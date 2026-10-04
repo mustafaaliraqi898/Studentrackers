@@ -1,0 +1,8 @@
+{
+  "name": "Remix سجل متابعة الطلاب",
+  "description": "تطبيق تجريبي تفاعلي للمدرس لتسجيل متابعة الطلاب اليومية وحساب درجة اليومي من 100 بسهولة وسرعة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
