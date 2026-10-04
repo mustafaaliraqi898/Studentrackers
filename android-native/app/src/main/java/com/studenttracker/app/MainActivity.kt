@@ -59,14 +59,24 @@ fun StudentTrackerMainApp(
     val savedSessions = remember(refreshTick) { repository.getSavedSessionsSummary() }
     val dbStats = remember(refreshTick) { repository.getDatabaseStats() }
 
-    var selectedClassId by remember(classes) {
+    var selectedClassId by remember {
         mutableLongStateOf(classes.firstOrNull()?.id ?: 1L)
+    }
+    LaunchedEffect(classes) {
+        if (classes.isNotEmpty() && classes.none { it.id == selectedClassId }) {
+            selectedClassId = classes.first().id
+        }
     }
     val currentClassSections = remember(sections, selectedClassId) {
         sections.filter { it.classId == selectedClassId }
     }
-    var selectedSectionId by remember(currentClassSections) {
+    var selectedSectionId by remember {
         mutableLongStateOf(currentClassSections.firstOrNull()?.id ?: 1L)
+    }
+    LaunchedEffect(currentClassSections) {
+        if (currentClassSections.isNotEmpty() && currentClassSections.none { it.id == selectedSectionId }) {
+            selectedSectionId = currentClassSections.first().id
+        }
     }
     var selectedDate by remember { mutableStateOf("2026-10-04") }
     var selectedStudentProfileId by remember { mutableLongStateOf(1L) }
@@ -211,6 +221,7 @@ fun StudentTrackerMainApp(
                     holidays = holidays,
                     dbHelper = dbHelper,
                     repository = repository,
+                    refreshTick = refreshTick,
                     isDirty = isDailyDirty,
                     onDirtyChange = { isDailyDirty = it },
                     onSelectClass = { clsId ->
@@ -243,6 +254,7 @@ fun StudentTrackerMainApp(
                     selectedSectionId = selectedSectionId,
                     dbHelper = dbHelper,
                     repository = repository,
+                    refreshTick = refreshTick,
                     onSelectClass = { clsId ->
                         selectedClassId = clsId
                         val firstSec = sections.firstOrNull { it.classId == clsId }
@@ -271,6 +283,7 @@ fun StudentTrackerMainApp(
                     sections = sections,
                     dbHelper = dbHelper,
                     repository = repository,
+                    refreshTick = refreshTick,
                     onOpenStudentProfile = { stId ->
                         selectedStudentProfileId = stId
                         currentScreen = AppScreen.STUDENT_PROFILE
@@ -298,6 +311,7 @@ fun StudentTrackerMainApp(
                     studentId = selectedStudentProfileId,
                     dbHelper = dbHelper,
                     repository = repository,
+                    refreshTick = refreshTick,
                     onBack = { currentScreen = AppScreen.STUDENTS }
                 )
 
@@ -308,6 +322,7 @@ fun StudentTrackerMainApp(
                     selectedSectionId = selectedSectionId,
                     dbHelper = dbHelper,
                     repository = repository,
+                    refreshTick = refreshTick,
                     onSelectClass = { clsId ->
                         selectedClassId = clsId
                         val firstSec = sections.firstOrNull { it.classId == clsId }

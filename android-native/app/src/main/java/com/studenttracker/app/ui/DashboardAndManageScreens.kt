@@ -596,6 +596,7 @@ fun StudentsScreen(
     selectedSectionId: Long,
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
+    refreshTick: Int,
     onSelectClass: (Long) -> Unit,
     onSelectSection: (Long) -> Unit,
     onOpenStudentProfile: (Long) -> Unit,
@@ -610,10 +611,10 @@ fun StudentsScreen(
     var studentToDelete by remember { mutableStateOf<StudentEntity?>(null) }
     var studentToTransfer by remember { mutableStateOf<StudentEntity?>(null) }
 
-    val students = remember(selectedClassId, selectedSectionId, showInactive, classes, sections) {
+    val students = remember(refreshTick, selectedClassId, selectedSectionId, showInactive, classes, sections) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = showInactive)
     }
-    val gradesMap = remember(selectedClassId, selectedSectionId, students) {
+    val gradesMap = remember(refreshTick, selectedClassId, selectedSectionId, students) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
@@ -943,6 +944,7 @@ fun QuickSearchScreen(
     sections: List<SectionEntity>,
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
+    refreshTick: Int,
     onOpenStudentProfile: (Long) -> Unit,
     onJumpToDailyTracking: (Long, Long) -> Unit
 ) {
@@ -950,10 +952,10 @@ fun QuickSearchScreen(
     var filterClassId by remember { mutableStateOf<Long?>(null) }
     var filterSectionId by remember { mutableStateOf<Long?>(null) }
 
-    val results = remember(query, filterClassId, filterSectionId) {
+    val results = remember(refreshTick, query, filterClassId, filterSectionId) {
         repository.searchStudents(query, filterClassId, filterSectionId)
     }
-    val allGradesMap = remember(results) {
+    val allGradesMap = remember(refreshTick, results) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,

@@ -118,5 +118,9 @@ data class BackupFileEntry(
     val createdAt: String,
     val sizeBytes: Long,
     val isAutoPreRestore: Boolean,
-    val isAutoDaily: Boolean = false
+    val isAutoDaily: Boolean = false,
+    val studentsCount: Int = 0,
+    val classesCount: Int = 0,
+    val sectionsCount: Int = 0,
+    val recordsCount: Int = 0
 )

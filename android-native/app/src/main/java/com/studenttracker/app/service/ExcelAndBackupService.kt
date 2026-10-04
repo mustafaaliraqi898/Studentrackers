@@ -365,18 +365,24 @@ object ExcelAndBackupService {
         val dir = getBackupsDirectory(context)
         val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") } ?: emptyList()
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        val dbHelper = AppDatabaseHelper.getInstance(context)
         return files.sortedByDescending { it.lastModified() }.map { f ->
             val modifiedTime = java.time.Instant.ofEpochMilli(f.lastModified())
                 .atZone(java.time.ZoneId.systemDefault())
                 .toLocalDateTime()
                 .format(formatter)
+            val counts = runCatching { dbHelper.inspectDatabaseFileCounts(f) }.getOrDefault(emptyMap())
             BackupFileEntry(
                 fileName = f.name,
                 filePath = f.absolutePath,
                 createdAt = modifiedTime,
                 sizeBytes = f.length(),
                 isAutoPreRestore = f.name.contains("_Safety_") || f.name.startsWith("auto_safety_"),
-                isAutoDaily = f.name.contains("_AutoDaily_")
+                isAutoDaily = f.name.contains("_AutoDaily_"),
+                studentsCount = counts["students"] ?: 0,
+                classesCount = counts["classes"] ?: 0,
+                sectionsCount = counts["sections"] ?: 0,
+                recordsCount = counts["records"] ?: 0
             )
         }
     }
@@ -403,12 +409,18 @@ object ExcelAndBackupService {
         isAutoDaily: Boolean = false
     ): BackupFileEntry {
         try {
-            // Ensure WAL/journal is flushed by checkpointing
-            dbHelper.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL);", null).close()
-            val srcFile = dbHelper.getDatabaseFile()
-            require(srcFile.exists() && srcFile.length() > 0) {
-                "ملف قاعدة البيانات غير موجود أو فارغ"
+            // 1. Read expected live counts from the active SQLite connection before creating backup
+            val db = dbHelper.writableDatabase
+            val expectedStudents = db.rawQuery("SELECT COUNT(*) FROM Students", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
             }
+            val expectedClasses = db.rawQuery("SELECT COUNT(*) FROM Classes", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+
+            // 2. Flush WAL and memory
+            dbHelper.flushAndCheckpoint()
+
             val now = LocalDateTime.now()
             val stamp = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
             val tag = when {
@@ -418,9 +430,41 @@ object ExcelAndBackupService {
             }
             val fileName = "StudentTracker_Backup_${stamp}${tag}.db"
             val targetFile = File(getBackupsDirectory(context), fileName)
-            srcFile.copyTo(targetFile, overwrite = true)
+            if (targetFile.exists()) {
+                targetFile.delete()
+            }
 
-            // Enforce keeping only the latest 7 local backups
+            // 3. Create a self-contained, WAL-free snapshot using VACUUM INTO (or fallback to closed-connection copy)
+            val vacuumSucceeded = runCatching {
+                val escapedPath = targetFile.absolutePath.replace("'", "''")
+                db.execSQL("VACUUM INTO '$escapedPath';")
+                targetFile.exists() && targetFile.length() > 100
+            }.getOrDefault(false)
+
+            if (!vacuumSucceeded) {
+                // Fallback: close SQLiteOpenHelper completely so Android merges -wal into .db, then copy
+                dbHelper.close()
+                val srcFile = dbHelper.getDatabaseFile()
+                require(srcFile.exists() && srcFile.length() > 0) {
+                    "ملف قاعدة البيانات غير موجود أو فارغ"
+                }
+                srcFile.copyTo(targetFile, overwrite = true)
+                // Re-open connection
+                dbHelper.writableDatabase
+            }
+
+            // 4. Verify the created backup file actually contains the current students & classes
+            require(targetFile.exists() && targetFile.length() > 100) {
+                "فشل إنشاء ملف النسخة الاحتياطية على الجهاز"
+            }
+            val backupCounts = dbHelper.inspectDatabaseFileCounts(targetFile)
+            val backedUpStudents = backupCounts["students"] ?: -1
+            val backedUpClasses = backupCounts["classes"] ?: -1
+            require(backedUpStudents == expectedStudents && backedUpClasses == expectedClasses) {
+                "فشل التحقق من النسخة الاحتياطية: المتوقع ($expectedStudents طالب) والمحفوظ ($backedUpStudents طالب)"
+            }
+
+            // 5. Enforce keeping only the latest 7 local backups
             pruneOldBackups(context, MAX_LOCAL_BACKUPS)
 
             // Mark today's date as having a successful backup
@@ -436,7 +480,11 @@ object ExcelAndBackupService {
                 createdAt = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                 sizeBytes = targetFile.length(),
                 isAutoPreRestore = isAutoSafety,
-                isAutoDaily = isAutoDaily
+                isAutoDaily = isAutoDaily,
+                studentsCount = backedUpStudents,
+                classesCount = backedUpClasses,
+                sectionsCount = backupCounts["sections"] ?: 0,
+                recordsCount = backupCounts["records"] ?: 0
             )
         } catch (e: Exception) {
             recordBackupError(context, "createLocalBackup", e)
@@ -487,17 +535,52 @@ object ExcelAndBackupService {
                 "ملف النسخة الاحتياطية غير موجود أو تالف"
             }
 
+            // Inspect backup file before restoring to know exact expected counts
+            val expectedBackupCounts = dbHelper.inspectDatabaseFileCounts(backupFile)
+            val expectedStudents = expectedBackupCounts["students"] ?: 0
+            val expectedClasses = expectedBackupCounts["classes"] ?: 0
+
             // 1. Mandatory automatic safety backup of current database first (aborts if this throws)
             val safetyBackup = createLocalBackup(context, dbHelper, isAutoSafety = true, isAutoDaily = false)
 
-            // 2. Close active SQLite connection and copy backup file over primary DB file
+            // 2. Close active SQLite connection AND delete stale -wal, -shm, and -journal files
+            // CRITICAL: If -wal/-shm are not deleted, SQLite will replay old WAL frames (such as deleted students) on reopen!
             val destFile = dbHelper.getDatabaseFile()
+            val walFile = dbHelper.getWalFile()
+            val shmFile = dbHelper.getShmFile()
+            val journalFile = dbHelper.getJournalFile()
+
             dbHelper.close()
+
+            if (walFile.exists()) walFile.delete()
+            if (shmFile.exists()) shmFile.delete()
+            if (journalFile.exists()) journalFile.delete()
+
+            // 3. Copy the backup file into the primary SQLite database location
             FileOutputStream(destFile).use { out ->
                 backupFile.inputStream().use { inp ->
                     inp.copyTo(out)
                 }
+                out.fd.sync()
             }
+
+            // Ensure no -wal or -shm exist before reopening
+            if (walFile.exists()) walFile.delete()
+            if (shmFile.exists()) shmFile.delete()
+
+            // 4. Re-open the database and verify the restored data matches the backup file
+            val reopenedDb = dbHelper.writableDatabase
+            val restoredStudents = reopenedDb.rawQuery("SELECT COUNT(*) FROM Students", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+            val restoredClasses = reopenedDb.rawQuery("SELECT COUNT(*) FROM Classes", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+
+            require(restoredStudents == expectedStudents && restoredClasses == expectedClasses) {
+                "فشل التحقق بعد الاستعادة: النسخة تحتوي ($expectedStudents طالب) ولكن القاعدة المستعادة تحتوي ($restoredStudents طالب)"
+            }
+
             return safetyBackup
         } catch (e: Exception) {
             recordBackupError(context, "restoreBackup", e)
@@ -510,24 +593,33 @@ object ExcelAndBackupService {
     }
 
     fun exportDatabaseToUri(context: Context, dbHelper: AppDatabaseHelper, uri: Uri) {
-        dbHelper.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL);", null).close()
-        val srcFile = dbHelper.getDatabaseFile()
+        val tempExport = File(context.cacheDir, "export_snapshot_temp.db")
+        if (tempExport.exists()) tempExport.delete()
+        val db = dbHelper.writableDatabase
+        dbHelper.flushAndCheckpoint()
+        val escapedPath = tempExport.absolutePath.replace("'", "''")
+        val vacuumOk = runCatching {
+            db.execSQL("VACUUM INTO '$escapedPath';")
+            tempExport.exists() && tempExport.length() > 100
+        }.getOrDefault(false)
+
+        val srcToCopy = if (vacuumOk) tempExport else dbHelper.getDatabaseFile()
         context.contentResolver.openOutputStream(uri)?.use { out ->
-            srcFile.inputStream().use { inp ->
+            srcToCopy.inputStream().use { inp ->
                 inp.copyTo(out)
             }
         }
+        if (tempExport.exists()) tempExport.delete()
     }
 
     fun restoreDatabaseFromUri(context: Context, dbHelper: AppDatabaseHelper, uri: Uri) {
-        // 1. Create automatic safety backup of current database first
-        createLocalBackup(context, dbHelper, isAutoSafety = true)
-
-        // 2. Read uploaded file into a temporary file and validate SQLite header
+        // 1. Read uploaded file into a temporary file and validate SQLite header + tables
         val tempFile = File(context.cacheDir, "restore_temp.db")
+        if (tempFile.exists()) tempFile.delete()
         context.contentResolver.openInputStream(uri)?.use { inp ->
             FileOutputStream(tempFile).use { out ->
                 inp.copyTo(out)
+                out.fd.sync()
             }
         } ?: throw IllegalArgumentException("تعذر قراءة الملف المختار")
 
@@ -537,13 +629,38 @@ object ExcelAndBackupService {
         val headerStr = String(header, Charsets.US_ASCII)
         require(headerStr.startsWith("SQLite format 3")) { "الملف المختار ليس قاعدة بيانات SQLite صالحة" }
 
+        val expectedCounts = dbHelper.inspectDatabaseFileCounts(tempFile)
+        val expectedStudents = expectedCounts["students"] ?: 0
+
+        // 2. Create automatic safety backup of current database first
+        createLocalBackup(context, dbHelper, isAutoSafety = true)
+
+        // 3. Close connection and delete stale -wal / -shm / -journal files
         val destFile = dbHelper.getDatabaseFile()
+        val walFile = dbHelper.getWalFile()
+        val shmFile = dbHelper.getShmFile()
+        val journalFile = dbHelper.getJournalFile()
+
         dbHelper.close()
+        if (walFile.exists()) walFile.delete()
+        if (shmFile.exists()) shmFile.delete()
+        if (journalFile.exists()) journalFile.delete()
+
         FileOutputStream(destFile).use { out ->
             tempFile.inputStream().use { inp ->
                 inp.copyTo(out)
             }
+            out.fd.sync()
         }
         tempFile.delete()
+
+        // 4. Reopen and verify
+        val reopenedDb = dbHelper.writableDatabase
+        val actualStudents = reopenedDb.rawQuery("SELECT COUNT(*) FROM Students", null).use {
+            if (it.moveToFirst()) it.getInt(0) else 0
+        }
+        require(actualStudents == expectedStudents) {
+            "فشل التحقق بعد استعادة الملف الخارجي: المتوقع ($expectedStudents طالب) والموجود ($actualStudents طالب)"
+        }
     }
 }

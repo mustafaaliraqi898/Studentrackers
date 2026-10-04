@@ -387,6 +387,37 @@ export async function getDatabase(): Promise<Database> {
   return dbInstance;
 }
 
+export async function inspectBinaryCounts(bytes: Uint8Array): Promise<{
+  classesCount: number;
+  sectionsCount: number;
+  studentsCount: number;
+  recordsCount: number;
+  holidaysCount: number;
+}> {
+  if (!sqlPromise) {
+    sqlPromise = initSqlJs({
+      locateFile: () => '/sql-wasm.wasm',
+    });
+  }
+  const SQL = await sqlPromise;
+  const tempDb = new SQL.Database(bytes);
+  try {
+    const countTable = (table: string): number => {
+      const res = tempDb.exec(`SELECT COUNT(*) FROM ${table};`);
+      return res.length > 0 && res[0].values.length > 0 ? Number(res[0].values[0][0]) : 0;
+    };
+    return {
+      classesCount: countTable('Classes'),
+      sectionsCount: countTable('Sections'),
+      studentsCount: countTable('Students'),
+      recordsCount: countTable('DailyRecords'),
+      holidaysCount: countTable('Holidays'),
+    };
+  } finally {
+    tempDb.close();
+  }
+}
+
 export async function replaceDatabaseFromBinary(bytes: Uint8Array): Promise<void> {
   if (!sqlPromise) {
     sqlPromise = initSqlJs({
@@ -401,6 +432,12 @@ export async function replaceDatabaseFromBinary(bytes: Uint8Array): Promise<void
     newDb.close();
     throw new Error('ملف النسخة الاحتياطية غير صالح أو لا يحتوي على جداول قاعدة البيانات المطلوبة.');
   }
+  const expectedStudentsRes = newDb.exec('SELECT COUNT(*) FROM Students;');
+  const expectedStudents =
+    expectedStudentsRes.length > 0 && expectedStudentsRes[0].values.length > 0
+      ? Number(expectedStudentsRes[0].values[0][0])
+      : 0;
+
   runMigrations(newDb);
   if (dbInstance) {
     try {
@@ -411,6 +448,17 @@ export async function replaceDatabaseFromBinary(bytes: Uint8Array): Promise<void
   }
   dbInstance = newDb;
   await persistDatabaseToStorage();
+
+  const verifyRes = dbInstance.exec('SELECT COUNT(*) FROM Students;');
+  const actualStudents =
+    verifyRes.length > 0 && verifyRes[0].values.length > 0
+      ? Number(verifyRes[0].values[0][0])
+      : 0;
+  if (actualStudents !== expectedStudents) {
+    throw new Error(
+      `فشل التحقق بعد الاستعادة: النسخة تحتوي (${expectedStudents} طالب) والمستعاد (${actualStudents} طالب).`
+    );
+  }
 }
 
 export async function clearAllAndResetDatabase(includeDemoData: boolean): Promise<void> {

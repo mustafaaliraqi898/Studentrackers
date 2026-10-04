@@ -38,6 +38,7 @@ fun DailyTrackingScreen(
     holidays: List<HolidayEntity>,
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
+    refreshTick: Int,
     isDirty: Boolean,
     onDirtyChange: (Boolean) -> Unit,
     onSelectClass: (Long) -> Unit,
@@ -47,17 +48,17 @@ fun DailyTrackingScreen(
     onDataChanged: () -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    val students = remember(selectedClassId, selectedSectionId, classes, sections) {
+    val students = remember(refreshTick, selectedClassId, selectedSectionId, classes, sections) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
     }
-    var hasSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
+    var hasSaved by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate) {
         mutableStateOf(repository.hasSavedSession(selectedClassId, selectedSectionId, selectedDate))
     }
-    var isEditingSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
+    var isEditingSaved by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate) {
         mutableStateOf(!hasSaved)
     }
 
-    var entriesMap by remember(selectedClassId, selectedSectionId, selectedDate, students) {
+    var entriesMap by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, students) {
         val saved = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
         val initial = mutableMapOf<Long, StudentDailyEntry>()
         students.forEach { st ->
@@ -70,7 +71,7 @@ fun DailyTrackingScreen(
         GradingService.checkDateStatus(selectedDate, holidays)
     }
 
-    val liveGradesMap = remember(selectedClassId, selectedSectionId, selectedDate, entriesMap, holidays) {
+    val liveGradesMap = remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, entriesMap, holidays) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
@@ -680,10 +681,11 @@ fun StudentProfileScreen(
     studentId: Long,
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
+    refreshTick: Int,
     onBack: () -> Unit
 ) {
     var selectedMonth by remember { mutableStateOf("ALL") }
-    val allGrades = remember(studentId, selectedMonth) {
+    val allGrades = remember(refreshTick, studentId, selectedMonth) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
@@ -857,6 +859,7 @@ fun ReportsScreen(
     selectedSectionId: Long,
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
+    refreshTick: Int,
     onSelectClass: (Long) -> Unit,
     onSelectSection: (Long) -> Unit,
     onOpenStudentProfile: (Long) -> Unit,
@@ -865,7 +868,7 @@ fun ReportsScreen(
     val context = LocalContext.current
     var sortMode by remember { mutableStateOf("HIGHEST") }
 
-    val grades = remember(selectedClassId, selectedSectionId, sortMode, classes, sections) {
+    val grades = remember(refreshTick, selectedClassId, selectedSectionId, sortMode, classes, sections) {
         val raw = GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
@@ -1193,7 +1196,7 @@ fun ExcelAndBackupScreen(
                                     isAutoDaily = false
                                 )
                                 backups = ExcelAndBackupService.listBackups(context)
-                                onShowMessage("تم إنشاء النسخة الاحتياطية (${created.fileName}) بنجاح")
+                                onShowMessage("تم إنشاء النسخة الاحتياطية بنجاح (${created.studentsCount} طالب • ${created.classesCount} صف)")
                             }.onFailure { e ->
                                 lastError = ExcelAndBackupService.getLastBackupError(context)
                                 onShowMessage(e.message ?: "فشل إنشاء النسخة الاحتياطية")
@@ -1245,7 +1248,7 @@ fun ExcelAndBackupScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(b.fileName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
                                     Text(
                                         text = "${b.createdAt} • ${maxOf(1L, b.sizeBytes / 1024)} KB" +
@@ -1256,6 +1259,12 @@ fun ExcelAndBackupScreen(
                                             },
                                         fontSize = 11.sp,
                                         color = Slate600
+                                    )
+                                    Text(
+                                        text = "تحتوي على: ${b.studentsCount} طالب • ${b.classesCount} صف • ${b.sectionsCount} شعبة • ${b.recordsCount} سجل",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Emerald700
                                     )
                                 }
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1460,7 +1469,7 @@ fun ExcelAndBackupScreen(
                             backups = ExcelAndBackupService.listBackups(context)
                             pendingRestoreBackup = null
                             onDataChanged()
-                            onShowMessage("تمت الاستعادة بنجاح. حُفظت بياناتك السابقة في (${safety.fileName})")
+                            onShowMessage("تمت الاستعادة بنجاح (${target.studentsCount} طالب). حُفظت بياناتك السابقة في (${safety.fileName})")
                         }.onFailure { e ->
                             pendingRestoreBackup = null
                             lastError = ExcelAndBackupService.getLastBackupError(context)

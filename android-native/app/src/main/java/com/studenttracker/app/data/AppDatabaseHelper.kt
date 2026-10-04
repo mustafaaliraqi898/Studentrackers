@@ -261,6 +261,74 @@ class AppDatabaseHelper(private val context: Context) :
         return context.getDatabasePath(DATABASE_NAME)
     }
 
+    fun getWalFile(): File {
+        return File(getDatabaseFile().absolutePath + "-wal")
+    }
+
+    fun getShmFile(): File {
+        return File(getDatabaseFile().absolutePath + "-shm")
+    }
+
+    fun getJournalFile(): File {
+        return File(getDatabaseFile().absolutePath + "-journal")
+    }
+
+    /**
+     * Ensures all pending SQLite writes and WAL frames are flushed into the primary database file.
+     */
+    fun flushAndCheckpoint() {
+        val db = writableDatabase
+        runCatching {
+            db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE);", null).use { cursor ->
+                while (cursor.moveToNext()) {
+                    // consume checkpoint result
+                }
+            }
+        }
+        runCatching {
+            db.rawQuery("PRAGMA shrink_memory;", null).use { }
+        }
+    }
+
+    /**
+     * Opens a standalone read-only connection to any SQLite file (e.g., backup file or restored file)
+     * and returns the exact counts of Students, Classes, Sections, and DailyRecords inside it.
+     */
+    fun inspectDatabaseFileCounts(dbFile: File): Map<String, Int> {
+        require(dbFile.exists() && dbFile.length() > 100) {
+            "ملف قاعدة البيانات غير موجود أو فارغ: ${dbFile.name}"
+        }
+        val counts = mutableMapOf(
+            "students" to 0,
+            "classes" to 0,
+            "sections" to 0,
+            "records" to 0,
+            "holidays" to 0
+        )
+        val checkDb = SQLiteDatabase.openDatabase(
+            dbFile.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
+        )
+        try {
+            fun countTable(table: String): Int {
+                return runCatching {
+                    checkDb.rawQuery("SELECT COUNT(*) FROM $table", null).use { c ->
+                        if (c.moveToFirst()) c.getInt(0) else 0
+                    }
+                }.getOrDefault(0)
+            }
+            counts["students"] = countTable("Students")
+            counts["classes"] = countTable("Classes")
+            counts["sections"] = countTable("Sections")
+            counts["records"] = countTable("DailyRecords")
+            counts["holidays"] = countTable("Holidays")
+        } finally {
+            checkDb.close()
+        }
+        return counts
+    }
+
     fun resetDatabase(includeDemo: Boolean) {
         val db = writableDatabase
         db.beginTransaction()

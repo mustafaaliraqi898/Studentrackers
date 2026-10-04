@@ -1,6 +1,8 @@
 import { BackupSnapshotMetadata } from '../types';
 import {
   exportDatabaseBinary,
+  inspectBinaryCounts,
+   persistDatabaseToStorage,
   replaceDatabaseFromBinary,
   SCHEMA_VERSION,
 } from '../db/sqliteEngine';
@@ -158,11 +160,18 @@ export class BackupService {
     isAutoDaily = false
   ): Promise<BackupSnapshotMetadata> {
     try {
+      await persistDatabaseToStorage();
+      const stats = await TrackerRepository.getDatabaseStats();
       const binary = exportDatabaseBinary();
       if (!binary || binary.byteLength === 0) {
         throw new Error('بيانات قاعدة البيانات فارغة أو غير جاهزة للنسخ الاحتياطي.');
       }
-      const stats = await TrackerRepository.getDatabaseStats();
+      const verifiedStats = await inspectBinaryCounts(binary);
+      if (verifiedStats.studentsCount !== stats.studentsCount) {
+        throw new Error(
+          `فشل التحقق من النسخة الاحتياطية: المتوقع (${stats.studentsCount} طالب) والمحفوظ (${verifiedStats.studentsCount} طالب).`
+        );
+      }
       const now = new Date();
       const fileBaseName = formatBackupFileName(now);
       const formattedTime = now.toLocaleString('ar-IQ', {
