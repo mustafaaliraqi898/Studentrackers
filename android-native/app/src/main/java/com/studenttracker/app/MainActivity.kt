@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
 import com.studenttracker.app.data.TrackerRepository
+import com.studenttracker.app.service.AppExitBackupService
 import com.studenttracker.app.service.DailyBackupWorker
 import com.studenttracker.app.service.ExcelAndBackupService
 import com.studenttracker.app.ui.*
@@ -27,6 +28,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
         val repository = TrackerRepository(dbHelper)
+
+        // Start lightweight task-removal watcher service (does NOT create a backup on launch;
+        // only triggers onTaskRemoved when the user swipes the app away from Recents or taps "Close All")
+        AppExitBackupService.ensureRunning(applicationContext)
 
         setContent {
             StudentTrackerRtlTheme {
@@ -45,15 +50,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Create automatic backup only when the Activity is actually finishing (not on configuration change or temporary background switch)
+        // Flush SQLite WAL to main DB file whenever the Activity goes to background so the file on disk is 100% up-to-date.
+        // Only create an actual Backup file here if the Activity is explicitly finishing (e.g. Back button exit).
+        // Going to Home screen or switching apps has isFinishing == false, so NO backup is created then.
+        val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
+        runCatching { dbHelper.flushAndCheckpoint() }
+
         if (isFinishing && !isChangingConfigurations) {
-            val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
             ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, dbHelper)
         }
     }
 
     override fun onDestroy() {
-        if (isFinishing && !isChangingConfigurations) {
+        // When the user swipes the app from Recents while it was in background, onDestroy() may be called
+        // with !isChangingConfigurations (alongside AppExitBackupService.onTaskRemoved).
+        // The 10-second persistent lock in createAutoBackupOnAppExit guarantees only 1 backup is created.
+        if (!isChangingConfigurations) {
             val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
             ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, dbHelper)
         }

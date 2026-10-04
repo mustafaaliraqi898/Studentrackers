@@ -493,12 +493,15 @@ object ExcelAndBackupService {
     }
 
     /**
-     * Creates an automatic local SQLite backup when the user actually exits or closes the app.
-     * Uses a short cooldown (5 seconds) so that if both Back-Exit and onStop(isFinishing)/onDestroy
+     * Creates an automatic local SQLite backup when the user actually exits or closes the app
+     * (including swiping the app away from Recents or tapping "Close All").
+     * Uses both an in-memory and SharedPreferences timestamp cooldown (10 seconds) so that if
+     * multiple exit signals (Back button, onStop(isFinishing), onTaskRemoved, and expedited WorkManager)
      * fire during the same app termination sequence, only a single exit backup is created.
      */
     @Volatile
     private var lastExitBackupEpochMs: Long = 0L
+    private const val KEY_LAST_EXIT_BACKUP_MS = "last_exit_backup_epoch_ms"
 
     @Synchronized
     fun createAutoBackupOnAppExit(
@@ -506,9 +509,18 @@ object ExcelAndBackupService {
         dbHelper: AppDatabaseHelper
     ): BackupFileEntry? {
         val nowMs = System.currentTimeMillis()
-        if (nowMs - lastExitBackupEpochMs < 5000L) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val persistedLastMs = prefs.getLong(KEY_LAST_EXIT_BACKUP_MS, 0L)
+        val effectiveLastMs = maxOf(lastExitBackupEpochMs, persistedLastMs)
+
+        if (nowMs - effectiveLastMs < 10_000L) {
             return null
         }
+
+        // Reserve timestamp immediately before I/O so concurrent exit hooks don't duplicate
+        lastExitBackupEpochMs = nowMs
+        prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, nowMs).commit()
+
         return try {
             val created = createLocalBackup(
                 context = context,
@@ -516,9 +528,14 @@ object ExcelAndBackupService {
                 isAutoSafety = false,
                 isAutoDaily = true
             )
-            lastExitBackupEpochMs = System.currentTimeMillis()
+            val completedMs = System.currentTimeMillis()
+            lastExitBackupEpochMs = completedMs
+            prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, completedMs).commit()
             created
         } catch (e: Exception) {
+            // Reset lock on failure so retry can proceed
+            lastExitBackupEpochMs = 0L
+            prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, 0L).commit()
             recordBackupError(context, "createAutoBackupOnAppExit", e)
             null
         }
