@@ -390,10 +390,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div>
               <h4 className="text-sm font-extrabold text-slate-900">
-                الإعدادات وبيانات التطوير
+                الإعدادات وأدوات الاختبار والتطوير
               </h4>
               <p className="text-xs text-slate-500 mt-0.5">
-                فصل بيانات Demo عن البيانات الحقيقية وإعادة الضبط
+                إحصائيات قاعدة البيانات وأدوات الاختبار المحمية (Demo)
               </p>
             </div>
           </div>

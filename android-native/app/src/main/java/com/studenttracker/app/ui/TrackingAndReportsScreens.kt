@@ -1005,6 +1005,22 @@ fun ExcelAndBackupScreen(
     val context = LocalContext.current
     var importResult by remember { mutableStateOf<ExcelImportResult?>(null) }
     var backups by remember { mutableStateOf(ExcelAndBackupService.listBackups(context)) }
+    var lastError by remember { mutableStateOf(ExcelAndBackupService.getLastBackupError(context)) }
+
+    // Confirmation modals for Backup Restore and Delete
+    var pendingRestoreBackup by remember { mutableStateOf<BackupFileEntry?>(null) }
+    var pendingDeleteBackup by remember { mutableStateOf<BackupFileEntry?>(null) }
+
+    // Protection states for "أدوات الاختبار والتطوير" (إدارة البيانات التجريبية Demo)
+    var isDevToolsUnlocked by remember { mutableStateOf(false) }
+    var showUnlockWarningDialog by remember { mutableStateOf(false) }
+    var unlockAcknowledged by remember { mutableStateOf(false) }
+
+    var showResetDemoDialog by remember { mutableStateOf(false) }
+    var demoConfirmText by remember { mutableStateOf("") }
+
+    var showEmptyStartDialog by remember { mutableStateOf(false) }
+    var emptyStartConfirmed by remember { mutableStateOf(false) }
 
     val exportTemplateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -1057,7 +1073,9 @@ fun ExcelAndBackupScreen(
             runCatching {
                 ExcelAndBackupService.exportDatabaseToUri(context, dbHelper, uri)
                 onShowMessage("تم تصدير ملف النسخة الاحتياطية (.db) إلى الهاتف")
-            }.onFailure {
+            }.onFailure { e ->
+                ExcelAndBackupService.recordBackupError(context, "exportDatabaseToUri", e)
+                lastError = ExcelAndBackupService.getLastBackupError(context)
                 onShowMessage("تعذر تصدير النسخة الاحتياطية")
             }
         }
@@ -1071,12 +1089,16 @@ fun ExcelAndBackupScreen(
                 ExcelAndBackupService.restoreDatabaseFromUri(context, dbHelper, uri)
                 backups = ExcelAndBackupService.listBackups(context)
                 onDataChanged()
-                onShowMessage("تمت استعادة النسخة الاحتياطية بنجاح (مع حفظ نسخة أمان تلقائية)")
+                onShowMessage("تمت استعادة النسخة الاحتياطية بنجاح (مع حفظ نسخة أمان تلقائية للبيانات السابقة)")
             }.onFailure { e ->
+                ExcelAndBackupService.recordBackupError(context, "restoreDatabaseFromUri", e)
+                lastError = ExcelAndBackupService.getLastBackupError(context)
                 onShowMessage(e.message ?: "تعذر استعادة النسخة الاحتياطية")
             }
         }
     }
+
+    val latestBackup = backups.firstOrNull()
 
     LazyColumn(
         modifier = Modifier
@@ -1084,6 +1106,7 @@ fun ExcelAndBackupScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 1. النسخ الاحتياطي والاستعادة (Local SQLite Backup & Restore)
         item {
             Surface(
                 color = Color.White,
@@ -1092,7 +1115,177 @@ fun ExcelAndBackupScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("1. مركز Excel (قالب • استيراد الطلاب • تصدير النتائج)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Slate900)
+                    Text(
+                        text = "النسخ الاحتياطي والاستعادة (SQLite)",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 16.sp,
+                        color = Slate900
+                    )
+                    Text(
+                        text = "ينشئ التطبيق نسخة احتياطية تلقائياً عند أول تشغيل كل يوم، ويحتفظ بآخر 7 نسخ احتياطية محلية مع حذف الأقدم تلقائياً.",
+                        fontSize = 12.sp,
+                        color = Slate600
+                    )
+
+                    // Last backup summary box
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "آخر نسخة احتياطية: ${latestBackup?.fileName ?: "لا توجد نسخة بعد"}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 12.sp,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "تاريخ ووقت آخر Backup: ${latestBackup?.createdAt ?: "—"}",
+                                fontSize = 11.sp,
+                                color = Slate600
+                            )
+                            Text(
+                                text = "النسخ المحلية المحفوظة: ${backups.size} / 7",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Emerald700
+                            )
+                        }
+                    }
+
+                    if (lastError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "سجل خطأ النسخ الاحتياطي: $lastError",
+                                    fontSize = 11.sp,
+                                    color = Red700,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = {
+                                    ExcelAndBackupService.clearLastBackupError(context)
+                                    lastError = null
+                                }) {
+                                    Text("مسح", fontSize = 11.sp, color = Red700)
+                                }
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            runCatching {
+                                val created = ExcelAndBackupService.createLocalBackup(
+                                    context,
+                                    dbHelper,
+                                    isAutoSafety = false,
+                                    isAutoDaily = false
+                                )
+                                backups = ExcelAndBackupService.listBackups(context)
+                                onShowMessage("تم إنشاء النسخة الاحتياطية (${created.fileName}) بنجاح")
+                            }.onFailure { e ->
+                                lastError = ExcelAndBackupService.getLastBackupError(context)
+                                onShowMessage(e.message ?: "فشل إنشاء النسخة الاحتياطية")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Backup, contentDescription = null)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("نسخ احتياطي الآن (إنشاء نسخة الآن)", fontWeight = FontWeight.ExtraBold)
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = {
+                                val stamp = java.time.LocalDateTime.now()
+                                    .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
+                                exportDbLauncher.launch("StudentTracker_Backup_${stamp}.db")
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("حفظ ملف .db للهاتف", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = { restoreDbLauncher.launch(arrayOf("*/*")) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("استعادة من ملف خارجي", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Text(
+                        text = "قائمة النسخ المحلية الموجودة (${backups.size}):",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.sp,
+                        color = Slate900
+                    )
+
+                    backups.forEach { b ->
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(b.fileName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
+                                    Text(
+                                        text = "${b.createdAt} • ${maxOf(1L, b.sizeBytes / 1024)} KB" +
+                                            when {
+                                                b.isAutoPreRestore -> " • نسخة أمان تلقائية"
+                                                b.isAutoDaily -> " • نسخة يومية تلقائية"
+                                                else -> ""
+                                            },
+                                        fontSize = 11.sp,
+                                        color = Slate600
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Button(
+                                        onClick = { pendingRestoreBackup = b },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Teal700)
+                                    ) {
+                                        Text("استعادة نسخة", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                    IconButton(onClick = { pendingDeleteBackup = b }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "حذف نسخة", tint = Red600)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. مركز Excel
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("مركز Excel (قالب • استيراد الطلاب • تصدير النتائج)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Slate900)
                     Text("الأعمدة المعتمدة في القالب: اسم الطالب | الصف | الشعبة", fontSize = 12.sp, color = Slate600)
 
                     OutlinedButton(
@@ -1155,121 +1348,312 @@ fun ExcelAndBackupScreen(
             }
         }
 
+        // 3. قسم متقدم محمي: أدوات الاختبار والتطوير (إدارة البيانات التجريبية Demo)
         item {
             Surface(
-                color = Color.White,
+                color = Amber50,
                 shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Slate200),
+                border = BorderStroke(1.5.dp, Amber600),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("2. النسخ الاحتياطي والاستعادة (SQLite)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Slate900)
-                    Text("قبل أي عملية استعادة، يقوم التطبيق تلقائياً بإنشاء نسخة احتياطية آمنة للبيانات الحالية.", fontSize = 12.sp, color = Slate600)
-
-                    Button(
-                        onClick = {
-                            ExcelAndBackupService.createLocalBackup(context, dbHelper, isAutoSafety = false)
-                            backups = ExcelAndBackupService.listBackups(context)
-                            onShowMessage("تم إنشاء نسخة احتياطية محلية بنجاح")
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Slate900),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Backup, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("إنشاء نسخة احتياطية داخلية الآن", fontWeight = FontWeight.Bold)
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = { exportDbLauncher.launch("student_tracker_backup.db") },
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text("حفظ ملف .db للهاتف", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = Amber700)
+                            Column {
+                                Text(
+                                    text = "أدوات الاختبار والتطوير (إدارة بيانات تجريبية)",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    color = Slate900
+                                )
+                                Text(
+                                    text = "هذه الأدوات مخصصة للاختبار فقط، وقد تؤدي إلى تغيير أو حذف البيانات الحالية.",
+                                    fontSize = 11.sp,
+                                    color = Amber700,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
-                        OutlinedButton(
-                            onClick = { restoreDbLauncher.launch(arrayOf("*/*")) },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("استعادة من ملف .db", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
 
-                    backups.forEach { b ->
-                        Surface(
-                            color = Slate50,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, Slate200),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (!isDevToolsUnlocked) {
+                            Button(
+                                onClick = {
+                                    unlockAcknowledged = false
+                                    showUnlockWarningDialog = true
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Slate900)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(b.fileName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate900)
-                                    Text("${b.sizeBytes / 1024} KB", fontSize = 11.sp, color = Slate600)
-                                }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(
-                                        onClick = {
-                                            ExcelAndBackupService.restoreBackup(context, dbHelper, b)
-                                            backups = ExcelAndBackupService.listBackups(context)
-                                            onDataChanged()
-                                            onShowMessage("تمت استعادة النسخة الاحتياطية بنجاح")
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Teal700)
-                                    ) {
-                                        Text("استعادة", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                    IconButton(onClick = {
-                                        ExcelAndBackupService.deleteBackup(b)
-                                        backups = ExcelAndBackupService.listBackups(context)
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Red600)
-                                    }
-                                }
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("فك القفل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            OutlinedButton(onClick = { isDevToolsUnlocked = false }) {
+                                Text("قفل القسم", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (isDevToolsUnlocked) {
+                        Text(
+                            text = "حماية تلقائية: يتم أخذ نسخة احتياطية تلقائية قبل أي عملية أدناه، ولا تُنفذ العملية إذا فشل النسخ الاحتياطي.",
+                            fontSize = 11.sp,
+                            color = Slate700
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    emptyStartConfirmed = false
+                                    showEmptyStartDialog = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("بدء فعلي فارغ", fontSize = 12.sp, color = Red700, fontWeight = FontWeight.Bold)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    demoConfirmText = ""
+                                    showResetDemoDialog = true
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("إعادة بيانات Demo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
         }
+    }
 
-        item {
-            Surface(
-                color = Color.White,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Slate200),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("3. إدارة البيانات التجريبية (Demo)", fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            onClick = {
-                                dbHelper.resetDatabase(includeDemo = false)
-                                onDataChanged()
-                                onShowMessage("تم مسح البيانات التجريبية والبدء بقاعدة بيانات فارغة")
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("بدء فعلي فارغ", fontSize = 12.sp, color = Red700, fontWeight = FontWeight.Bold)
+    // Restore Confirmation Dialog (Creates automatic safety backup before restore)
+    if (pendingRestoreBackup != null) {
+        val target = pendingRestoreBackup!!
+        AlertDialog(
+            onDismissRequest = { pendingRestoreBackup = null },
+            title = { Text("تأكيد استعادة النسخة الاحتياطية", fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("هل أنت متأكد من استعادة النسخة (${target.fileName})؟ سيتم استبدال البيانات الحالية بهذه النسخة.")
+                    Text(
+                        text = "سيقوم التطبيق تلقائياً بإنشاء نسخة احتياطية كاملة للبيانات الحالية قبل تنفيذ الاستعادة لضمان عدم فقدان أي بيانات.",
+                        fontSize = 12.sp,
+                        color = Emerald700,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        runCatching {
+                            val safety = ExcelAndBackupService.restoreBackup(context, dbHelper, target)
+                            backups = ExcelAndBackupService.listBackups(context)
+                            pendingRestoreBackup = null
+                            onDataChanged()
+                            onShowMessage("تمت الاستعادة بنجاح. حُفظت بياناتك السابقة في (${safety.fileName})")
+                        }.onFailure { e ->
+                            pendingRestoreBackup = null
+                            lastError = ExcelAndBackupService.getLastBackupError(context)
+                            onShowMessage(e.message ?: "فشلت استعادة النسخة الاحتياطية")
                         }
-                        OutlinedButton(
-                            onClick = {
-                                dbHelper.resetDatabase(includeDemo = true)
-                                onDataChanged()
-                                onShowMessage("تمت استعادة البيانات التجريبية الافتراضية")
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("إعادة بيانات Demo", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                ) {
+                    Text("تأكيد واستعادة", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestoreBackup = null }) {
+                    Text("إلغاء")
                 }
             }
-        }
+        )
+    }
+
+    // Delete Backup Confirmation Dialog
+    if (pendingDeleteBackup != null) {
+        val target = pendingDeleteBackup!!
+        AlertDialog(
+            onDismissRequest = { pendingDeleteBackup = null },
+            title = { Text("تأكيد حذف النسخة الاحتياطية", fontWeight = FontWeight.ExtraBold, color = Red700) },
+            text = { Text("هل تريد حذف ملف النسخة الاحتياطية (${target.fileName}) من الجهاز؟") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        ExcelAndBackupService.deleteBackup(target)
+                        backups = ExcelAndBackupService.listBackups(context)
+                        pendingDeleteBackup = null
+                        onShowMessage("تم حذف النسخة الاحتياطية")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("حذف", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteBackup = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+
+    // Step 1 Dialog: Unlock Dev & Demo Tools Warning
+    if (showUnlockWarningDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnlockWarningDialog = false },
+            title = { Text("تحذير: أدوات الاختبار والتطوير", fontWeight = FontWeight.ExtraBold, color = Amber700) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "هذه الأدوات مخصصة للاختبار فقط، وقد تؤدي إلى تغيير أو حذف البيانات الحالية.",
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { unlockAcknowledged = !unlockAcknowledged }
+                    ) {
+                        Checkbox(checked = unlockAcknowledged, onCheckedChange = { unlockAcknowledged = it })
+                        Text("أفهم التحذير وأرغب بفتح أدوات الاختبار", fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = unlockAcknowledged,
+                    onClick = {
+                        isDevToolsUnlocked = true
+                        showUnlockWarningDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                ) {
+                    Text("تأكيد وفتح القسم", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnlockWarningDialog = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+
+    // Step 2A Dialog: Confirm "إعادة بيانات Demo" by typing DEMO
+    if (showResetDemoDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDemoDialog = false },
+            title = { Text("تأكيد إعادة بيانات Demo", fontWeight = FontWeight.ExtraBold, color = Amber700) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "تحذير: ستؤدي هذه العملية إلى استبدال جميع البيانات الحالية ببيانات Demo التجريبية. سيتم إنشاء نسخة احتياطية تلقائية لبياناتك الحالية قبل التنفيذ.",
+                        fontSize = 13.sp
+                    )
+                    Text("اكتب كلمة DEMO للتأكيد الصريح:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = demoConfirmText,
+                        onValueChange = { demoConfirmText = it },
+                        placeholder = { Text("DEMO") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = demoConfirmText.trim() == "DEMO",
+                    onClick = {
+                        runCatching {
+                            val safety = ExcelAndBackupService.createLocalBackup(
+                                context,
+                                dbHelper,
+                                isAutoSafety = true,
+                                isAutoDaily = false
+                            )
+                            dbHelper.resetDatabase(includeDemo = true)
+                            backups = ExcelAndBackupService.listBackups(context)
+                            showResetDemoDialog = false
+                            demoConfirmText = ""
+                            onDataChanged()
+                            onShowMessage("تمت إعادة بيانات Demo. النسخة الاحتياطية محفوظة في: ${safety.filePath}")
+                        }.onFailure { e ->
+                            onShowMessage("تم إلغاء العملية لأن النسخ الاحتياطي التلقائي فشل: ${e.message}")
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                ) {
+                    Text("تأكيد إعادة بيانات Demo", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDemoDialog = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+
+    // Step 2B Dialog: Confirm "بدء فعلي فارغ"
+    if (showEmptyStartDialog) {
+        AlertDialog(
+            onDismissRequest = { showEmptyStartDialog = false },
+            title = { Text("تأكيد البدء الفعلي الفارغ", fontWeight = FontWeight.ExtraBold, color = Red700) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "تحذير: ستؤدي هذه العملية إلى حذف/إزالة البيانات التجريبية أو الحالية وإعادة تهيئة جداول التطبيق للبدء الفعلي الفارغ. سيتم حفظ نسخة احتياطية تلقائية قبل التنفيذ.",
+                        fontSize = 13.sp
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { emptyStartConfirmed = !emptyStartConfirmed }
+                    ) {
+                        Checkbox(checked = emptyStartConfirmed, onCheckedChange = { emptyStartConfirmed = it })
+                        Text("أؤكد رغبتي الصريحة في تفريغ البيانات والبدء الفعلي الفارغ", fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = emptyStartConfirmed,
+                    onClick = {
+                        runCatching {
+                            val safety = ExcelAndBackupService.createLocalBackup(
+                                context,
+                                dbHelper,
+                                isAutoSafety = true,
+                                isAutoDaily = false
+                            )
+                            dbHelper.resetDatabase(includeDemo = false)
+                            backups = ExcelAndBackupService.listBackups(context)
+                            showEmptyStartDialog = false
+                            emptyStartConfirmed = false
+                            onDataChanged()
+                            onShowMessage("تم البدء الفعلي الفارغ. النسخة الاحتياطية محفوظة في: ${safety.filePath}")
+                        }.onFailure { e ->
+                            onShowMessage("تم إلغاء العملية لأن النسخ الاحتياطي التلقائي فشل: ${e.message}")
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد البدء الفعلي الفارغ", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEmptyStartDialog = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }

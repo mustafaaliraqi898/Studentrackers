@@ -3,9 +3,10 @@ import {
   AlertTriangle,
   ArchiveRestore,
   CheckCircle2,
-  Cloud,
+  Clock,
   Database,
   Download,
+  FileCode2,
   HardDriveDownload,
   Plus,
   ShieldCheck,
@@ -13,7 +14,11 @@ import {
   Upload,
 } from 'lucide-react';
 import { BackupSnapshotMetadata } from '../types';
-import { BackupService } from '../services/backupService';
+import {
+  BackupDiagnosticLog,
+  BackupService,
+  getLocalTodayDateString,
+} from '../services/backupService';
 
 interface BackupRestoreViewProps {
   onDatabaseRestored: () => Promise<void>;
@@ -23,6 +28,7 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
   onDatabaseRestored,
 }) => {
   const [snapshots, setSnapshots] = useState<BackupSnapshotMetadata[]>([]);
+  const [diagnostics, setDiagnostics] = useState<BackupDiagnosticLog[]>([]);
   const [customTitle, setCustomTitle] = useState('');
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
@@ -32,12 +38,13 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
   const [pendingRestoreSnapshot, setPendingRestoreSnapshot] =
     useState<BackupSnapshotMetadata | null>(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
-  const [createSafetyBackupBeforeRestore, setCreateSafetyBackupBeforeRestore] =
-    useState(true);
+  const [pendingDeleteSnapshot, setPendingDeleteSnapshot] =
+    useState<BackupSnapshotMetadata | null>(null);
 
   const loadSnapshots = async () => {
     const list = await BackupService.listLocalBackups();
     setSnapshots(list);
+    setDiagnostics(BackupService.getDiagnosticLogs());
   };
 
   useEffect(() => {
@@ -51,23 +58,43 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
     try {
       const snap = await BackupService.createLocalBackup(
         customTitle.trim() || undefined,
+        false,
         false
       );
       setCustomTitle('');
       await loadSnapshots();
-      setStatusBanner(`تم إنشاء النسخة الاحتياطية "${snap.title}" بنجاح.`);
+      setStatusBanner(
+        `تم إنشاء النسخة الاحتياطية "${snap.fileName || snap.title}" بنجاح. (يتم الاحتفاظ بآخر 7 نسخ محلية تلقائياً)`
+      );
     } catch (err: unknown) {
       setErrorBanner(
         err instanceof Error ? err.message : 'تعذر إنشاء النسخة الاحتياطية.'
       );
+      setDiagnostics(BackupService.getDiagnosticLogs());
     } finally {
       setIsBusy(false);
     }
   };
 
-  const handleDeleteSnapshot = async (id: string) => {
-    await BackupService.deleteLocalBackup(id);
-    await loadSnapshots();
+  const confirmAndExecuteDelete = async () => {
+    if (!pendingDeleteSnapshot) return;
+    setIsBusy(true);
+    setErrorBanner(null);
+    setStatusBanner(null);
+    try {
+      await BackupService.deleteLocalBackup(pendingDeleteSnapshot.id);
+      await loadSnapshots();
+      setStatusBanner(
+        `تم حذف النسخة الاحتياطية "${pendingDeleteSnapshot.fileName || pendingDeleteSnapshot.title}" بنجاح.`
+      );
+    } catch (err: unknown) {
+      setErrorBanner(
+        err instanceof Error ? err.message : 'تعذر حذف النسخة الاحتياطية.'
+      );
+    } finally {
+      setIsBusy(false);
+      setPendingDeleteSnapshot(null);
+    }
   };
 
   const confirmAndExecuteRestore = async () => {
@@ -76,28 +103,29 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
     setStatusBanner(null);
     try {
       if (pendingRestoreSnapshot) {
-        await BackupService.restoreFromSnapshot(
-          pendingRestoreSnapshot,
-          createSafetyBackupBeforeRestore
+        const safetySnap = await BackupService.restoreFromSnapshot(
+          pendingRestoreSnapshot
         );
         await onDatabaseRestored();
         await loadSnapshots();
         setStatusBanner(
-          `تمت استعادة النسخة الاحتياطية "${pendingRestoreSnapshot.title}" بنجاح ورجوع جميع البيانات والسجلات كما كانت.`
+          `تمت استعادة النسخة الاحتياطية "${
+            pendingRestoreSnapshot.fileName || pendingRestoreSnapshot.title
+          }" بنجاح. تم حفظ نسخة احتياطية تلقائية لبياناتك السابقة باسم "${
+            safetySnap.fileName || safetySnap.title
+          }".`
         );
       } else if (pendingRestoreFile) {
-        const msg = await BackupService.restoreFromUploadedFile(
-          pendingRestoreFile,
-          createSafetyBackupBeforeRestore
-        );
+        const res = await BackupService.restoreFromUploadedFile(pendingRestoreFile);
         await onDatabaseRestored();
         await loadSnapshots();
-        setStatusBanner(msg);
+        setStatusBanner(res.message);
       }
     } catch (err: unknown) {
       setErrorBanner(
         err instanceof Error ? err.message : 'فشلت عملية استعادة النسخة الاحتياطية.'
       );
+      setDiagnostics(BackupService.getDiagnosticLogs());
     } finally {
       setIsBusy(false);
       setPendingRestoreSnapshot(null);
@@ -106,27 +134,78 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
   };
 
   const latestBackup = snapshots[0];
+  const todayStr = getLocalTodayDateString(new Date());
+  const hasTodayBackup = snapshots.some(
+    (s) => getLocalTodayDateString(new Date(s.createdAt)) === todayStr
+  );
 
   return (
     <div className="space-y-6 pb-10">
-      {/* Header & Last Backup Info */}
-      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-extrabold text-slate-900">
-            النسخ الاحتياطي والاستعادة (SQLite Backup)
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            احفظ نسخة احتياطية كاملة من قاعدة بيانات SQLite (الصفوف، الشعب، الطلاب، الحضور، التقييمات، الاختبارات، والعطل)
-          </p>
+      {/* Header & Last Backup Summary */}
+      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900">
+              النسخ الاحتياطي والاستعادة
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              نسخ احتياطي تلقائي يومي لقاعدة بيانات SQLite (الصفوف، الشعب، الطلاب، الحضور، التقييمات، الاختبارات، والعطل) مع الاحتفاظ بآخر 7 نسخ محلية تلقائياً
+            </p>
+          </div>
+
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={handleCreateBackupNow}
+            className="min-h-[44px] px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors shadow-xs shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>نسخ احتياطي الآن</span>
+          </button>
         </div>
 
-        <div className="bg-slate-50 px-3.5 py-2.5 rounded-xl border border-slate-200/80 text-xs shrink-0">
-          <span className="text-slate-500 block">آخر نسخة احتياطية محلية:</span>
-          <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
-            {latestBackup
-              ? new Date(latestBackup.createdAt).toLocaleString('ar-IQ')
-              : 'لم يتم إنشاء نسخة بعد'}
-          </span>
+        {/* Last Backup Details Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3 border-t border-slate-100">
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+            <span className="text-xs text-slate-500 block">آخر نسخة احتياطية:</span>
+            <span className="font-mono-num text-xs font-extrabold text-slate-900 mt-1 block truncate">
+              {latestBackup
+                ? latestBackup.fileName || latestBackup.title
+                : 'لا توجد نسخة بعد'}
+            </span>
+          </div>
+
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+            <span className="text-xs text-slate-500 block">تاريخ ووقت آخر Backup:</span>
+            <span className="font-mono-num text-xs font-extrabold text-slate-900 mt-1 block">
+              {latestBackup
+                ? new Date(latestBackup.createdAt).toLocaleString('ar-IQ', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  })
+                : '—'}
+            </span>
+          </div>
+
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80">
+            <span className="text-xs text-slate-500 block">النسخ التلقائي اليومي (حد أقصى 7 نسخ):</span>
+            <span
+              className={`text-xs font-extrabold mt-1 flex items-center gap-1.5 ${
+                hasTodayBackup ? 'text-emerald-700' : 'text-amber-700'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {hasTodayBackup
+                  ? `تم إنشاء نسخة اليوم (${snapshots.length} / 7 محفوظة)`
+                  : 'لم يتم إنشاء نسخة اليوم بعد'}
+              </span>
+            </span>
+          </div>
         </div>
       </section>
 
@@ -141,12 +220,16 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
       )}
 
       {errorBanner && (
-        <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs font-bold">
-          {errorBanner}
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs font-bold flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-extrabold">تعذر إتمام العملية:</p>
+            <p className="mt-0.5">{errorBanner}</p>
+          </div>
         </div>
       )}
 
-      {/* Create Local Backup & Export Actions */}
+      {/* Create Local Backup with Custom Label & Export Actions */}
       <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-4">
         <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
           <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
@@ -154,10 +237,10 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
           </div>
           <div>
             <h3 className="text-base font-extrabold text-slate-900">
-              إنشاء نسخة احتياطية محلية الآن
+              إنشاء نسخة الآن وتصدير أو استيراد ملف خارجي
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              تُحفظ النسخة في خزنة الجهاز المحلية مع إمكانية تنزيلها كملف لمشاركته أو الاحتفاظ به
+              يحتفظ التطبيق بآخر 7 نسخ احتياطية محلية تلقائياً ويحذف النسخ الأقدم لمنع امتلاء الذاكرة
             </p>
           </div>
         </div>
@@ -167,17 +250,17 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
             type="text"
             value={customTitle}
             onChange={(e) => setCustomTitle(e.target.value)}
-            placeholder="عنوان اختياري للنسخة (مثال: قبل تعديل درجات شهر تشرين الأول)..."
+            placeholder="ملاحظة أو عنوان اختياري للنسخة (مثال: قبل رصد درجات نهاية الشهر)..."
             className="flex-1 min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
           />
           <button
             type="button"
             disabled={isBusy}
             onClick={handleCreateBackupNow}
-            className="min-h-[44px] px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
+            className="min-h-[44px] px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 whitespace-nowrap transition-colors"
           >
             <Plus className="w-4 h-4" />
-            <span>إنشاء نسخة احتياطية الآن</span>
+            <span>إنشاء نسخة الآن</span>
           </button>
         </div>
 
@@ -190,12 +273,12 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
               className="min-h-[40px] px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold flex items-center gap-1.5"
             >
               <Database className="w-3.5 h-3.5" />
-              <span>تنزيل ملف قاعدة البيانات (.sqlite)</span>
+              <span>تنزيل ملف قاعدة البيانات (StudentTracker_Backup.db)</span>
             </button>
 
-            <label className="min-h-[40px] px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+            <label className="min-h-[40px] px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
               <Upload className="w-3.5 h-3.5" />
-              <span>استعادة من ملف خارجي (.stbackup / .sqlite)</span>
+              <span>استعادة نسخة من ملف خارجي (.db / .sqlite / .stbackup)</span>
               <input
                 type="file"
                 accept=".json,.sqlite,.db"
@@ -215,9 +298,14 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
 
       {/* Saved Local Backups Vault List */}
       <section className="space-y-3">
-        <h3 className="text-sm font-extrabold text-slate-800 px-1">
-          النسخ الاحتياطية المتوفرة داخل الجهاز ({snapshots.length})
-        </h3>
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-sm font-extrabold text-slate-800">
+            قائمة النسخ المحلية الموجودة ({snapshots.length} / 7)
+          </h3>
+          <span className="text-xs text-slate-500">
+            يتم الاحتفاظ بآخر 7 نسخ فقط وحذف الأقدم تلقائياً
+          </span>
+        </div>
 
         {snapshots.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-slate-200/80">
@@ -226,7 +314,7 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
               لا توجد نسخ احتياطية محفوظة حتى الآن
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              اضغط على "إنشاء نسخة احتياطية الآن" أعلاه لتجربة حفظ واستعادة البيانات عملياً.
+              اضغط على "نسخ احتياطي الآن" أعلاه لحفظ نسخة كاملة من بياناتك.
             </p>
           </div>
         ) : (
@@ -235,22 +323,35 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
               key={snap.id}
               className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
             >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <h4 className="text-sm font-extrabold text-slate-900">
+              <div className="space-y-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-sm font-extrabold text-slate-900 truncate">
                     {snap.title}
                   </h4>
+                  {snap.isAutoDaily && (
+                    <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md">
+                      نسخة يومية تلقائية
+                    </span>
+                  )}
                   {snap.isAutoPreRestore && (
-                    <span className="text-[11px] font-bold text-amber-700">
-                      · نسخة أمان تلقائية
+                    <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md">
+                      نسخة أمان قبل الاستعادة/التعديل
                     </span>
                   )}
                 </div>
+
+                {snap.fileName && (
+                  <p className="text-xs font-mono-num text-slate-500 truncate">
+                    اسم الملف: {snap.fileName} ({Math.max(1, Math.round(snap.sizeBytes / 1024))} KB)
+                  </p>
+                )}
 
                 <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-mono-num">
                   <span>{new Date(snap.createdAt).toLocaleString('ar-IQ')}</span>
                   <span aria-hidden="true">·</span>
                   <span>الصفوف: {snap.stats.classesCount}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>الشعب: {snap.stats.sectionsCount}</span>
                   <span aria-hidden="true">·</span>
                   <span>الطلاب: {snap.stats.studentsCount}</span>
                   <span aria-hidden="true">·</span>
@@ -267,7 +368,7 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                   className="min-h-[40px] px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <ArchiveRestore className="w-4 h-4" />
-                  <span>استعادة</span>
+                  <span>استعادة نسخة</span>
                 </button>
 
                 <button
@@ -277,16 +378,17 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                   title="تنزيل كملف"
                 >
                   <Download className="w-4 h-4" />
-                  <span>ملف</span>
+                  <span>تنزيل</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => handleDeleteSnapshot(snap.id)}
-                  className="min-h-[40px] px-2.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold"
-                  title="حذف النسخة"
+                  onClick={() => setPendingDeleteSnapshot(snap)}
+                  className="min-h-[40px] px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold flex items-center gap-1"
+                  title="حذف نسخة"
                 >
                   <Trash2 className="w-4 h-4" />
+                  <span>حذف نسخة</span>
                 </button>
               </div>
             </div>
@@ -294,24 +396,39 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
         )}
       </section>
 
-      {/* Phase 10 Preview Card: Google Drive Backup (Scheduled after local MVP verification) */}
-      <section className="bg-slate-100 rounded-2xl p-4 sm:p-5 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-white text-slate-700 border border-slate-200 flex items-center justify-center shrink-0">
-            <Cloud className="w-5 h-5" />
+      {/* Diagnostic Error Log Section (Only shown if any backup errors were recorded) */}
+      {diagnostics.length > 0 && (
+        <section className="bg-slate-900 text-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-amber-400 text-xs font-extrabold">
+              <FileCode2 className="w-4 h-4" />
+              <span>سجل تشخيص أخطاء النسخ الاحتياطي ({diagnostics.length})</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                BackupService.clearDiagnosticLogs();
+                setDiagnostics([]);
+              }}
+              className="text-xs text-slate-400 hover:text-white underline"
+            >
+              مسح السجل
+            </button>
           </div>
-          <div>
-            <h4 className="text-sm font-extrabold text-slate-900">
-              النسخ الاحتياطي السحابي إلى Google Drive (المرحلة العاشرة)
-            </h4>
-            <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
-              وفق خطة التنفيذ، يتم أولاً اعتماد واختبار النسخ الاحتياطي المحلي لقاعدة بيانات SQLite على أجهزة Android، ثم تفعيل ربط Google Drive المشفر في المرحلة العاشرة.
-            </p>
+          <div className="space-y-1.5 max-h-40 overflow-y-auto text-xs font-mono-num">
+            {diagnostics.map((log, i) => (
+              <div key={i} className="bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+                <span className="text-slate-400">
+                  [{new Date(log.timestamp).toLocaleString('ar-IQ')}] ({log.operation}):
+                </span>{' '}
+                <span className="text-rose-300">{log.message}</span>
+              </div>
+            ))}
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* Restore Warning Confirmation Modal (Exact prompt text) */}
+      {/* Restore Warning Confirmation Modal (Mandatory safety backup before restore) */}
       {(pendingRestoreSnapshot || pendingRestoreFile) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <div
@@ -328,20 +445,21 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                   تأكيد استعادة النسخة الاحتياطية
                 </h3>
                 <p className="text-sm text-slate-700 mt-1 leading-relaxed font-medium">
-                  استعادة النسخة الاحتياطية قد تستبدل البيانات الحالية. هل تريد المتابعة؟
+                  ستقوم هذه العملية باستبدال البيانات الحالية بالنسخة المختارة (
+                  {pendingRestoreSnapshot
+                    ? pendingRestoreSnapshot.fileName || pendingRestoreSnapshot.title
+                    : pendingRestoreFile?.name}
+                  ). هل تريد المتابعة؟
                 </p>
               </div>
             </div>
 
-            <label className="flex items-center gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-xs font-bold text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={createSafetyBackupBeforeRestore}
-                onChange={(e) => setCreateSafetyBackupBeforeRestore(e.target.checked)}
-                className="w-4 h-4 accent-emerald-600 rounded"
-              />
-              <span>إنشاء نسخة احتياطية تلقائية من البيانات الحالية قبل تنفيذ الاستعادة</span>
-            </label>
+            <div className="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-xs font-bold text-emerald-900 flex items-start gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+              <span>
+                حماية تلقائية: سيقوم التطبيق تلقائياً بإنشاء نسخة احتياطية كاملة للبيانات الحالية وحفظها في الجهاز قبل تنفيذ الاستعادة لضمان عدم فقدان أي بيانات.
+              </span>
+            </div>
 
             <div className="flex items-center gap-2.5 pt-2">
               <button
@@ -350,7 +468,7 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                 onClick={confirmAndExecuteRestore}
                 className="flex-1 min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition-colors"
               >
-                استعادة
+                {isBusy ? 'جاري الاستعادة بأمان...' : 'تأكيد واستعادة النسخة'}
               </button>
               <button
                 type="button"
@@ -359,6 +477,50 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                   setPendingRestoreSnapshot(null);
                   setPendingRestoreFile(null);
                 }}
+                className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Backup Confirmation Modal */}
+      {pendingDeleteSnapshot && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-slate-200 space-y-4"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  تأكيد حذف النسخة الاحتياطية
+                </h3>
+                <p className="text-sm text-slate-700 mt-1 leading-relaxed font-medium">
+                  هل أنت متأكد من حذف النسخة الاحتياطية ({pendingDeleteSnapshot.fileName || pendingDeleteSnapshot.title}) من الجهاز؟
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={confirmAndExecuteDelete}
+                className="flex-1 min-h-[44px] bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl transition-colors"
+              >
+                تأكيد الحذف
+              </button>
+              <button
+                type="button"
+                disabled={isBusy}
+                onClick={() => setPendingDeleteSnapshot(null)}
                 className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
               >
                 إلغاء

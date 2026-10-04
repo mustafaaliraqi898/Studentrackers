@@ -23,6 +23,7 @@ import {
 } from './types';
 import { clearAllAndResetDatabase, getDatabase } from './db/sqliteEngine';
 import { TrackerRepository } from './repositories/trackerRepository';
+import { BackupService } from './services/backupService';
 import { createDefaultStudentEntry } from './services/gradingService';
 import { DashboardView } from './components/DashboardView';
 import { ClassesSectionsView } from './components/ClassesSectionsView';
@@ -109,6 +110,8 @@ export default function App() {
         await getDatabase();
         if (!mounted) return;
         await refreshAllFromSQLite();
+        // Automatically check and create daily backup on first app launch each day (max 1 auto backup per day)
+        await BackupService.ensureDailyAutoBackup();
         if (mounted) setIsDbReady(true);
       } catch (err: unknown) {
         console.error('SQLite Initialization error:', err);

@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
 import com.studenttracker.app.data.TrackerRepository
+import com.studenttracker.app.service.DailyBackupWorker
+import com.studenttracker.app.service.ExcelAndBackupService
 import com.studenttracker.app.ui.*
 import kotlinx.coroutines.launch
 
@@ -25,6 +27,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
         val repository = TrackerRepository(dbHelper)
+
+        // Ensure daily automatic local backup on first launch of the day & schedule background WorkManager job
+        ExcelAndBackupService.ensureDailyAutoBackup(applicationContext, dbHelper)
+        DailyBackupWorker.scheduleDailyBackup(applicationContext)
 
         setContent {
             StudentTrackerRtlTheme {

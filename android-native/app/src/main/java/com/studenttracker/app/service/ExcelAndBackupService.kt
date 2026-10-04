@@ -325,68 +325,183 @@ object ExcelAndBackupService {
     }
 
     // =========================================================================
-    // 3. LOCAL SQLITE BACKUP & RESTORE
+    // 3. LOCAL SQLITE BACKUP & RESTORE (Auto Daily + 7-Backup Retention + Safety)
     // =========================================================================
+    private const val PREFS_NAME = "student_tracker_backup_prefs"
+    private const val KEY_LAST_AUTO_BACKUP_DATE = "last_auto_backup_date"
+    private const val KEY_LAST_ERROR_LOG = "last_backup_error_log"
+    private const val MAX_LOCAL_BACKUPS = 7
+
     private fun getBackupsDirectory(context: Context): File {
         val dir = File(context.filesDir, "sqlite_backups")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
 
+    fun recordBackupError(context: Context, operation: String, e: Throwable) {
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        val entry = "[$stamp] ($operation): ${e.message ?: "خطأ غير معروف"}"
+        runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().putString(KEY_LAST_ERROR_LOG, entry).apply()
+        }
+    }
+
+    fun getLastBackupError(context: Context): String? {
+        return runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getString(KEY_LAST_ERROR_LOG, null)
+        }.getOrNull()
+    }
+
+    fun clearLastBackupError(context: Context) {
+        runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit().remove(KEY_LAST_ERROR_LOG).apply()
+        }
+    }
+
     fun listBackups(context: Context): List<BackupFileEntry> {
         val dir = getBackupsDirectory(context)
         val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") } ?: emptyList()
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         return files.sortedByDescending { it.lastModified() }.map { f ->
+            val modifiedTime = java.time.Instant.ofEpochMilli(f.lastModified())
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalDateTime()
+                .format(formatter)
             BackupFileEntry(
                 fileName = f.name,
                 filePath = f.absolutePath,
-                createdAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")),
+                createdAt = modifiedTime,
                 sizeBytes = f.length(),
-                isAutoPreRestore = f.name.startsWith("auto_safety_")
+                isAutoPreRestore = f.name.contains("_Safety_") || f.name.startsWith("auto_safety_"),
+                isAutoDaily = f.name.contains("_AutoDaily_")
             )
+        }
+    }
+
+    fun pruneOldBackups(context: Context, maxCount: Int = MAX_LOCAL_BACKUPS) {
+        runCatching {
+            val dir = getBackupsDirectory(context)
+            val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") }
+                ?.sortedByDescending { it.lastModified() } ?: return
+            if (files.size > maxCount) {
+                files.drop(maxCount).forEach { oldFile ->
+                    oldFile.delete()
+                }
+            }
+        }.onFailure { e ->
+            recordBackupError(context, "pruneOldBackups", e)
         }
     }
 
     fun createLocalBackup(
         context: Context,
         dbHelper: AppDatabaseHelper,
-        isAutoSafety: Boolean = false
+        isAutoSafety: Boolean = false,
+        isAutoDaily: Boolean = false
     ): BackupFileEntry {
-        // Ensure WAL/journal is flushed by closing or checkpointing
-        dbHelper.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL);", null).close()
-        val srcFile = dbHelper.getDatabaseFile()
-        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
-        val prefix = if (isAutoSafety) "auto_safety_" else "backup_"
-        val targetFile = File(getBackupsDirectory(context), "${prefix}${stamp}.db")
-        srcFile.copyTo(targetFile, overwrite = true)
+        try {
+            // Ensure WAL/journal is flushed by checkpointing
+            dbHelper.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL);", null).close()
+            val srcFile = dbHelper.getDatabaseFile()
+            require(srcFile.exists() && srcFile.length() > 0) {
+                "ملف قاعدة البيانات غير موجود أو فارغ"
+            }
+            val now = LocalDateTime.now()
+            val stamp = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
+            val tag = when {
+                isAutoSafety -> "_Safety"
+                isAutoDaily -> "_AutoDaily"
+                else -> ""
+            }
+            val fileName = "StudentTracker_Backup_${stamp}${tag}.db"
+            val targetFile = File(getBackupsDirectory(context), fileName)
+            srcFile.copyTo(targetFile, overwrite = true)
 
-        return BackupFileEntry(
-            fileName = targetFile.name,
-            filePath = targetFile.absolutePath,
-            createdAt = stamp,
-            sizeBytes = targetFile.length(),
-            isAutoPreRestore = isAutoSafety
-        )
+            // Enforce keeping only the latest 7 local backups
+            pruneOldBackups(context, MAX_LOCAL_BACKUPS)
+
+            // Mark today's date as having a successful backup
+            val todayStr = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_LAST_AUTO_BACKUP_DATE, todayStr)
+                .apply()
+
+            return BackupFileEntry(
+                fileName = targetFile.name,
+                filePath = targetFile.absolutePath,
+                createdAt = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                sizeBytes = targetFile.length(),
+                isAutoPreRestore = isAutoSafety,
+                isAutoDaily = isAutoDaily
+            )
+        } catch (e: Exception) {
+            recordBackupError(context, "createLocalBackup", e)
+            throw e
+        }
+    }
+
+    /**
+     * Checks on first launch each day whether a successful backup exists for today.
+     * If not, creates one automatically (at most 1 automatic backup per day).
+     */
+    fun ensureDailyAutoBackup(
+        context: Context,
+        dbHelper: AppDatabaseHelper
+    ): BackupFileEntry? {
+        return try {
+            val todayStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val lastAutoDate = prefs.getString(KEY_LAST_AUTO_BACKUP_DATE, null)
+
+            val existingToday = listBackups(context).any {
+                it.createdAt.startsWith(todayStr) || it.fileName.contains(todayStr)
+            }
+
+            if (lastAutoDate == todayStr && existingToday) {
+                return null
+            }
+            if (existingToday) {
+                prefs.edit().putString(KEY_LAST_AUTO_BACKUP_DATE, todayStr).apply()
+                return null
+            }
+
+            createLocalBackup(context, dbHelper, isAutoSafety = false, isAutoDaily = true)
+        } catch (e: Exception) {
+            recordBackupError(context, "ensureDailyAutoBackup", e)
+            null
+        }
     }
 
     fun restoreBackup(
         context: Context,
         dbHelper: AppDatabaseHelper,
         backupEntry: BackupFileEntry
-    ) {
-        // 1. Create automatic safety backup of current database first
-        createLocalBackup(context, dbHelper, isAutoSafety = true)
-
-        // 2. Close active SQLite connection and copy backup file over primary DB file
-        val backupFile = File(backupEntry.filePath)
-        require(backupFile.exists()) { "ملف النسخة الاحتياطية غير موجود" }
-
-        val destFile = dbHelper.getDatabaseFile()
-        dbHelper.close()
-        FileOutputStream(destFile).use { out ->
-            backupFile.inputStream().use { inp ->
-                inp.copyTo(out)
+    ): BackupFileEntry {
+        try {
+            val backupFile = File(backupEntry.filePath)
+            require(backupFile.exists() && backupFile.length() > 100) {
+                "ملف النسخة الاحتياطية غير موجود أو تالف"
             }
+
+            // 1. Mandatory automatic safety backup of current database first (aborts if this throws)
+            val safetyBackup = createLocalBackup(context, dbHelper, isAutoSafety = true, isAutoDaily = false)
+
+            // 2. Close active SQLite connection and copy backup file over primary DB file
+            val destFile = dbHelper.getDatabaseFile()
+            dbHelper.close()
+            FileOutputStream(destFile).use { out ->
+                backupFile.inputStream().use { inp ->
+                    inp.copyTo(out)
+                }
+            }
+            return safetyBackup
+        } catch (e: Exception) {
+            recordBackupError(context, "restoreBackup", e)
+            throw e
         }
     }
 

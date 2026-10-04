@@ -111,9 +111,11 @@ export interface StudentCalculatedGrade {
 
 export interface BackupSnapshotMetadata {
   id: string;
+  fileName?: string;
   title: string;
   createdAt: string;
   isAutoPreRestore: boolean;
+  isAutoDaily?: boolean;
   sizeBytes: number;
   stats: {
     classesCount: number;
