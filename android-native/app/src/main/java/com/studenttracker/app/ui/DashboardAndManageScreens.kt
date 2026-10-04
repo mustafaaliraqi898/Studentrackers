@@ -690,7 +690,7 @@ fun StudentsScreen(
                                     selectedSectionId
                                 )
                                 if (isDup) {
-                                    onShowMessage("الطالب موجود مسبقاً في نفس الصف والشعبة")
+                                    onShowMessage("الطالب موجود مسبقاً في نفس الصف (حتى وإن كان في شعبة أخرى)")
                                 } else {
                                     newStudentName = ""
                                     onDataChanged()
@@ -821,10 +821,14 @@ fun StudentsScreen(
                 Button(onClick = {
                     val target = editingStudent
                     if (target != null && editingStudentName.isNotBlank()) {
-                        repository.updateStudentName(target.id, editingStudentName)
-                        editingStudent = null
-                        onDataChanged()
-                        onShowMessage("تم تحديث اسم الطالب")
+                        val updated = repository.updateStudentName(target.id, editingStudentName)
+                        if (!updated) {
+                            onShowMessage("الاسم موجود مسبقاً لطالب آخر في نفس الصف")
+                        } else {
+                            editingStudent = null
+                            onDataChanged()
+                            onShowMessage("تم تحديث اسم الطالب")
+                        }
                     }
                 }) {
                     Text("حفظ الاسم")
@@ -889,10 +893,14 @@ fun StudentsScreen(
             },
             confirmButton = {
                 Button(onClick = {
-                    repository.transferStudentSection(target.id, targetClsId, targetSecId)
-                    studentToTransfer = null
-                    onDataChanged()
-                    onShowMessage("تم نقل الطالب بنجاح")
+                    val transferred = repository.transferStudentSection(target.id, targetClsId, targetSecId)
+                    if (!transferred) {
+                        onShowMessage("يوجد طالب بنفس الاسم في الصف المختار")
+                    } else {
+                        studentToTransfer = null
+                        onDataChanged()
+                        onShowMessage("تم نقل الطالب بنجاح")
+                    }
                 }) {
                     Text("تأكيد النقل")
                 }

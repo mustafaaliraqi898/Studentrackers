@@ -11,6 +11,18 @@ import {
 import { getDatabase, persistDatabaseToStorage } from '../db/sqliteEngine';
 
 export class TrackerRepository {
+  static normalizeStudentName(name: string): string {
+    return name
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .replace(/ـ/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  static canonicalArabicComparisonKey(name: string): string {
+    return this.normalizeStudentName(name).replace(/[\u064B-\u065F\u0670]/g, '');
+  }
+
   // ---------------- CLASSES ----------------
   static async getClasses(): Promise<ClassEntity[]> {
     const db = await getDatabase();
@@ -211,24 +223,34 @@ export class TrackerRepository {
     classId: number,
     sectionId: number
   ): Promise<{ id: number; isDuplicate: boolean }> {
-    const trimmed = studentName.trim().replace(/\s+/g, ' ');
+    const trimmed = this.normalizeStudentName(studentName);
     if (!trimmed) throw new Error('اسم الطالب مطلوب');
+    const targetKey = this.canonicalArabicComparisonKey(trimmed);
 
     const db = await getDatabase();
-    // Check duplicate in same class & section
+    // Check duplicate across the ENTIRE ClassID (regardless of SectionID)
     const existing = db.exec(
-      'SELECT ID, IsActive FROM Students WHERE StudentName = ? AND ClassID = ? AND SectionID = ?;',
-      [trimmed, classId, sectionId]
+      'SELECT ID, StudentName, SectionID, IsActive FROM Students WHERE ClassID = ?;',
+      [classId]
     );
     if (existing.length > 0 && existing[0].values.length > 0) {
-      const existingId = Number(existing[0].values[0][0]);
-      const isAct = Number(existing[0].values[0][1]) === 1;
-      if (!isAct) {
-        db.run('UPDATE Students SET IsActive = 1 WHERE ID = ?;', [existingId]);
-        await persistDatabaseToStorage();
-        return { id: existingId, isDuplicate: false };
+      for (const row of existing[0].values) {
+        const existingId = Number(row[0]);
+        const existingName = String(row[1] || '');
+        const existingSecId = Number(row[2]);
+        const isAct = Number(row[3]) === 1;
+        if (this.canonicalArabicComparisonKey(existingName) === targetKey) {
+          if (!isAct && existingSecId === sectionId) {
+            db.run('UPDATE Students SET IsActive = 1, StudentName = ? WHERE ID = ?;', [
+              trimmed,
+              existingId,
+            ]);
+            await persistDatabaseToStorage();
+            return { id: existingId, isDuplicate: false };
+          }
+          return { id: existingId, isDuplicate: true };
+        }
       }
-      return { id: existingId, isDuplicate: true };
     }
 
     const now = new Date().toISOString();
@@ -242,12 +264,37 @@ export class TrackerRepository {
     return { id: newId, isDuplicate: false };
   }
 
-  static async updateStudentName(studentId: number, newName: string): Promise<void> {
-    const trimmed = newName.trim().replace(/\s+/g, ' ');
+  static async updateStudentName(
+    studentId: number,
+    newName: string
+  ): Promise<{ updated: boolean; isDuplicate: boolean }> {
+    const trimmed = this.normalizeStudentName(newName);
     if (!trimmed) throw new Error('اسم الطالب مطلوب');
+    const targetKey = this.canonicalArabicComparisonKey(trimmed);
+
     const db = await getDatabase();
+    const stuRes = db.exec('SELECT ClassID FROM Students WHERE ID = ?;', [studentId]);
+    if (stuRes.length === 0 || stuRes[0].values.length === 0) {
+      return { updated: false, isDuplicate: false };
+    }
+    const classId = Number(stuRes[0].values[0][0]);
+
+    const others = db.exec(
+      'SELECT ID, StudentName FROM Students WHERE ClassID = ? AND ID != ?;',
+      [classId, studentId]
+    );
+    if (others.length > 0 && others[0].values.length > 0) {
+      for (const row of others[0].values) {
+        const otherName = String(row[1] || '');
+        if (this.canonicalArabicComparisonKey(otherName) === targetKey) {
+          return { updated: false, isDuplicate: true };
+        }
+      }
+    }
+
     db.run('UPDATE Students SET StudentName = ? WHERE ID = ?;', [trimmed, studentId]);
     await persistDatabaseToStorage();
+    return { updated: true, isDuplicate: false };
   }
 
   static async toggleStudentActiveStatus(
@@ -266,8 +313,28 @@ export class TrackerRepository {
     studentId: number,
     targetClassId: number,
     targetSectionId: number
-  ): Promise<void> {
+  ): Promise<{ transferred: boolean; isDuplicate: boolean }> {
     const db = await getDatabase();
+    const stuRes = db.exec('SELECT StudentName FROM Students WHERE ID = ?;', [studentId]);
+    if (stuRes.length === 0 || stuRes[0].values.length === 0) {
+      return { transferred: false, isDuplicate: false };
+    }
+    const currentName = String(stuRes[0].values[0][0] || '');
+    const targetKey = this.canonicalArabicComparisonKey(currentName);
+
+    const others = db.exec(
+      'SELECT ID, StudentName FROM Students WHERE ClassID = ? AND ID != ?;',
+      [targetClassId, studentId]
+    );
+    if (others.length > 0 && others[0].values.length > 0) {
+      for (const row of others[0].values) {
+        const otherName = String(row[1] || '');
+        if (this.canonicalArabicComparisonKey(otherName) === targetKey) {
+          return { transferred: false, isDuplicate: true };
+        }
+      }
+    }
+
     db.run(
       'UPDATE Students SET ClassID = ?, SectionID = ? WHERE ID = ?;',
       [targetClassId, targetSectionId, studentId]
@@ -277,6 +344,7 @@ export class TrackerRepository {
       [targetClassId, targetSectionId, studentId]
     );
     await persistDatabaseToStorage();
+    return { transferred: true, isDuplicate: false };
   }
 
   static async deleteStudent(studentId: number): Promise<void> {

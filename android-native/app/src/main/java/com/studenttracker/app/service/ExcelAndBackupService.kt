@@ -258,9 +258,9 @@ object ExcelAndBackupService {
         for (r in startIdx until matrix.size) {
             val rowNum = r + 1
             val cells = matrix[r]
-            val rawName = cells.getOrNull(0)?.trim()?.replace(Regex("\\s+"), " ") ?: ""
-            val rawClass = cells.getOrNull(1)?.trim()?.replace(Regex("\\s+"), " ") ?: ""
-            val rawSection = cells.getOrNull(2)?.trim()?.replace(Regex("\\s+"), " ") ?: ""
+            val rawName = TrackerRepository.normalizeStudentName(cells.getOrNull(0) ?: "")
+            val rawClass = TrackerRepository.normalizeStudentName(cells.getOrNull(1) ?: "")
+            val rawSection = TrackerRepository.normalizeStudentName(cells.getOrNull(2) ?: "")
 
             if (rawName.isEmpty() && rawClass.isEmpty() && rawSection.isEmpty()) {
                 emptyRowCount++
@@ -493,8 +493,39 @@ object ExcelAndBackupService {
     }
 
     /**
-     * Checks on first launch each day whether a successful backup exists for today.
-     * If not, creates one automatically (at most 1 automatic backup per day).
+     * Creates an automatic local SQLite backup when the user actually exits or closes the app.
+     * Uses a short cooldown (5 seconds) so that if both Back-Exit and onStop(isFinishing)/onDestroy
+     * fire during the same app termination sequence, only a single exit backup is created.
+     */
+    @Volatile
+    private var lastExitBackupEpochMs: Long = 0L
+
+    @Synchronized
+    fun createAutoBackupOnAppExit(
+        context: Context,
+        dbHelper: AppDatabaseHelper
+    ): BackupFileEntry? {
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastExitBackupEpochMs < 5000L) {
+            return null
+        }
+        return try {
+            val created = createLocalBackup(
+                context = context,
+                dbHelper = dbHelper,
+                isAutoSafety = false,
+                isAutoDaily = true
+            )
+            lastExitBackupEpochMs = System.currentTimeMillis()
+            created
+        } catch (e: Exception) {
+            recordBackupError(context, "createAutoBackupOnAppExit", e)
+            null
+        }
+    }
+
+    /**
+     * Legacy helper kept for compatibility (not called on app startup).
      */
     fun ensureDailyAutoBackup(
         context: Context,

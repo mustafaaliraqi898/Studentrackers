@@ -7,6 +7,34 @@ import java.time.Instant
 
 class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
 
+    companion object {
+        /**
+         * Normalizes Arabic student names for storage and comparison:
+         * trims leading/trailing whitespace, removes zero-width characters and tatweel (ـ),
+         * and collapses any multiple spaces/tabs into a single space.
+         */
+        fun normalizeStudentName(name: String): String {
+            return name
+                .replace("\u200B", "")
+                .replace("\u200C", "")
+                .replace("\u200D", "")
+                .replace("\uFEFF", "")
+                .replace("ـ", "")
+                .trim()
+                .replace(Regex("\\s+"), " ")
+        }
+
+        /**
+         * Produces a canonical comparison key for Arabic names so minor alef/ta-marbuta/diacritic
+         * or spacing differences are accurately matched within the same class.
+         */
+        fun canonicalArabicComparisonKey(name: String): String {
+            val base = normalizeStudentName(name)
+            val withoutTashkeel = base.replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
+            return withoutTashkeel
+        }
+    }
+
     // ---------------- CLASSES ----------------
     fun getClasses(): List<ClassEntity> {
         val db = dbHelper.readableDatabase
@@ -206,24 +234,34 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     }
 
     fun addStudent(studentName: String, classId: Long, sectionId: Long): Pair<Long, Boolean> {
-        val trimmed = studentName.trim().replace(Regex("\\s+"), " ")
+        val trimmed = normalizeStudentName(studentName)
         require(trimmed.isNotEmpty()) { "اسم الطالب مطلوب" }
+        val targetKey = canonicalArabicComparisonKey(trimmed)
 
         val db = dbHelper.writableDatabase
+        // Check duplicate across the ENTIRE ClassID (regardless of SectionID)
         val check = db.rawQuery(
-            "SELECT ID, IsActive FROM Students WHERE StudentName = ? AND ClassID = ? AND SectionID = ?",
-            arrayOf(trimmed, classId.toString(), sectionId.toString())
+            "SELECT ID, StudentName, SectionID, IsActive FROM Students WHERE ClassID = ?",
+            arrayOf(classId.toString())
         )
         check.use {
-            if (it.moveToFirst()) {
+            while (it.moveToNext()) {
                 val existingId = it.getLong(0)
-                val isAct = it.getInt(1) == 1
-                if (!isAct) {
-                    val cv = ContentValues().apply { put("IsActive", 1) }
-                    db.update("Students", cv, "ID = ?", arrayOf(existingId.toString()))
-                    return Pair(existingId, false)
+                val existingName = it.getString(1) ?: ""
+                val existingSecId = it.getLong(2)
+                val isAct = it.getInt(3) == 1
+                if (canonicalArabicComparisonKey(existingName) == targetKey) {
+                    if (!isAct && existingSecId == sectionId) {
+                        val cv = ContentValues().apply {
+                            put("IsActive", 1)
+                            put("StudentName", trimmed)
+                        }
+                        db.update("Students", cv, "ID = ?", arrayOf(existingId.toString()))
+                        return Pair(existingId, false)
+                    }
+                    // Duplicate in the same class (either active in same/another section, or inactive in another section)
+                    return Pair(existingId, true)
                 }
-                return Pair(existingId, true)
             }
         }
 
@@ -238,12 +276,41 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         return Pair(id, false)
     }
 
-    fun updateStudentName(studentId: Long, newName: String) {
-        val trimmed = newName.trim().replace(Regex("\\s+"), " ")
+    /**
+     * Updates a student's name after verifying that no other student in the same ClassID
+     * (across all sections of that class) already has the same normalized name.
+     * Returns true if updated, or false if rejected due to a duplicate in the same class.
+     */
+    fun updateStudentName(studentId: Long, newName: String): Boolean {
+        val trimmed = normalizeStudentName(newName)
         require(trimmed.isNotEmpty()) { "اسم الطالب مطلوب" }
+        val targetKey = canonicalArabicComparisonKey(trimmed)
+
         val db = dbHelper.writableDatabase
+        var studentClassId: Long? = null
+        db.rawQuery("SELECT ClassID FROM Students WHERE ID = ?", arrayOf(studentId.toString())).use { c ->
+            if (c.moveToFirst()) {
+                studentClassId = c.getLong(0)
+            }
+        }
+        val clsId = studentClassId ?: return false
+
+        // Check if another student (ID != studentId) in the same ClassID has this name
+        db.rawQuery(
+            "SELECT ID, StudentName FROM Students WHERE ClassID = ? AND ID != ?",
+            arrayOf(clsId.toString(), studentId.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val otherName = c.getString(1) ?: ""
+                if (canonicalArabicComparisonKey(otherName) == targetKey) {
+                    return false
+                }
+            }
+        }
+
         val cv = ContentValues().apply { put("StudentName", trimmed) }
         db.update("Students", cv, "ID = ?", arrayOf(studentId.toString()))
+        return true
     }
 
     fun toggleStudentActive(studentId: Long, isActive: Boolean) {
@@ -252,8 +319,34 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         db.update("Students", cv, "ID = ?", arrayOf(studentId.toString()))
     }
 
-    fun transferStudentSection(studentId: Long, targetClassId: Long, targetSectionId: Long) {
+    /**
+     * Transfers a student to another section/class. If transferring to a different ClassID,
+     * checks that no other student in targetClassId already has the same name.
+     * Returns true if transferred, or false if duplicate name exists in targetClassId.
+     */
+    fun transferStudentSection(studentId: Long, targetClassId: Long, targetSectionId: Long): Boolean {
         val db = dbHelper.writableDatabase
+        var currentName = ""
+        db.rawQuery("SELECT StudentName FROM Students WHERE ID = ?", arrayOf(studentId.toString())).use { c ->
+            if (c.moveToFirst()) {
+                currentName = c.getString(0) ?: ""
+            }
+        }
+        if (currentName.isEmpty()) return false
+        val targetKey = canonicalArabicComparisonKey(currentName)
+
+        db.rawQuery(
+            "SELECT ID, StudentName FROM Students WHERE ClassID = ? AND ID != ?",
+            arrayOf(targetClassId.toString(), studentId.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val otherName = c.getString(1) ?: ""
+                if (canonicalArabicComparisonKey(otherName) == targetKey) {
+                    return false
+                }
+            }
+        }
+
         db.beginTransaction()
         try {
             val cv = ContentValues().apply {
@@ -266,6 +359,7 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         } finally {
             db.endTransaction()
         }
+        return true
     }
 
     fun deleteStudent(studentId: Long) {

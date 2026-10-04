@@ -227,11 +227,39 @@ export class BackupService {
     }
   }
 
+  private static lastExitBackupEpochMs = 0;
+
   /**
-   * 1. عند أول تشغيل للتطبيق كل يوم:
-   * - تحقق هل تم إنشاء Backup ناجح في نفس اليوم.
-   * - إذا لم يوجد، أنشئ Backup تلقائياً.
-   * - لا تنشئ أكثر من Backup تلقائي واحد في اليوم.
+   * Creates an automatic local SQLite backup when the user closes or exits the application.
+   */
+  static async createAutoBackupOnAppExit(): Promise<BackupSnapshotMetadata | null> {
+    const nowMs = Date.now();
+    if (nowMs - this.lastExitBackupEpochMs < 5000) {
+      return null;
+    }
+    this.lastExitBackupEpochMs = nowMs;
+    try {
+      const formattedTime = new Date().toLocaleString('ar-IQ', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      return await this.createLocalBackup(
+        `نسخة احتياطية تلقائية عند إغلاق التطبيق (${formattedTime})`,
+        false,
+        true
+      );
+    } catch (err) {
+      this.logDiagnosticError('createAutoBackupOnAppExit', err);
+      return null;
+    }
+  }
+
+  /**
+   * Legacy helper kept for compatibility (not called on app startup).
    */
   static async ensureDailyAutoBackup(): Promise<{
     created: boolean;

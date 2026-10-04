@@ -190,17 +190,15 @@ export class ExcelService {
       const excelRowNumber = r + 1;
       const rowCells = matrix[r] || [];
 
-      const rawName = String(rowCells[nameColIdx] ?? '')
-        .trim()
-        .replace(/\s+/g, ' ');
+      const rawName = TrackerRepository.normalizeStudentName(
+        String(rowCells[nameColIdx] ?? '')
+      );
       const rawClass = hasExplicitClassColumn
-        ? String(rowCells[classColIdx] ?? '')
-            .trim()
-            .replace(/\s+/g, ' ')
+        ? TrackerRepository.normalizeStudentName(String(rowCells[classColIdx] ?? ''))
         : fallbackClassObj?.className || '';
-      const rawSection = String(rowCells[sectionColIdx] ?? '')
-        .trim()
-        .replace(/\s+/g, ' ');
+      const rawSection = TrackerRepository.normalizeStudentName(
+        String(rowCells[sectionColIdx] ?? '')
+      );
 
       // Check if entire row is empty
       const allCellsEmpty = rowCells.every((c) => String(c ?? '').trim() === '');

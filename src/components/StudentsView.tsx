@@ -38,13 +38,16 @@ interface StudentsViewProps {
     classId: number,
     sectionId: number
   ) => Promise<{ isDuplicate: boolean }>;
-  onUpdateStudentName: (studentId: number, newName: string) => Promise<void>;
+  onUpdateStudentName: (
+    studentId: number,
+    newName: string
+  ) => Promise<{ updated: boolean; isDuplicate: boolean }>;
   onToggleStudentActive: (studentId: number, isActive: boolean) => Promise<void>;
   onTransferStudent: (
     studentId: number,
     targetClassId: number,
     targetSectionId: number
-  ) => Promise<void>;
+  ) => Promise<{ transferred: boolean; isDuplicate: boolean }>;
   onDeleteStudent: (studentId: number) => Promise<void>;
   onNavigate: (screen: AppScreen, params?: { studentId?: number }) => void;
 }
@@ -129,7 +132,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     const res = await onAddStudent(trimmed, currentClass.id, currentSection.id);
     if (res.isDuplicate) {
       setDuplicateAlert(
-        `الطالب "${trimmed}" موجود مسبقاً في ${currentClass.className} — شعبة ${currentSection.sectionName} (تم منع التكرار).`
+        `الطالب "${trimmed}" موجود مسبقاً في ${currentClass.className} (تم منع التكرار على مستوى الصف بالكامل).`
       );
     } else {
       setNewStudentName('');
@@ -312,8 +315,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       type="button"
                       onClick={async () => {
                         if (editingName.trim()) {
-                          await onUpdateStudentName(student.id, editingName);
+                          const res = await onUpdateStudentName(
+                            student.id,
+                            editingName
+                          );
+                          if (res.isDuplicate) {
+                            setDuplicateAlert(
+                              `لا يمكن تعديل الاسم إلى "${editingName.trim()}" لأنه موجود مسبقاً لطالب آخر في نفس الصف.`
+                            );
+                            return;
+                          }
                         }
+                        setDuplicateAlert(null);
                         setEditingId(null);
                       }}
                       className="min-h-[42px] px-3.5 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1"
@@ -372,11 +385,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       <button
                         type="button"
                         onClick={async () => {
-                          await onTransferStudent(
+                          const res = await onTransferStudent(
                             student.id,
                             targetClassId,
                             targetSectionId
                           );
+                          if (res.isDuplicate) {
+                            setDuplicateAlert(
+                              `لا يمكن نقل الطالب "${student.studentName}" إلى الصف المختار لوجود طالب بنفس الاسم في ذلك الصف.`
+                            );
+                            return;
+                          }
+                          setDuplicateAlert(null);
                           setTransferringId(null);
                         }}
                         className="min-h-[36px] px-3.5 bg-emerald-600 text-white rounded-lg text-xs font-bold"

@@ -28,18 +28,36 @@ class MainActivity : ComponentActivity() {
         val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
         val repository = TrackerRepository(dbHelper)
 
-        // Ensure daily automatic local backup on first launch of the day & schedule background WorkManager job
-        ExcelAndBackupService.ensureDailyAutoBackup(applicationContext, dbHelper)
-        DailyBackupWorker.scheduleDailyBackup(applicationContext)
-
         setContent {
             StudentTrackerRtlTheme {
                 StudentTrackerMainApp(
                     dbHelper = dbHelper,
-                    repository = repository
+                    repository = repository,
+                    onExitApp = {
+                        val db = AppDatabaseHelper.getInstance(applicationContext)
+                        ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, db)
+                        finish()
+                    }
                 )
             }
         }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Create automatic backup only when the Activity is actually finishing (not on configuration change or temporary background switch)
+        if (isFinishing && !isChangingConfigurations) {
+            val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
+            ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, dbHelper)
+        }
+    }
+
+    override fun onDestroy() {
+        if (isFinishing && !isChangingConfigurations) {
+            val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
+            ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, dbHelper)
+        }
+        super.onDestroy()
     }
 }
 
@@ -47,7 +65,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun StudentTrackerMainApp(
     dbHelper: AppDatabaseHelper,
-    repository: TrackerRepository
+    repository: TrackerRepository,
+    onExitApp: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -91,6 +110,14 @@ fun StudentTrackerMainApp(
         }
     }
 
+    LaunchedEffect(Unit) {
+        val migrationWarn = AppDatabaseHelper.lastMigrationDuplicateWarning
+        if (!migrationWarn.isNullOrBlank()) {
+            snackbarHostState.showSnackbar(migrationWarn, duration = SnackbarDuration.Long)
+            AppDatabaseHelper.lastMigrationDuplicateWarning = null
+        }
+    }
+
     fun guardedAction(action: () -> Unit) {
         if (currentScreen == AppScreen.DAILY_TRACKING && isDailyDirty) {
             pendingNavigation = action
@@ -99,9 +126,13 @@ fun StudentTrackerMainApp(
         }
     }
 
-    BackHandler(enabled = currentScreen != AppScreen.DASHBOARD) {
-        guardedAction {
-            currentScreen = AppScreen.DASHBOARD
+    BackHandler(enabled = true) {
+        if (currentScreen != AppScreen.DASHBOARD) {
+            guardedAction {
+                currentScreen = AppScreen.DASHBOARD
+            }
+        } else {
+            onExitApp()
         }
     }
 

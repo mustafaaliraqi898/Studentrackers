@@ -6,8 +6,17 @@ const IDB_KEY = 'primary_sqlite_binary';
 
 let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbInstance: Database | null = null;
+let lastMigrationWarning: string | null = null;
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
+
+export function getLastMigrationWarning(): string | null {
+  return lastMigrationWarning;
+}
+
+export function clearLastMigrationWarning(): void {
+  lastMigrationWarning = null;
+}
 
 export const SQL_SCHEMA_DDL = `
 PRAGMA foreign_keys = ON;
@@ -42,7 +51,7 @@ CREATE TABLE IF NOT EXISTS Students (
   CreatedDate TEXT NOT NULL,
   FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
   FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
-  UNIQUE(StudentName, ClassID, SectionID)
+  UNIQUE(StudentName, ClassID)
 );
 
 CREATE TABLE IF NOT EXISTS DailyRecords (
@@ -217,6 +226,64 @@ function runMigrations(db: Database): void {
         'Added IsSaved, CreatedDate, ModifiedDate to DailyRecords, TestValue to DailyTests, and idx_students_name index',
       ]
     );
+  }
+
+  if (currentVer < 4) {
+    try {
+      // Check if existing data has duplicate student names in the same ClassID across different sections
+      const dupCheck = db.exec(`
+        SELECT StudentName, ClassID, COUNT(*) as cnt
+        FROM Students
+        GROUP BY StudentName, ClassID
+        HAVING cnt > 1;
+      `);
+      if (dupCheck.length > 0 && dupCheck[0].values.length > 0) {
+        const dupNames = dupCheck[0].values.map((r) => String(r[0])).join('، ');
+        lastMigrationWarning = `تنبيه Migration: وُجدت أسماء مكررة سابقة في نفس الصف (${dupNames})؛ تم الحفاظ على جميع الطلاب الحاليين بأمان وتطبيق منع التكرار على الإضافات والتعديلات.`;
+      } else {
+        db.run('PRAGMA foreign_keys = OFF;');
+        db.run('BEGIN TRANSACTION;');
+        try {
+          db.run(`
+            CREATE TABLE IF NOT EXISTS Students_v4 (
+              ID INTEGER PRIMARY KEY AUTOINCREMENT,
+              StudentName TEXT NOT NULL,
+              ClassID INTEGER NOT NULL,
+              SectionID INTEGER NOT NULL,
+              IsActive INTEGER NOT NULL DEFAULT 1,
+              CreatedDate TEXT NOT NULL,
+              FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+              FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+              UNIQUE(StudentName, ClassID)
+            );
+          `);
+          db.run(`
+            INSERT INTO Students_v4 (ID, StudentName, ClassID, SectionID, IsActive, CreatedDate)
+            SELECT ID, StudentName, ClassID, SectionID, IsActive, CreatedDate FROM Students;
+          `);
+          db.run('DROP TABLE Students;');
+          db.run('ALTER TABLE Students_v4 RENAME TO Students;');
+          db.run('CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);');
+          db.run('CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);');
+          db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_students_unique_name_class ON Students(StudentName, ClassID);');
+          db.run('COMMIT;');
+        } catch (err) {
+          db.run('ROLLBACK;');
+          throw err;
+        } finally {
+          db.run('PRAGMA foreign_keys = ON;');
+        }
+      }
+      db.run(
+        `INSERT INTO SchemaMigrations (Version, AppliedAt, Description) VALUES (4, ?, ?);`,
+        [
+          new Date().toISOString(),
+          'Migrated student uniqueness rule from (StudentName, ClassID, SectionID) to class-level (StudentName, ClassID)',
+        ]
+      );
+    } catch (err) {
+      console.warn('Migration v4 warning:', err);
+    }
   }
 }
 

@@ -110,8 +110,6 @@ export default function App() {
         await getDatabase();
         if (!mounted) return;
         await refreshAllFromSQLite();
-        // Automatically check and create daily backup on first app launch each day (max 1 auto backup per day)
-        await BackupService.ensureDailyAutoBackup();
         if (mounted) setIsDbReady(true);
       } catch (err: unknown) {
         console.error('SQLite Initialization error:', err);
@@ -125,8 +123,18 @@ export default function App() {
       }
     }
     bootstrapSQLite();
+
+    // Create automatic local backup when the user closes or exits the application (pagehide / beforeunload), not on startup
+    const handleAppExit = () => {
+      void BackupService.createAutoBackupOnAppExit();
+    };
+    window.addEventListener('pagehide', handleAppExit);
+    window.addEventListener('beforeunload', handleAppExit);
+
     return () => {
       mounted = false;
+      window.removeEventListener('pagehide', handleAppExit);
+      window.removeEventListener('beforeunload', handleAppExit);
     };
   }, []);
 
@@ -442,20 +450,22 @@ export default function App() {
               return { isDuplicate: res.isDuplicate };
             }}
             onUpdateStudentName={async (stId, newName) => {
-              await TrackerRepository.updateStudentName(stId, newName);
+              const res = await TrackerRepository.updateStudentName(stId, newName);
               await refreshAllFromSQLite();
+              return res;
             }}
             onToggleStudentActive={async (stId, isActive) => {
               await TrackerRepository.toggleStudentActiveStatus(stId, isActive);
               await refreshAllFromSQLite();
             }}
             onTransferStudent={async (stId, targetClsId, targetSecId) => {
-              await TrackerRepository.transferStudentSection(
+              const res = await TrackerRepository.transferStudentSection(
                 stId,
                 targetClsId,
                 targetSecId
               );
               await refreshAllFromSQLite();
+              return res;
             }}
             onDeleteStudent={async (stId) => {
               await TrackerRepository.deleteStudent(stId);

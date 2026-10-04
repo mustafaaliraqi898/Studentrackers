@@ -12,10 +12,13 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
+
+        @Volatile
+        var lastMigrationDuplicateWarning: String? = null
 
         fun getInstance(context: Context): AppDatabaseHelper {
             return instance ?: synchronized(this) {
@@ -51,6 +54,98 @@ class AppDatabaseHelper(private val context: Context) :
             }
             runCatching {
                 db.execSQL("CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);")
+            }
+        }
+        if (oldVersion < 4) {
+            migrateStudentsUniqueConstraintToClassLevel(db)
+        }
+    }
+
+    /**
+     * Migrates Students table from UNIQUE(StudentName, ClassID, SectionID) to UNIQUE(StudentName, ClassID)
+     * without deleting any existing students. If existing data already has duplicate names across sections
+     * in the same class, preserves all rows safely and sets a diagnostic notice for the user.
+     */
+    private fun migrateStudentsUniqueConstraintToClassLevel(db: SQLiteDatabase) {
+        runCatching {
+            // Normalize existing student names (trim + collapse multiple spaces) safely where no collision occurs
+            val cursor = db.rawQuery("SELECT ID, StudentName FROM Students", null)
+            val updates = mutableListOf<Pair<Long, String>>()
+            cursor.use {
+                while (it.moveToNext()) {
+                    val id = it.getLong(0)
+                    val raw = it.getString(1) ?: ""
+                    val norm = raw.trim().replace(Regex("\\s+"), " ")
+                    if (norm != raw && norm.isNotEmpty()) {
+                        updates.add(id to norm)
+                    }
+                }
+            }
+            updates.forEach { (id, norm) ->
+                runCatching {
+                    val cv = ContentValues().apply { put("StudentName", norm) }
+                    db.update("Students", cv, "ID = ?", arrayOf(id.toString()))
+                }
+            }
+
+            // Check if there are existing duplicate student names in the same ClassID across different sections
+            val dupCursor = db.rawQuery(
+                """
+                SELECT StudentName, ClassID, COUNT(*) as cnt
+                FROM Students
+                GROUP BY StudentName, ClassID
+                HAVING cnt > 1
+                """.trimIndent(),
+                null
+            )
+            val dupNames = mutableListOf<String>()
+            dupCursor.use {
+                while (it.moveToNext()) {
+                    dupNames.add(it.getString(0))
+                }
+            }
+
+            if (dupNames.isNotEmpty()) {
+                // Keep all existing students untouched as requested; notify user that existing duplicates were preserved
+                lastMigrationDuplicateWarning =
+                    "تنبيه Migration: وُجدت أسماء مكررة سابقة في نفس الصف (${dupNames.joinToString("، ")})؛ تم الحفاظ على جميع الطلاب الحاليين بأمان وتطبيق منع التكرار على الإضافات والتعديلات."
+                return
+            }
+
+            // Rebuild Students table with UNIQUE(StudentName, ClassID) while preserving all IDs and foreign keys
+            db.execSQL("PRAGMA foreign_keys = OFF;")
+            db.beginTransaction()
+            try {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS Students_v4 (
+                        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                        StudentName TEXT NOT NULL,
+                        ClassID INTEGER NOT NULL,
+                        SectionID INTEGER NOT NULL,
+                        IsActive INTEGER NOT NULL DEFAULT 1,
+                        CreatedDate TEXT NOT NULL,
+                        FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+                        FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+                        UNIQUE(StudentName, ClassID)
+                    );
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO Students_v4 (ID, StudentName, ClassID, SectionID, IsActive, CreatedDate)
+                    SELECT ID, StudentName, ClassID, SectionID, IsActive, CreatedDate FROM Students;
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE Students;")
+                db.execSQL("ALTER TABLE Students_v4 RENAME TO Students;")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);")
+                db.execSQL("CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_students_unique_name_class ON Students(StudentName, ClassID);")
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+                db.execSQL("PRAGMA foreign_keys = ON;")
             }
         }
     }
@@ -90,7 +185,7 @@ class AppDatabaseHelper(private val context: Context) :
                 CreatedDate TEXT NOT NULL,
                 FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
                 FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
-                UNIQUE(StudentName, ClassID, SectionID)
+                UNIQUE(StudentName, ClassID)
             );
             """.trimIndent()
         )
