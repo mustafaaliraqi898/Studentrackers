@@ -51,24 +51,46 @@ fun DailyTrackingScreen(
     val students = remember(refreshTick, selectedClassId, selectedSectionId, classes, sections) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
     }
-    var hasSaved by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate) {
+    var hasSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
         mutableStateOf(repository.hasSavedSession(selectedClassId, selectedSectionId, selectedDate))
     }
-    var isEditingSaved by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate) {
+    var isEditingSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
         mutableStateOf(!hasSaved)
     }
 
-    var savedEntriesSnapshot by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, students) {
+    var savedEntriesSnapshot by remember(selectedClassId, selectedSectionId, selectedDate, students) {
         mutableStateOf(repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate))
     }
 
-    var entriesMap by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, students) {
+    var entriesMap by remember(selectedClassId, selectedSectionId, selectedDate, students) {
         val saved = savedEntriesSnapshot
         val initial = mutableMapOf<Long, StudentDailyEntry>()
         students.forEach { st ->
             initial[st.id] = saved[st.id] ?: StudentDailyEntry(studentId = st.id)
         }
         mutableStateOf<Map<Long, StudentDailyEntry>>(initial)
+    }
+
+    // Top notification banner state (replaces previous message immediately & auto-hides, never covers bottom Save button)
+    var topNotificationMessage by remember(selectedClassId, selectedSectionId, selectedDate) {
+        mutableStateOf<String?>(null)
+    }
+    var topNotificationIsWarning by remember(selectedClassId, selectedSectionId, selectedDate) {
+        mutableStateOf(false)
+    }
+    var topNotificationSeq by remember { mutableIntStateOf(0) }
+
+    fun showTopNotification(msg: String, isWarning: Boolean = false) {
+        topNotificationMessage = msg
+        topNotificationIsWarning = isWarning
+        topNotificationSeq++
+    }
+
+    LaunchedEffect(topNotificationSeq) {
+        if (topNotificationMessage != null) {
+            kotlinx.coroutines.delay(2800L)
+            topNotificationMessage = null
+        }
     }
 
     // Track students whose attendance was explicitly touched by the user in this session
@@ -109,10 +131,16 @@ fun DailyTrackingScreen(
         hasSaved = true
         if (targetStatus == AttendanceStatus.ABSENT) {
             explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
-            onShowMessage("تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)")
+            showTopNotification(
+                msg = "تم تسجيل الغياب للطالب (${student.studentName}) وحفظه في قاعدة البيانات",
+                isWarning = true
+            )
         } else {
             explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + student.id
-            onShowMessage("تم تسجيل الطالب (${student.studentName}) حاضراً وحفظ السجل فوراً (درجة حضور اليوم = 19)")
+            showTopNotification(
+                msg = "تم تسجيل الحضور للطالب (${student.studentName}) وحفظه في قاعدة البيانات (19/19)",
+                isWarning = false
+            )
         }
         onDataChanged()
     }
@@ -152,10 +180,61 @@ fun DailyTrackingScreen(
     val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Top Notification Banner (appears at the top below screen title, never covers bottom save button)
+        if (topNotificationMessage != null) {
+            Surface(
+                color = if (topNotificationIsWarning) Red50 else Emerald50,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, if (topNotificationIsWarning) Red600 else Emerald600),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (topNotificationIsWarning) Icons.Default.Info else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = if (topNotificationIsWarning) Red700 else Emerald700,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = topNotificationMessage!!,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (topNotificationIsWarning) Red700 else Emerald700,
+                            maxLines = 2
+                        )
+                    }
+                    IconButton(
+                        onClick = { topNotificationMessage = null },
+                        modifier = Modifier.size(22.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "إغلاق",
+                            tint = Slate600,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        }
+
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
@@ -285,13 +364,16 @@ fun DailyTrackingScreen(
                                     color = Emerald700
                                 )
                                 Text(
-                                    text = "لإجراء أي تعديل على هذا اليوم اضغط على زر تعديل السجل أو استخدم البحث لتسجيل غياب مباشر",
+                                    text = "الحضور والغياب يُحفظ مباشرة عند الضغط. لتعديل المشاركة أو الدفتر أو الواجب أو السلوك أو الاختبار اضغط على تعديل السجل",
                                     fontSize = 11.sp,
                                     color = Slate700
                                 )
                             }
                             Button(
-                                onClick = { isEditingSaved = true },
+                                onClick = {
+                                    isEditingSaved = true
+                                    showTopNotification("تم تفعيل وضع تعديل التقييمات اليومية")
+                                },
                                 colors = ButtonDefaults.buttonColors(containerColor = Emerald700)
                             ) {
                                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -492,7 +574,7 @@ fun DailyTrackingScreen(
                             }
                         }
 
-                        // Attendance Present / Absent Toggle
+                        // Attendance Present / Absent Toggle (Always enabled on working days & saves immediately to SQLite)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -503,16 +585,8 @@ fun DailyTrackingScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable(enabled = canEdit || searchQuery.trim().isNotEmpty()) {
-                                        if (searchQuery.trim().isNotEmpty()) {
-                                            executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
-                                        } else {
-                                            entriesMap = entriesMap.toMutableMap().apply {
-                                                put(st.id, entry.copy(attendance = AttendanceStatus.PRESENT))
-                                            }
-                                            explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + st.id
-                                            onDirtyChange(true)
-                                        }
+                                    .clickable(enabled = !dayStatus.isNonWorkingDay) {
+                                        executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
                                     }
                             ) {
                                 Row(
@@ -532,25 +606,8 @@ fun DailyTrackingScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable(enabled = canEdit || searchQuery.trim().isNotEmpty()) {
-                                        if (searchQuery.trim().isNotEmpty()) {
-                                            requestMarkAbsentFromSearch(st)
-                                        } else {
-                                            entriesMap = entriesMap.toMutableMap().apply {
-                                                put(
-                                                    st.id,
-                                                    entry.copy(
-                                                        attendance = AttendanceStatus.ABSENT,
-                                                        participation = null,
-                                                        notebook = null,
-                                                        homework = null,
-                                                        behavior = null,
-                                                        dailyTestScore = null
-                                                    )
-                                                )
-                                            }
-                                            onDirtyChange(true)
-                                        }
+                                    .clickable(enabled = !dayStatus.isNonWorkingDay) {
+                                        executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
                                     }
                             ) {
                                 Row(
@@ -708,7 +765,7 @@ fun DailyTrackingScreen(
                             isEditingSaved = false
                             onDirtyChange(false)
                             onDataChanged()
-                            onShowMessage("تم حفظ السجل اليومي (${GradingService.formatDisplayDate(selectedDate)}) بنجاح")
+                            showTopNotification("تم حفظ السجل اليومي (${GradingService.formatDisplayDate(selectedDate)}) بنجاح")
                         },
                         enabled = isEditingSaved,
                         colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
@@ -785,7 +842,7 @@ fun DailyTrackingScreen(
                         showDateDialog = false
                         onSelectDate(tempDateInput)
                     } else {
-                        onShowMessage("يرجى إدخال التاريخ بصيغة YYYY-MM-DD")
+                        showTopNotification("يرجى إدخال التاريخ بصيغة YYYY-MM-DD", isWarning = true)
                     }
                 }) {
                     Text("انتقال للتاريخ")

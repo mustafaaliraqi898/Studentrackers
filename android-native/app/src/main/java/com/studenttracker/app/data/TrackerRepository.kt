@@ -535,18 +535,23 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     ): Map<Long, StudentDailyEntry> {
         val existingSaved = getSessionEntries(classId, sectionId, recordDate)
         val sectionStudents = getStudents(classId, sectionId, includeInactive = false)
-        val merged = mutableMapOf<Long, StudentDailyEntry>()
+        val dbEntriesToSave = mutableMapOf<Long, StudentDailyEntry>()
+        val updatedDraftEntries = mutableMapOf<Long, StudentDailyEntry>()
 
         for (st in sectionStudents) {
-            val baseEntry = currentDraftEntries?.get(st.id)
-                ?: existingSaved[st.id]
+            val savedEntry = existingSaved[st.id]
                 ?: StudentDailyEntry(studentId = st.id, attendance = AttendanceStatus.PRESENT)
-            merged[st.id] = baseEntry
+            dbEntriesToSave[st.id] = savedEntry
+
+            val draftEntry = currentDraftEntries?.get(st.id) ?: savedEntry
+            updatedDraftEntries[st.id] = draftEntry
         }
 
-        val currentStudentEntry = merged[studentId] ?: StudentDailyEntry(studentId = studentId)
-        merged[studentId] = if (targetStatus == AttendanceStatus.ABSENT) {
-            StudentDailyEntry(
+        val currentSavedStudent = dbEntriesToSave[studentId] ?: StudentDailyEntry(studentId = studentId)
+        val currentDraftStudent = updatedDraftEntries[studentId] ?: StudentDailyEntry(studentId = studentId)
+
+        if (targetStatus == AttendanceStatus.ABSENT) {
+            val absentEntry = StudentDailyEntry(
                 studentId = studentId,
                 attendance = AttendanceStatus.ABSENT,
                 participation = null,
@@ -555,17 +560,20 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                 behavior = null,
                 dailyTestScore = null
             )
+            dbEntriesToSave[studentId] = absentEntry
+            updatedDraftEntries[studentId] = absentEntry
         } else {
-            currentStudentEntry.copy(attendance = AttendanceStatus.PRESENT)
+            dbEntriesToSave[studentId] = currentSavedStudent.copy(attendance = AttendanceStatus.PRESENT)
+            updatedDraftEntries[studentId] = currentDraftStudent.copy(attendance = AttendanceStatus.PRESENT)
         }
 
         saveDailySession(
             classId = classId,
             sectionId = sectionId,
             recordDate = recordDate,
-            entries = merged
+            entries = dbEntriesToSave
         )
-        return merged
+        return updatedDraftEntries
     }
 
     fun markStudentAbsentImmediately(

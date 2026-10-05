@@ -96,11 +96,24 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
   const [draftQuizStrings, setDraftQuizStrings] = useState<Record<number, string>>({});
   const [liveGrades, setLiveGrades] = useState<Record<number, StudentCalculatedGrade>>({});
   const [saveBannerMessage, setSaveBannerMessage] = useState<string | null>(null);
+  const [saveBannerIsWarning, setSaveBannerIsWarning] = useState<boolean>(false);
   const [savedDatesSet, setSavedDatesSet] = useState<Set<string>>(new Set());
   const [searchText, setSearchText] = useState<string>('');
   const [showAbsentOnly, setShowAbsentOnly] = useState<boolean>(false);
   const [explicitlyMarkedPresentIds, setExplicitlyMarkedPresentIds] = useState<Set<number>>(new Set());
   const [pendingConfirmAbsentStudent, setPendingConfirmAbsentStudent] = useState<StudentEntity | null>(null);
+  const bannerTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showTopBanner = (msg: string, isWarning = false) => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+    }
+    setSaveBannerMessage(msg);
+    setSaveBannerIsWarning(isWarning);
+    bannerTimerRef.current = setTimeout(() => {
+      setSaveBannerMessage(null);
+    }, 2800);
+  };
 
   const dayStatus = checkDateHolidayStatus(selectedDate, holidays);
 
@@ -208,12 +221,10 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     setIsEditingSaved(false);
     setIsDirty(false);
     setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
-    setSaveBannerMessage(
-      wasSaved ? 'تم حفظ التعديلات وإعادة حساب الدرجات بنجاح.' : 'تم حفظ السجل بنجاح.'
+    showTopBanner(
+      wasSaved ? 'تم حفظ التعديلات وإعادة حساب الدرجات بنجاح' : 'تم حفظ السجل اليومي بنجاح',
+      false
     );
-    setTimeout(() => {
-      setSaveBannerMessage(null);
-    }, 4000);
   };
 
   const executeImmediateAttendanceStatus = async (
@@ -222,9 +233,12 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
   ) => {
     if (!currentClass || !currentSection || dayStatus.isNonWorkingDay) return;
 
-    const currentEntry =
+    const currentDraftStudent =
       draftEntries[student.id] || createDefaultStudentEntry(student.id);
-    const updatedStudentEntry: StudentDailyEntry =
+    const currentSavedStudent =
+      savedEntriesMap[student.id] || createDefaultStudentEntry(student.id);
+
+    const updatedDraftStudent: StudentDailyEntry =
       targetStatus === 'absent'
         ? {
             studentId: student.id,
@@ -236,18 +250,41 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
             dailyTestScore: null,
           }
         : {
-            ...currentEntry,
+            ...currentDraftStudent,
+            studentId: student.id,
+            attendance: 'present',
+          };
+
+    const updatedSavedStudent: StudentDailyEntry =
+      targetStatus === 'absent'
+        ? {
+            studentId: student.id,
+            attendance: 'absent',
+            participation: null,
+            notebook: null,
+            homework: null,
+            behavior: null,
+            dailyTestScore: null,
+          }
+        : {
+            ...currentSavedStudent,
             studentId: student.id,
             attendance: 'present',
           };
 
     const nextDraft: Record<number, StudentDailyEntry> = { ...draftEntries };
+    const nextDbEntries: Record<number, StudentDailyEntry> = { ...savedEntriesMap };
+
     for (const st of sectionStudents) {
       if (!nextDraft[st.id]) {
         nextDraft[st.id] = createDefaultStudentEntry(st.id);
       }
+      if (!nextDbEntries[st.id]) {
+        nextDbEntries[st.id] = createDefaultStudentEntry(st.id);
+      }
     }
-    nextDraft[student.id] = updatedStudentEntry;
+    nextDraft[student.id] = updatedDraftStudent;
+    nextDbEntries[student.id] = updatedSavedStudent;
 
     setDraftEntries(nextDraft);
     if (targetStatus === 'absent') {
@@ -258,9 +295,9 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
       currentClass.id,
       currentSection.id,
       selectedDate,
-      nextDraft
+      nextDbEntries
     );
-    setSavedEntriesMap(nextDraft);
+    setSavedEntriesMap(nextDbEntries);
     setIsSavedRecord(true);
     setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
     if (targetStatus === 'absent') {
@@ -274,14 +311,12 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     }
     await onSaveComplete();
 
-    setSaveBannerMessage(
+    showTopBanner(
       targetStatus === 'absent'
-        ? `تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)`
-        : `تم تسجيل الطالب (${student.studentName}) حاضراً وحفظ السجل فوراً (درجة حضور اليوم = 19)`
+        ? `تم تسجيل الغياب للطالب (${student.studentName}) وحفظه في قاعدة البيانات`
+        : `تم تسجيل الحضور للطالب (${student.studentName}) وحفظه في قاعدة البيانات (19/19)`,
+      targetStatus === 'absent'
     );
-    setTimeout(() => {
-      setSaveBannerMessage(null);
-    }, 4000);
   };
 
   const executeImmediateAbsent = async (student: StudentEntity) => {
@@ -313,39 +348,15 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     dayStatus.isNonWorkingDay || (isSavedRecord && !isEditingSaved);
 
   const updateAttendance = (studentId: number, status: AttendanceStatus) => {
-    if (searchText.trim() !== '') {
-      const st = sectionStudents.find((s) => s.id === studentId);
-      if (st) {
-        if (status === 'absent') {
-          void handleQuickAbsentFromSearch(st);
-        } else {
-          void executeImmediateAttendanceStatus(st, 'present');
-        }
-        return;
-      }
+    if (dayStatus.isNonWorkingDay) return;
+    const st = sectionStudents.find((s) => s.id === studentId);
+    if (!st) return;
+
+    if (searchText.trim() !== '' && status === 'absent') {
+      void handleQuickAbsentFromSearch(st);
+      return;
     }
-    if (isLocked) return;
-    if (status === 'present') {
-      setExplicitlyMarkedPresentIds((prev) => new Set([...prev, studentId]));
-    }
-    setDraftEntries((prev) => ({
-      ...prev,
-      [studentId]: {
-        ...(prev[studentId] || createDefaultStudentEntry(studentId)),
-        attendance: status,
-        ...(status === 'absent'
-          ? {
-              participation: null,
-              notebook: null,
-              homework: null,
-              behavior: null,
-              dailyTestScore: null,
-            }
-          : {}),
-      },
-    }));
-    setIsDirty(true);
-    setSaveBannerMessage(null);
+    void executeImmediateAttendanceStatus(st, status);
   };
 
   const updateRating = (
@@ -536,7 +547,10 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
               {isSavedRecord && isLocked && (
                 <button
                   type="button"
-                  onClick={() => setIsEditingSaved(true)}
+                  onClick={() => {
+                    setIsEditingSaved(true);
+                    showTopBanner('تم تفعيل وضع تعديل التقييمات اليومية', false);
+                  }}
                   className="min-h-[40px] px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5"
                 >
                   <Edit3 className="w-3.5 h-3.5" />
@@ -548,17 +562,21 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
         )}
       </section>
 
-      {/* Save Confirmation Banner */}
+      {/* Compact Top Notification Banner (below selection bar, never covers bottom save button) */}
       {saveBannerMessage && (
         <div
           role="status"
-          className="bg-emerald-600 text-white rounded-2xl p-4 shadow-md flex items-center justify-between gap-3"
+          className={`rounded-xl px-3.5 py-2.5 border flex items-center justify-between gap-2 text-xs font-extrabold transition-all ${
+            saveBannerIsWarning
+              ? 'bg-rose-50 border-rose-300 text-rose-800'
+              : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+          }`}
         >
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span className="text-sm font-extrabold">{saveBannerMessage}</span>
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{saveBannerMessage}</span>
           </div>
-          <span className="text-xs text-emerald-100 font-mono-num">
+          <span className="text-[11px] opacity-80 font-mono-num shrink-0">
             {formatDisplayDate(selectedDate)}
           </span>
         </div>
@@ -773,7 +791,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Attendance Buttons */}
+                  {/* Attendance Buttons (Always enabled on working days & saved immediately to SQLite) */}
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-500 ml-1">
                       الحضور (19):
@@ -781,13 +799,13 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                     <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/70 w-full sm:w-auto min-w-[190px]">
                       <button
                         type="button"
-                        disabled={isLocked && searchText.trim() === ''}
+                        disabled={dayStatus.isNonWorkingDay}
                         onClick={() => updateAttendance(student.id, 'present')}
                         className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                           isPresent
                             ? 'bg-emerald-600 text-white shadow-xs'
                             : 'text-slate-600 hover:text-slate-900'
-                        } ${isLocked && searchText.trim() === '' ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
+                        } active:scale-[0.98]`}
                       >
                         <UserCheck className="w-4 h-4" />
                         <span>حاضر</span>
@@ -795,13 +813,13 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
 
                       <button
                         type="button"
-                        disabled={isLocked && searchText.trim() === ''}
+                        disabled={dayStatus.isNonWorkingDay}
                         onClick={() => updateAttendance(student.id, 'absent')}
                         className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                           !isPresent
                             ? 'bg-rose-600 text-white shadow-xs'
                             : 'text-slate-600 hover:text-slate-900'
-                        } ${isLocked && searchText.trim() === '' ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
+                        } active:scale-[0.98]`}
                       >
                         <UserX className="w-4 h-4" />
                         <span>غائب</span>
