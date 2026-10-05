@@ -31,6 +31,44 @@ object GradingService {
         }
     }
 
+    fun formatAbsenceDaysLabel(days: Int): String {
+        return if (days in 3..10) "$days أيام" else "$days يوم"
+    }
+
+    /**
+     * Counts how many times each student received an explicit 0.0 ("صفر") in Behavior
+     * from actual saved Evaluations records (excluding weekends and holidays).
+     * Does NOT count 1.0 ("كامل"), 0.5 ("نصف"), or null (unrecorded) as zero.
+     */
+    fun getBehaviorZeroCounts(
+        dbHelper: AppDatabaseHelper,
+        repository: TrackerRepository
+    ): Map<Long, Int> {
+        val holidaysSet = repository.getHolidays().map { it.holidayDate }.toSet()
+        fun isExcludedDate(dateStr: String): Boolean {
+            if (holidaysSet.contains(dateStr)) return true
+            return isWeekendDay(dateStr)
+        }
+
+        val counts = mutableMapOf<Long, Int>()
+        val db = dbHelper.readableDatabase
+        db.rawQuery(
+            "SELECT StudentID, RecordDate, Behavior FROM Evaluations WHERE Behavior IS NOT NULL",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                if (c.isNull(2)) continue
+                val stId = c.getLong(0)
+                val recordDate = c.getString(1) ?: continue
+                val behaviorVal = c.getDouble(2)
+                if (!isExcludedDate(recordDate) && behaviorVal == 0.0) {
+                    counts[stId] = (counts[stId] ?: 0) + 1
+                }
+            }
+        }
+        return counts
+    }
+
     fun formatDisplayDate(isoDate: String): String {
         val parts = isoDate.split("-")
         return if (parts.size == 3) "${parts[2]}/${parts[1]}/${parts[0]}" else isoDate

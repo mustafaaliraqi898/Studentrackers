@@ -56,6 +56,7 @@ export default function App() {
     recordsCount: 0,
     holidaysCount: 0,
   });
+  const [refreshVersion, setRefreshVersion] = useState<number>(0);
 
   // Active Navigation & Selection Context
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('dashboard');
@@ -90,6 +91,7 @@ export default function App() {
     setStudents(stList);
     setHolidays(holList);
     setStats(dbStats);
+    setRefreshVersion((v) => v + 1);
 
     if (clsList.length > 0 && !clsList.some((c) => c.id === selectedClassId)) {
       const firstCls = clsList[0].id;
@@ -522,7 +524,7 @@ export default function App() {
             sections={sections}
             selectedClassId={selectedClassId}
             selectedSectionId={selectedSectionId}
-            recordsVersion={stats.recordsCount + stats.holidaysCount}
+            recordsVersion={refreshVersion}
             onSelectClass={handleSelectClass}
             onSelectSection={handleSelectSection}
           />

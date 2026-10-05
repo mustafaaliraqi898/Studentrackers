@@ -947,6 +947,8 @@ fun StudentProfileScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
+            val behaviorZeroCount = grade.behaviorRatings.count { it.value == 0.0 }
+            val hasFrequentBehaviorZero = behaviorZeroCount >= 6
             Surface(
                 color = Slate900,
                 shape = RoundedCornerShape(16.dp),
@@ -961,7 +963,7 @@ fun StudentProfileScreen(
                         Column {
                             Text(
                                 text = grade.studentName,
-                                color = Color.White,
+                                color = if (hasFrequentBehaviorZero) Red600 else Color.White,
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold
                             )
@@ -1231,7 +1233,7 @@ fun ReportsScreen(
 }
 
 // ============================================================================
-// ABSENCE TRACKING SCREEN ("متابعة الغياب")
+// ABSENCE TRACKING SCREEN ("عدد أيام الغياب")
 // ============================================================================
 @Composable
 fun AbsenceTrackingScreen(
@@ -1245,499 +1247,103 @@ fun AbsenceTrackingScreen(
     onSelectClass: (Long) -> Unit,
     onSelectSection: (Long) -> Unit
 ) {
-    var filterClassId by remember(selectedClassId) { mutableStateOf<Long?>(selectedClassId) }
-    var filterSectionId by remember(selectedSectionId) { mutableStateOf<Long?>(selectedSectionId) }
-    var filterMonth by remember { mutableStateOf("2026-10") }
-    var showAbsentOnly by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedStudentDetails by remember { mutableStateOf<StudentAbsenceSummary?>(null) }
-
-    val rawSummaries = remember(refreshTick, filterClassId, filterSectionId, filterMonth, classes, sections) {
+    val summaries = remember(refreshTick, classes, sections) {
         GradingService.calculateAbsenceSummaries(
             dbHelper = dbHelper,
             repository = repository,
-            classId = filterClassId,
-            sectionId = filterSectionId,
-            monthPrefix = filterMonth
+            classId = null,
+            sectionId = null,
+            monthPrefix = "ALL"
         )
-    }
-
-    val filteredSummaries = remember(rawSummaries, showAbsentOnly, searchQuery) {
-        val q = TrackerRepository.normalizeStudentName(searchQuery)
-        val qKey = if (q.isEmpty()) "" else TrackerRepository.canonicalArabicComparisonKey(q)
-
-        rawSummaries.filter { item ->
-            val matchesAbsentFilter = !showAbsentOnly || item.absentDays > 0
-            val matchesSearch = q.isEmpty() ||
-                item.studentName.contains(q) ||
-                TrackerRepository.canonicalArabicComparisonKey(item.studentName).contains(qKey)
-            matchesAbsentFilter && matchesSearch
-        }
-    }
-
-    val absentStudentsCount = remember(rawSummaries) {
-        rawSummaries.count { it.absentDays > 0 }
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item {
             Surface(
-                color = Color.White,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Slate200),
+                color = Slate900,
+                shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "متابعة الغياب (حساب ديناميكي لأيام الدوام الفعلية)",
+                        text = "اسم الطالب",
+                        color = Color.White,
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 15.sp,
-                        color = Slate900
+                        fontSize = 14.sp
                     )
                     Text(
-                        text = "يُستبعد يومي الجمعة والسبت والعطل المسجلة تلقائياً. مرتب افتراضياً من الأكثر غياباً إلى الأقل غياباً.",
-                        fontSize = 11.sp,
-                        color = Slate600
+                        text = "عدد أيام الغياب",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 14.sp
                     )
+                }
+            }
+        }
 
-                    // 1. Class Filter
-                    Text("الصف الدراسي:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate700)
+        if (summaries.isEmpty()) {
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "لا يوجد طلاب مسجلون حالياً",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate600,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        } else {
+            items(summaries, key = { it.studentId }) { item ->
+                Surface(
+                    color = Color.White,
+                    border = BorderStroke(0.5.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Surface(
-                            color = if (filterClassId == null) Slate900 else Slate100,
-                            contentColor = if (filterClassId == null) Color.White else Slate800,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.clickable {
-                                filterClassId = null
-                                filterSectionId = null
-                            }
-                        ) {
-                            Text(
-                                text = "جميع الصفوف",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                            )
-                        }
-                        classes.forEach { cls ->
-                            val isSel = filterClassId == cls.id
-                            Surface(
-                                color = if (isSel) Slate900 else Slate100,
-                                contentColor = if (isSel) Color.White else Slate800,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable {
-                                    filterClassId = cls.id
-                                    filterSectionId = null
-                                    onSelectClass(cls.id)
-                                }
-                            ) {
-                                Text(
-                                    text = cls.className,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // 2. Section Filter
-                    if (filterClassId != null) {
-                        val classSections = sections.filter { it.classId == filterClassId }
-                        Text("الشعبة:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate700)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Surface(
-                                color = if (filterSectionId == null) Teal700 else Slate100,
-                                contentColor = if (filterSectionId == null) Color.White else Slate800,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { filterSectionId = null }
-                            ) {
-                                Text(
-                                    text = "جميع الشعب",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                )
-                            }
-                            classSections.forEach { sec ->
-                                val isSecSel = filterSectionId == sec.id
-                                Surface(
-                                    color = if (isSecSel) Teal700 else Slate100,
-                                    contentColor = if (isSecSel) Color.White else Slate800,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable {
-                                        filterSectionId = sec.id
-                                        onSelectSection(sec.id)
-                                    }
-                                ) {
-                                    Text(
-                                        text = "شعبة ${sec.sectionName}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 3. Period / Month Filter
-                    Text("الفترة الزمنية / الشهر:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate700)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            "2026-10" to "تشرين الأول (10 / 2026)",
-                            "2026-11" to "تشرين الثاني (11 / 2026)",
-                            "ALL" to "كامل الفترة المسجلة"
-                        ).forEach { (monthKey, monthLabel) ->
-                            val isSel = filterMonth == monthKey
-                            Surface(
-                                color = if (isSel) Slate900 else Slate100,
-                                contentColor = if (isSel) Color.White else Slate800,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable { filterMonth = monthKey }
-                            ) {
-                                Text(
-                                    text = monthLabel,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // 4. Search Bar & "الغائبون فقط" Toggle
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        placeholder = { Text("ابحث باسم الطالب ضمن الفلاتر المحددة...") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث", tint = Teal700) },
-                        trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "مسح")
-                                }
-                            }
-                        },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "النتائج المطابقة: ${filteredSummaries.size} طالب",
-                            fontSize = 12.sp,
+                            text = item.studentName,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Slate700
+                            fontSize = 15.sp,
+                            color = Slate900,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
-
-                        Surface(
-                            color = if (showAbsentOnly) Red600 else Slate100,
-                            contentColor = if (showAbsentOnly) Color.White else Slate800,
-                            shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, if (showAbsentOnly) Red600 else Slate200),
-                            modifier = Modifier.clickable { showAbsentOnly = !showAbsentOnly }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PersonOff,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "الغائبون فقط ($absentStudentsCount)",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.ExtraBold
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (filteredSummaries.isEmpty()) {
-            item {
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, Slate200),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                        Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = if (showAbsentOnly) "لا يوجد طلاب غائبون ضمن الفلاتر المحددة" else "لا توجد نتائج مطابقة للبحث",
+                            text = GradingService.formatAbsenceDaysLabel(item.absentDays),
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 14.sp,
-                            color = Slate800
+                            color = if (item.absentDays > 0) Red700 else Slate700
                         )
-                        Text(
-                            text = "جرب تغيير فلتر الصف أو الشعبة أو إلغاء تفعيل 'الغائبون فقط'",
-                            fontSize = 12.sp,
-                            color = Slate500
-                        )
-                    }
-                }
-            }
-        } else {
-            items(filteredSummaries, key = { it.studentId }) { item ->
-                val hasAbsences = item.absentDays > 0
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, if (hasAbsences) Red600 else Slate200),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { selectedStudentDetails = item }
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.studentName,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp,
-                                    color = Slate900,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${item.className} — شعبة ${item.sectionName}",
-                                    fontSize = 12.sp,
-                                    color = Slate600
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(8.dp))
-
-                            Surface(
-                                color = if (hasAbsences) Red50 else Emerald50,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, if (hasAbsences) Red600 else Emerald600)
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Text(
-                                        text = "الغياب: ${item.absentDays}",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 13.sp,
-                                        color = if (hasAbsences) Red700 else Emerald700
-                                    )
-                                    Text(
-                                        text = "من ${item.totalWorkingDays} يوم دوام",
-                                        fontSize = 10.sp,
-                                        color = Slate600
-                                    )
-                                }
-                            }
-                        }
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Slate50, RoundedCornerShape(10.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "الحضور: ${item.presentDays} يوم",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald700
-                            )
-                            Text(
-                                text = "نسبة الحضور: ${GradingService.formatScore(item.attendancePercentage)}%",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate800
-                            )
-                            Text(
-                                text = if (item.lastAbsentDate != null) {
-                                    "آخر غياب: ${GradingService.formatDisplayDate(item.lastAbsentDate)}"
-                                } else {
-                                    "آخر غياب: لا يوجد"
-                                },
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (hasAbsences) Red700 else Slate500
-                            )
-                        }
                     }
                 }
             }
         }
-    }
-
-    // Student Absence Details Dialog
-    if (selectedStudentDetails != null) {
-        // Re-lookup latest summary in case data refreshed
-        val currentSummary = rawSummaries.find { it.studentId == selectedStudentDetails!!.studentId }
-            ?: selectedStudentDetails!!
-
-        AlertDialog(
-            onDismissRequest = { selectedStudentDetails = null },
-            title = {
-                Column {
-                    Text(
-                        text = currentSummary.studentName,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 17.sp,
-                        color = Slate900
-                    )
-                    Text(
-                        text = "${currentSummary.className} / شعبة ${currentSummary.sectionName}",
-                        fontSize = 12.sp,
-                        color = Slate600
-                    )
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(
-                        color = Slate50,
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, Slate200),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "إجمالي أيام الدوام: ${currentSummary.totalWorkingDays}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Slate800
-                            )
-                            Text(
-                                text = "أيام الحضور: ${currentSummary.presentDays}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald700
-                            )
-                            Text(
-                                text = "أيام الغياب: ${currentSummary.absentDays}",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (currentSummary.absentDays > 0) Red700 else Slate700
-                            )
-                            Text(
-                                text = "نسبة الحضور: ${GradingService.formatScore(currentSummary.attendancePercentage)}%",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Teal700
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "قائمة أيام الغياب (من الأحدث إلى الأقدم):",
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.sp,
-                        color = Slate900
-                    )
-
-                    if (currentSummary.absentDatesNewestFirst.isEmpty()) {
-                        Surface(
-                            color = Emerald50,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "لا يوجد أي يوم غياب مسجل لهذا الطالب في الفترة المحددة.",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Emerald700,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                    } else {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            currentSummary.absentDatesNewestFirst.forEach { dateStr ->
-                                Surface(
-                                    color = Red50,
-                                    shape = RoundedCornerShape(8.dp),
-                                    border = BorderStroke(1.dp, Red100),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${GradingService.formatDisplayDate(dateStr)} — ${GradingService.getArabicDayName(dateStr)}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Slate900
-                                        )
-                                        Text(
-                                            text = "الحالة: غائب",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Red700
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = { selectedStudentDetails = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = Slate900)
-                ) {
-                    Text("إغلاق", fontWeight = FontWeight.Bold)
-                }
-            }
-        )
     }
 }
 

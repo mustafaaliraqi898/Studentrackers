@@ -129,7 +129,13 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             <p className="text-xs text-slate-500 font-medium">
               الصف: {grade.className} · الشعبة: {grade.sectionName}
             </p>
-            <h2 className="text-xl font-extrabold text-slate-900 mt-0.5">
+            <h2
+              className={`text-xl font-extrabold mt-0.5 ${
+                grade.behaviorRatings.filter((r) => r.value === 0).length >= 6
+                  ? 'text-rose-600'
+                  : 'text-slate-900'
+              }`}
+            >
               {grade.studentName}
             </h2>
           </div>

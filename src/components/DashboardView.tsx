@@ -270,9 +270,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <UserX className="w-5 h-5" />
             </div>
             <div>
-              <h4 className="text-sm font-extrabold text-slate-900">متابعة الغياب</h4>
+              <h4 className="text-sm font-extrabold text-slate-900">عدد أيام الغياب</h4>
               <p className="text-xs text-slate-500 mt-0.5">
-                حساب وعرض أيام غياب كل طالب ونسبة الحضور وتواريخ الغياب
+                اسم الطالب وعدد أيام غيابه
               </p>
             </div>
           </div>
@@ -435,41 +435,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="divide-y divide-slate-100">
-          {sectionGrades.map((grade, idx) => (
-            <button
-              key={grade.studentId}
-              type="button"
-              onClick={() =>
-                onNavigate('student-profile', { studentId: grade.studentId })
-              }
-              className="w-full min-h-[54px] py-2.5 px-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-right rounded-lg"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <span className="w-6 text-xs font-mono-num text-slate-400 font-semibold">
-                  {idx + 1}.
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-bold text-slate-900 truncate">
-                    {grade.studentName}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5 font-mono-num">
-                    دوام فعلي {grade.presentDays}/{grade.totalWorkingDays} · اختبار{' '}
-                    {formatScore(grade.quizScore)}/5
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-left">
-                  <span className="text-sm font-extrabold text-slate-900 font-mono-num">
-                    {formatScore(grade.totalScore)}
+          {sectionGrades.map((grade, idx) => {
+            const behaviorZeroCount = grade.behaviorRatings.filter(
+              (r) => r.value === 0
+            ).length;
+            const hasFrequentBehaviorZero = behaviorZeroCount >= 6;
+            return (
+              <button
+                key={grade.studentId}
+                type="button"
+                onClick={() =>
+                  onNavigate('student-profile', { studentId: grade.studentId })
+                }
+                className="w-full min-h-[54px] py-2.5 px-2 hover:bg-slate-50 transition-colors flex items-center justify-between text-right rounded-lg"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="w-6 text-xs font-mono-num text-slate-400 font-semibold">
+                    {idx + 1}.
                   </span>
-                  <span className="text-xs text-slate-400 font-mono-num"> / 100</span>
+                  <div className="min-w-0">
+                    <p
+                      className={`text-sm font-bold truncate ${
+                        hasFrequentBehaviorZero
+                          ? 'text-rose-600'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {grade.studentName}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5 font-mono-num">
+                      دوام فعلي {grade.presentDays}/{grade.totalWorkingDays} · اختبار{' '}
+                      {formatScore(grade.quizScore)}/5
+                    </p>
+                  </div>
                 </div>
-                <ChevronLeft className="w-4 h-4 text-slate-400" />
-              </div>
-            </button>
-          ))}
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-left">
+                    <span className="text-sm font-extrabold text-slate-900 font-mono-num">
+                      {formatScore(grade.totalScore)}
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono-num"> / 100</span>
+                  </div>
+                  <ChevronLeft className="w-4 h-4 text-slate-400" />
+                </div>
+              </button>
+            );
+          })}
         </div>
       </section>
     </div>

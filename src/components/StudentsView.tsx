@@ -84,6 +84,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [gradesMap, setGradesMap] = useState<
     Record<number, StudentCalculatedGrade>
   >({});
+  const [behaviorZeroCounts, setBehaviorZeroCounts] = useState<
+    Record<number, number>
+  >({});
 
   const currentClass =
     classes.find((c) => c.id === selectedClassId) || classes[0];
@@ -106,16 +109,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     let active = true;
     async function loadGrades() {
       if (!currentClass || !currentSection) return;
-      const list = await GradingService.calculateGradesForClass(
-        currentClass.id,
-        currentSection.id
-      );
+      const [list, zeroCounts] = await Promise.all([
+        GradingService.calculateGradesForClass(
+          currentClass.id,
+          currentSection.id
+        ),
+        GradingService.getBehaviorZeroCounts(),
+      ]);
       if (!active) return;
       const map: Record<number, StudentCalculatedGrade> = {};
       for (const g of list) {
         map[g.studentId] = g;
       }
       setGradesMap(map);
+      setBehaviorZeroCounts(zeroCounts);
     }
     loadGrades();
     return () => {
@@ -286,6 +293,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         ) : (
           sectionStudents.map((student, idx) => {
             const grade = gradesMap[student.id];
+            const behaviorZeroCount =
+              grade?.behaviorRatings.filter((r) => r.value === 0).length ??
+              behaviorZeroCounts[student.id] ??
+              0;
+            const hasFrequentBehaviorZero = behaviorZeroCount >= 6;
             const isEditing = editingId === student.id;
             const isConfirmingDelete = deletingId === student.id;
             const isTransferring = transferringId === student.id;
@@ -465,7 +477,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 studentId: student.id,
                               })
                             }
-                            className="text-base font-extrabold text-slate-900 hover:text-emerald-700 transition-colors text-right truncate whitespace-nowrap block min-w-0 flex-1"
+                            className={`text-base font-extrabold transition-colors text-right truncate whitespace-nowrap block min-w-0 flex-1 ${
+                              hasFrequentBehaviorZero
+                                ? 'text-rose-600 hover:text-rose-700'
+                                : 'text-slate-900 hover:text-emerald-700'
+                            }`}
                           >
                             {student.studentName}
                           </button>

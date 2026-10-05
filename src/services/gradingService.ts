@@ -24,6 +24,10 @@ export function getRatingLabel(val: RatingValue): string {
   return 'غير مسجل';
 }
 
+export function formatAbsenceDaysLabel(days: number): string {
+  return days >= 3 && days <= 10 ? `${days} أيام` : `${days} يوم`;
+}
+
 export function formatDisplayDate(isoDate: string): string {
   // Converts YYYY-MM-DD to DD/MM/YYYY for clear Arabic display
   const parts = isoDate.split('-');
@@ -320,6 +324,31 @@ export class GradingService {
         totalScore,
       };
     });
+  }
+
+  /**
+   * Counts how many times each student received an explicit 0 ("صفر") in Behavior
+   * from actual saved Evaluations records (excluding weekends and holidays).
+   * Does NOT count 1 ("كامل"), 0.5 ("نصف"), or null (unrecorded) as zero.
+   */
+  static async getBehaviorZeroCounts(): Promise<Record<number, number>> {
+    const raw = await TrackerRepository.getRawStudentHistory(
+      undefined,
+      undefined,
+      'ALL'
+    );
+    const isExcludedDate = (dateStr: string): boolean => {
+      if (raw.holidays.has(dateStr)) return true;
+      return isWeekendDay(dateStr).isWeekend;
+    };
+
+    const counts: Record<number, number> = {};
+    for (const r of raw.evaluationRows) {
+      if (!isExcludedDate(r.date) && r.behavior === 0) {
+        counts[r.studentId] = (counts[r.studentId] || 0) + 1;
+      }
+    }
+    return counts;
   }
 
   /**

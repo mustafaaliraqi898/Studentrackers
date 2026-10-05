@@ -207,8 +207,8 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "متابعة الغياب",
-                        subtitle = "حساب وعرض أيام غياب كل طالب",
+                        title = "عدد أيام الغياب",
+                        subtitle = "اسم الطالب وعدد أيام غيابه",
                         icon = Icons.Default.PersonOff,
                         tint = Red700,
                         onClick = { onNavigate(AppScreen.ABSENCE_TRACKING) }
@@ -631,6 +631,9 @@ fun StudentsScreen(
             sectionId = selectedSectionId
         ).associateBy { it.studentId }
     }
+    val behaviorZeroCounts = remember(refreshTick, students) {
+        GradingService.getBehaviorZeroCounts(dbHelper, repository)
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -727,6 +730,8 @@ fun StudentsScreen(
 
         items(students, key = { it.id }) { st ->
             val grade = gradesMap[st.id]
+            val behaviorZeroCount = behaviorZeroCounts[st.id] ?: 0
+            val hasFrequentBehaviorZero = behaviorZeroCount >= 6
             Surface(
                 color = if (st.isActive) Color.White else Slate100,
                 shape = RoundedCornerShape(12.dp),
@@ -749,7 +754,7 @@ fun StudentsScreen(
                             text = st.studentName,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 15.sp,
-                            color = Slate900,
+                            color = if (hasFrequentBehaviorZero) Red600 else Slate900,
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Ellipsis,
