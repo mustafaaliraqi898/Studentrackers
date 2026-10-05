@@ -207,6 +207,14 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
+                        title = "متابعة الغياب",
+                        subtitle = "حساب وعرض أيام غياب كل طالب",
+                        icon = Icons.Default.PersonOff,
+                        tint = Red700,
+                        onClick = { onNavigate(AppScreen.ABSENCE_TRACKING) }
+                    )
+                    NavActionTile(
+                        modifier = Modifier.weight(1f),
                         title = "Excel والنسخ الاحتياطي",
                         subtitle = "قالب واستيراد وتصدير ونسخ",
                         icon = Icons.Default.Storage,

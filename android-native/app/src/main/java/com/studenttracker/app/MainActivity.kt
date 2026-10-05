@@ -290,6 +290,22 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.ABSENCE_TRACKING -> AbsenceTrackingScreen(
+                    classes = classes,
+                    sections = sections,
+                    selectedClassId = selectedClassId,
+                    selectedSectionId = selectedSectionId,
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onSelectClass = { clsId ->
+                        selectedClassId = clsId
+                        val firstSec = sections.firstOrNull { it.classId == clsId }
+                        if (firstSec != null) selectedSectionId = firstSec.id
+                    },
+                    onSelectSection = { secId -> selectedSectionId = secId }
+                )
+
                 AppScreen.STUDENTS -> StudentsScreen(
                     classes = classes,
                     sections = sections,

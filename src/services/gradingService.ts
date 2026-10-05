@@ -2,6 +2,7 @@ import {
   AttendanceStatus,
   HolidayEntity,
   RatingValue,
+  StudentAbsenceSummary,
   StudentCalculatedGrade,
   StudentDailyEntry,
 } from '../types';
@@ -318,6 +319,88 @@ export class GradingService {
 
         totalScore,
       };
+    });
+  }
+
+  /**
+   * Dynamically calculates absence and attendance summaries for each student from SQLite Attendance records.
+   * - Excludes Fridays and Saturdays automatically.
+   * - Excludes any date registered in Holidays.
+   * - Does NOT count missing/unrecorded days as absences; only actual recorded 'absent' rows on working days count.
+   * - Sorted by default from most absent (absentDays DESC) to least absent.
+   */
+  static async calculateAbsenceSummaries(
+    classId?: number,
+    sectionId?: number,
+    monthFilter?: string
+  ): Promise<StudentAbsenceSummary[]> {
+    const raw = await TrackerRepository.getRawStudentHistory(
+      classId,
+      sectionId,
+      monthFilter
+    );
+
+    const isExcludedDate = (dateStr: string): boolean => {
+      if (raw.holidays.has(dateStr)) return true;
+      return isWeekendDay(dateStr).isWeekend;
+    };
+
+    const summaries: StudentAbsenceSummary[] = raw.students.map((st) => {
+      const attMap = new Map<string, AttendanceStatus>();
+      for (const r of raw.attendanceRows) {
+        if (r.studentId === st.id && !isExcludedDate(r.date)) {
+          attMap.set(r.date, r.status);
+        }
+      }
+
+      let presentDays = 0;
+      let absentDays = 0;
+      const absentDates: string[] = [];
+
+      for (const [d, status] of attMap.entries()) {
+        if (status === 'present') {
+          presentDays++;
+        } else {
+          absentDays++;
+          absentDates.push(d);
+        }
+      }
+
+      const totalWorkingDays = presentDays + absentDays;
+      const attendancePercentage =
+        totalWorkingDays > 0
+          ? round2((presentDays / totalWorkingDays) * 100)
+          : 100;
+
+      const absentDatesNewestFirst = absentDates.sort((a, b) =>
+        b.localeCompare(a)
+      );
+
+      return {
+        studentId: st.id,
+        studentName: st.studentName,
+        classId: st.classId,
+        className: st.className || '',
+        sectionId: st.sectionId,
+        sectionName: st.sectionName || '',
+        totalWorkingDays,
+        presentDays,
+        absentDays,
+        attendancePercentage,
+        lastAbsentDate:
+          absentDatesNewestFirst.length > 0 ? absentDatesNewestFirst[0] : null,
+        absentDatesNewestFirst,
+      };
+    });
+
+    return summaries.sort((a, b) => {
+      if (b.absentDays !== a.absentDays) {
+        return b.absentDays - a.absentDays;
+      }
+      if (a.attendancePercentage !== b.attendancePercentage) {
+        return a.attendancePercentage - b.attendancePercentage;
+      }
+      return a.studentName.localeCompare(b.studentName, 'ar');
     });
   }
 }

@@ -124,3 +124,19 @@ data class BackupFileEntry(
     val sectionsCount: Int = 0,
     val recordsCount: Int = 0
 )
+
+data class StudentAbsenceSummary(
+    val studentId: Long,
+    val studentName: String,
+    val classId: Long,
+    val className: String,
+    val sectionId: Long,
+    val sectionName: String,
+    val totalWorkingDays: Int,
+    val presentDays: Int,
+    val absentDays: Int,
+    val attendancePercentage: Double,
+    val lastAbsentDate: String?,
+    val absentDatesNewestFirst: List<String>
+)
+

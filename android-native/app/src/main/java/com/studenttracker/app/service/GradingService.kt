@@ -256,4 +256,92 @@ object GradingService {
             )
         }
     }
+
+    /**
+     * Dynamically calculates absence and attendance summaries for each student from SQLite Attendance records.
+     * - Excludes Fridays and Saturdays automatically.
+     * - Excludes any date registered in Holidays.
+     * - Does NOT count missing/unrecorded days as absences; only actual recorded 'absent' rows on working days count.
+     * - Sorted by default from most absent (absentDays DESC) to least absent.
+     */
+    fun calculateAbsenceSummaries(
+        dbHelper: AppDatabaseHelper,
+        repository: TrackerRepository,
+        classId: Long? = null,
+        sectionId: Long? = null,
+        monthPrefix: String? = null // e.g. "2026-10" or "ALL"
+    ): List<StudentAbsenceSummary> {
+        val students = repository.getStudents(classId, sectionId, includeInactive = false)
+        val holidaysSet = repository.getHolidays().map { it.holidayDate }.toSet()
+
+        fun isExcludedDate(dateStr: String): Boolean {
+            if (holidaysSet.contains(dateStr)) return true
+            return isWeekendDay(dateStr)
+        }
+
+        val db = dbHelper.readableDatabase
+        val dateWhere = if (!monthPrefix.isNullOrBlank() && monthPrefix != "ALL") {
+            "WHERE RecordDate LIKE '$monthPrefix%'"
+        } else {
+            ""
+        }
+
+        val attByStudent = mutableMapOf<Long, MutableMap<String, AttendanceStatus>>()
+        db.rawQuery(
+            "SELECT StudentID, RecordDate, Status FROM Attendance $dateWhere ORDER BY RecordDate ASC",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val stId = c.getLong(0)
+                val d = c.getString(1)
+                val st = AttendanceStatus.fromDb(c.getString(2))
+                if (!isExcludedDate(d)) {
+                    attByStudent.getOrPut(stId) { linkedMapOf() }[d] = st
+                }
+            }
+        }
+
+        return students.map { st ->
+            val attMap = attByStudent[st.id] ?: emptyMap()
+            var presentDays = 0
+            var absentDays = 0
+            val absentDates = mutableListOf<String>()
+
+            for ((d, status) in attMap) {
+                if (status == AttendanceStatus.PRESENT) {
+                    presentDays++
+                } else {
+                    absentDays++
+                    absentDates.add(d)
+                }
+            }
+
+            val totalWorkingDays = presentDays + absentDays
+            val attPercent = if (totalWorkingDays > 0) {
+                round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0)
+            } else {
+                100.0
+            }
+            val sortedAbsentNewestFirst = absentDates.sortedDescending()
+
+            StudentAbsenceSummary(
+                studentId = st.id,
+                studentName = st.studentName,
+                classId = st.classId,
+                className = st.className,
+                sectionId = st.sectionId,
+                sectionName = st.sectionName,
+                totalWorkingDays = totalWorkingDays,
+                presentDays = presentDays,
+                absentDays = absentDays,
+                attendancePercentage = attPercent,
+                lastAbsentDate = sortedAbsentNewestFirst.firstOrNull(),
+                absentDatesNewestFirst = sortedAbsentNewestFirst
+            )
+        }.sortedWith(
+            compareByDescending<StudentAbsenceSummary> { it.absentDays }
+                .thenBy { it.attendancePercentage }
+                .thenBy { it.studentName }
+        )
+    }
 }

@@ -146,11 +146,27 @@ export interface ExcelImportResult {
   details: string[];
 }
 
+export interface StudentAbsenceSummary {
+  studentId: number;
+  studentName: string;
+  classId: number;
+  className: string;
+  sectionId: number;
+  sectionName: string;
+  totalWorkingDays: number;
+  presentDays: number;
+  absentDays: number;
+  attendancePercentage: number;
+  lastAbsentDate: string | null;
+  absentDatesNewestFirst: string[];
+}
+
 export type AppScreen =
   | 'dashboard'
   | 'classes-sections'
   | 'students'
   | 'daily-tracking'
+  | 'absence-tracking'
   | 'holidays'
   | 'saved-records'
   | 'student-profile'

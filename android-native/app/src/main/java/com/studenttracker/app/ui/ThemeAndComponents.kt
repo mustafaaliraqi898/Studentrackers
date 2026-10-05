@@ -55,6 +55,7 @@ val Red50 = Color(0xFFFEF2F2)
 enum class AppScreen(val titleAr: String) {
     DASHBOARD("الرئيسية"),
     DAILY_TRACKING("المتابعة اليومية"),
+    ABSENCE_TRACKING("متابعة الغياب"),
     STUDENTS("الطلاب"),
     CLASSES_SECTIONS("الصفوف والشعب"),
     QUICK_SEARCH("البحث السريع"),

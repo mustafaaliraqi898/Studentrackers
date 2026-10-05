@@ -29,6 +29,7 @@ import { DashboardView } from './components/DashboardView';
 import { ClassesSectionsView } from './components/ClassesSectionsView';
 import { StudentsView } from './components/StudentsView';
 import { DailyTrackingView } from './components/DailyTrackingView';
+import { AbsenceTrackingView } from './components/AbsenceTrackingView';
 import { HolidaysView } from './components/HolidaysView';
 import { SavedRecordsView } from './components/SavedRecordsView';
 import { StudentProfileView } from './components/StudentProfileView';
@@ -512,6 +513,18 @@ export default function App() {
             onSaveComplete={refreshAllFromSQLite}
             onNavigate={handleNavigate}
             registerPendingSaveHandler={registerPendingSaveHandler}
+          />
+        )}
+
+        {currentScreen === 'absence-tracking' && (
+          <AbsenceTrackingView
+            classes={classes}
+            sections={sections}
+            selectedClassId={selectedClassId}
+            selectedSectionId={selectedSectionId}
+            recordsVersion={stats.recordsCount + stats.holidaysCount}
+            onSelectClass={handleSelectClass}
+            onSelectSection={handleSelectSection}
           />
         )}
 
