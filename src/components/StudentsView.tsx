@@ -451,13 +451,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex flex-row items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 font-mono-num text-xs font-bold flex items-center justify-center shrink-0">
                         {idx + 1}
                       </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <button
                             type="button"
                             onClick={() =>
@@ -465,12 +465,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 studentId: student.id,
                               })
                             }
-                            className="text-base font-extrabold text-slate-900 hover:text-emerald-700 transition-colors text-right truncate block"
+                            className="text-base font-extrabold text-slate-900 hover:text-emerald-700 transition-colors text-right truncate whitespace-nowrap block min-w-0 flex-1"
                           >
                             {student.studentName}
                           </button>
                           <span
-                            className={`text-[11px] font-bold ${
+                            className={`text-[11px] font-bold shrink-0 whitespace-nowrap ${
                               student.isActive
                                 ? 'text-emerald-700'
                                 : 'text-rose-600'
@@ -479,7 +479,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                             · {student.isActive ? 'فعال' : 'غير فعال'}
                           </span>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-0.5 font-mono-num">
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5 font-mono-num truncate whitespace-nowrap">
                           {grade && (
                             <>
                               <span>
@@ -498,7 +498,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() =>

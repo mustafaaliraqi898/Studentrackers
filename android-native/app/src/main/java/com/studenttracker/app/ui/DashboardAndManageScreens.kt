@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
@@ -725,8 +726,10 @@ fun StudentsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    modifier = Modifier.padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
@@ -738,19 +741,27 @@ fun StudentsScreen(
                             text = st.studentName,
                             fontWeight = FontWeight.ExtraBold,
                             fontSize = 15.sp,
-                            color = Slate900
+                            color = Slate900,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
                         )
                         Text(
                             text = "${st.className} - شعبة ${st.sectionName}" +
                                 if (!st.isActive) " (غير نشط)" else "",
                             fontSize = 12.sp,
-                            color = Slate600
+                            color = Slate600,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         if (grade != null) {
                             Surface(
@@ -764,24 +775,38 @@ fun StudentsScreen(
                                     color = Teal700,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 12.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
                                 )
                             }
                         }
 
-                        IconButton(onClick = { onOpenStudentProfile(st.id) }) {
+                        IconButton(
+                            onClick = { onOpenStudentProfile(st.id) },
+                            modifier = Modifier.size(38.dp)
+                        ) {
                             Icon(Icons.Default.Visibility, contentDescription = "ملف الطالب", tint = Teal700)
                         }
-                        IconButton(onClick = {
-                            editingStudent = st
-                            editingStudentName = st.studentName
-                        }) {
+                        IconButton(
+                            onClick = {
+                                editingStudent = st
+                                editingStudentName = st.studentName
+                            },
+                            modifier = Modifier.size(38.dp)
+                        ) {
                             Icon(Icons.Default.Edit, contentDescription = "تعديل الاسم", tint = Slate600)
                         }
-                        IconButton(onClick = { studentToTransfer = st }) {
+                        IconButton(
+                            onClick = { studentToTransfer = st },
+                            modifier = Modifier.size(38.dp)
+                        ) {
                             Icon(Icons.Default.SwapHoriz, contentDescription = "نقل شعبة", tint = Amber700)
                         }
-                        IconButton(onClick = { studentToDelete = st }) {
+                        IconButton(
+                            onClick = { studentToDelete = st },
+                            modifier = Modifier.size(38.dp)
+                        ) {
                             Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Red600)
                         }
                     }
