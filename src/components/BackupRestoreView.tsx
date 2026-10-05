@@ -7,6 +7,8 @@ import {
   Database,
   Download,
   FileCode2,
+  FolderCheck,
+  FolderOpen,
   HardDriveDownload,
   Plus,
   ShieldCheck,
@@ -33,6 +35,14 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [backupFolderPath, setBackupFolderPath] = useState<string | null>(() =>
+    BackupService.getSavedBackupFolderPath()
+  );
+  const [showFolderPickerModal, setShowFolderPickerModal] = useState(false);
+  const [folderInputPath, setFolderInputPath] = useState(
+    BackupService.getSavedBackupFolderPath() || 'Download/سجل متابعة الطلاب/النسخ الاحتياطية'
+  );
+  const [createBackupAfterFolderConfirm, setCreateBackupAfterFolderConfirm] = useState(false);
 
   // Confirmation modal state for restoring a snapshot or uploaded file
   const [pendingRestoreSnapshot, setPendingRestoreSnapshot] =
@@ -51,7 +61,7 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
     loadSnapshots();
   }, []);
 
-  const handleCreateBackupNow = async () => {
+  const executeCreateBackup = async (targetFolder?: string) => {
     setIsBusy(true);
     setErrorBanner(null);
     setStatusBanner(null);
@@ -63,8 +73,9 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
       );
       setCustomTitle('');
       await loadSnapshots();
+      const folderUsed = targetFolder || backupFolderPath;
       setStatusBanner(
-        `تم إنشاء النسخة الاحتياطية "${snap.fileName || snap.title}" بنجاح. (يتم الاحتفاظ بآخر 7 نسخ محلية تلقائياً)`
+        `تم إنشاء النسخة الاحتياطية "${snap.fileName || snap.title}" بنجاح في المجلد (${folderUsed}). (يتم الاحتفاظ بآخر 7 نسخ محلية تلقائياً)`
       );
     } catch (err: unknown) {
       setErrorBanner(
@@ -73,6 +84,29 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
       setDiagnostics(BackupService.getDiagnosticLogs());
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const handleCreateBackupNow = async () => {
+    const currentFolder = BackupService.getSavedBackupFolderPath();
+    if (!currentFolder) {
+      setCreateBackupAfterFolderConfirm(true);
+      setShowFolderPickerModal(true);
+      return;
+    }
+    await executeCreateBackup(currentFolder);
+  };
+
+  const handleSaveFolderSelection = async () => {
+    const cleaned = folderInputPath.trim() || 'Download/سجل متابعة الطلاب/النسخ الاحتياطية';
+    BackupService.setSavedBackupFolderPath(cleaned);
+    setBackupFolderPath(cleaned);
+    setShowFolderPickerModal(false);
+    if (createBackupAfterFolderConfirm) {
+      setCreateBackupAfterFolderConfirm(false);
+      await executeCreateBackup(cleaned);
+    } else {
+      setStatusBanner(`تم حفظ مجلد النسخ الاحتياطي: ${cleaned}`);
     }
   };
 
@@ -161,6 +195,66 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
           >
             <Plus className="w-4 h-4" />
             <span>نسخ احتياطي الآن</span>
+          </button>
+        </div>
+
+        {/* Selected Backup Folder Status & Change Folder Button */}
+        <div
+          className={`p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+            backupFolderPath
+              ? 'bg-emerald-50/70 border-emerald-200'
+              : 'bg-amber-50/80 border-amber-200'
+          }`}
+        >
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                backupFolderPath
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              {backupFolderPath ? (
+                <FolderCheck className="w-5 h-5" />
+              ) : (
+                <FolderOpen className="w-5 h-5" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <p
+                className={`text-xs font-extrabold ${
+                  backupFolderPath ? 'text-emerald-900' : 'text-amber-900'
+                }`}
+              >
+                {backupFolderPath
+                  ? `مجلد النسخ الاحتياطي الحالي: ${backupFolderPath}`
+                  : 'لم يتم تحديد مكان حفظ النسخ الاحتياطية بعد'}
+              </p>
+              <p className="text-[11px] text-slate-600 mt-0.5">
+                {backupFolderPath
+                  ? 'تُحفظ النسخ اليدوية والتلقائية عند إغلاق التطبيق داخل هذا المجلد (مع الاحتفاظ بآخر 7 نسخ).'
+                  : 'يرجى تحديد مجلد في ذاكرة الهاتف (مثل Download/سجل متابعة الطلاب/النسخ الاحتياطية) لحفظ النسخ واستعادتها منه.'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setCreateBackupAfterFolderConfirm(false);
+              setFolderInputPath(
+                backupFolderPath || 'Download/سجل متابعة الطلاب/النسخ الاحتياطية'
+              );
+              setShowFolderPickerModal(true);
+            }}
+            className="min-h-[38px] px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-2xs"
+          >
+            <FolderOpen className="w-4 h-4 text-teal-700" />
+            <span>
+              {backupFolderPath
+                ? 'تغيير مجلد الحفظ'
+                : 'تحديد مكان حفظ النسخ الاحتياطية'}
+            </span>
           </button>
         </div>
 
@@ -521,6 +615,82 @@ export const BackupRestoreView: React.FC<BackupRestoreViewProps> = ({
                 type="button"
                 disabled={isBusy}
                 onClick={() => setPendingDeleteSnapshot(null)}
+                className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Folder Selection Modal */}
+      {showFolderPickerModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-slate-200 space-y-4"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
+                <FolderOpen className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  تحديد مكان حفظ النسخ الاحتياطية
+                </h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  اختر مجلد حفظ النسخ الاحتياطية في ذاكرة الهاتف (Storage Access Framework). سيتم حفظ الصلاحية واستخدام هذا المجلد تلقائياً دون الحاجة لاختياره في كل مرة.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-extrabold text-slate-800">
+                مسار المجلد المختار:
+              </label>
+              <input
+                type="text"
+                dir="ltr"
+                value={folderInputPath}
+                onChange={(e) => setFolderInputPath(e.target.value)}
+                placeholder="Download/سجل متابعة الطلاب/النسخ الاحتياطية"
+                className="w-full min-h-[42px] px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono-num text-slate-900"
+              />
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {[
+                  'Download/سجل متابعة الطلاب/النسخ الاحتياطية',
+                  'Documents/سجل متابعة الطلاب/النسخ الاحتياطية',
+                  'Download/Backups',
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setFolderInputPath(preset)}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-mono-num"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={handleSaveFolderSelection}
+                className="flex-1 min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition-colors"
+              >
+                {createBackupAfterFolderConfirm
+                  ? 'حفظ المجلد وإنشاء النسخة الآن'
+                  : 'اعتماد وحفظ المجلد'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFolderPickerModal(false);
+                  setCreateBackupAfterFolderConfirm(false);
+                }}
                 className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
               >
                 إلغاء

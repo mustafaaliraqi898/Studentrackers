@@ -1007,8 +1007,11 @@ fun ExcelAndBackupScreen(
 ) {
     val context = LocalContext.current
     var importResult by remember { mutableStateOf<ExcelImportResult?>(null) }
+    var isFolderValid by remember { mutableStateOf(ExcelAndBackupService.isBackupFolderValidAndAccessible(context)) }
+    var folderDisplayPath by remember { mutableStateOf(ExcelAndBackupService.getBackupFolderDisplayPath(context)) }
     var backups by remember { mutableStateOf(ExcelAndBackupService.listBackups(context)) }
     var lastError by remember { mutableStateOf(ExcelAndBackupService.getLastBackupError(context)) }
+    var createBackupAfterFolderPick by remember { mutableStateOf(false) }
 
     // Confirmation modals for Backup Restore and Delete
     var pendingRestoreBackup by remember { mutableStateOf<BackupFileEntry?>(null) }
@@ -1024,6 +1027,39 @@ fun ExcelAndBackupScreen(
 
     var showEmptyStartDialog by remember { mutableStateOf(false) }
     var emptyStartConfirmed by remember { mutableStateOf(false) }
+
+    val selectBackupFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                ExcelAndBackupService.saveBackupFolderUri(context, treeUri)
+                isFolderValid = ExcelAndBackupService.isBackupFolderValidAndAccessible(context)
+                folderDisplayPath = ExcelAndBackupService.getBackupFolderDisplayPath(context)
+                backups = ExcelAndBackupService.listBackups(context)
+
+                if (createBackupAfterFolderPick && isFolderValid) {
+                    createBackupAfterFolderPick = false
+                    val created = ExcelAndBackupService.createLocalBackup(
+                        context,
+                        dbHelper,
+                        isAutoSafety = false,
+                        isAutoDaily = false
+                    )
+                    backups = ExcelAndBackupService.listBackups(context)
+                    onShowMessage("تم تحديد المجلد وإنشاء النسخة الاحتياطية بنجاح (${created.studentsCount} طالب)")
+                } else {
+                    createBackupAfterFolderPick = false
+                    onShowMessage("تم حفظ مجلد النسخ الاحتياطي: ${folderDisplayPath ?: ""}")
+                }
+            }.onFailure { e ->
+                createBackupAfterFolderPick = false
+                onShowMessage(e.message ?: "تعذر حفظ صلاحية المجلد المختار")
+            }
+        } else {
+            createBackupAfterFolderPick = false
+        }
+    }
 
     val exportTemplateLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -1130,6 +1166,67 @@ fun ExcelAndBackupScreen(
                         color = Slate600
                     )
 
+                    // Selected Backup Folder Status & Picker Card
+                    Surface(
+                        color = if (isFolderValid) Emerald50 else Amber50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, if (isFolderValid) Emerald600 else Amber600),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isFolderValid) Icons.Default.Folder else Icons.Default.CreateNewFolder,
+                                    contentDescription = null,
+                                    tint = if (isFolderValid) Emerald700 else Amber700,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = if (isFolderValid) {
+                                        "مجلد النسخ الاحتياطي الحالي: ${folderDisplayPath ?: "مجلد محدد"}"
+                                    } else if (folderDisplayPath != null) {
+                                        "المجلد السابق لم يعد متاحاً أو فُقدت صلاحيته: $folderDisplayPath"
+                                    } else {
+                                        "لم يتم تحديد مكان حفظ النسخ الاحتياطية بعد"
+                                    },
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp,
+                                    color = if (isFolderValid) Emerald700 else Amber700
+                                )
+                            }
+                            Text(
+                                text = if (isFolderValid) {
+                                    "تُحفظ النسخ اليدوية والتلقائية عند إغلاق التطبيق مباشرة داخل هذا المجلد (مع الاحتفاظ بآخر 7 نسخ)."
+                                } else {
+                                    "اختر مجلداً في ذاكرة الهاتف (مثل Download/سجل متابعة الطلاب/النسخ الاحتياطية) لحفظ النسخ الاحتياطية واستعادتها منه."
+                                },
+                                fontSize = 11.sp,
+                                color = Slate700
+                            )
+                            OutlinedButton(
+                                onClick = {
+                                    createBackupAfterFolderPick = false
+                                    selectBackupFolderLauncher.launch(ExcelAndBackupService.getSavedBackupFolderUri(context))
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isFolderValid) "تغيير مجلد الحفظ" else "تحديد مكان حفظ النسخ الاحتياطية",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
+                        }
+                    }
+
                     // Last backup summary box
                     Surface(
                         color = Slate50,
@@ -1188,18 +1285,26 @@ fun ExcelAndBackupScreen(
 
                     Button(
                         onClick = {
-                            runCatching {
-                                val created = ExcelAndBackupService.createLocalBackup(
-                                    context,
-                                    dbHelper,
-                                    isAutoSafety = false,
-                                    isAutoDaily = false
-                                )
-                                backups = ExcelAndBackupService.listBackups(context)
-                                onShowMessage("تم إنشاء النسخة الاحتياطية بنجاح (${created.studentsCount} طالب • ${created.classesCount} صف)")
-                            }.onFailure { e ->
-                                lastError = ExcelAndBackupService.getLastBackupError(context)
-                                onShowMessage(e.message ?: "فشل إنشاء النسخة الاحتياطية")
+                            val currentlyValid = ExcelAndBackupService.isBackupFolderValidAndAccessible(context)
+                            isFolderValid = currentlyValid
+                            if (!currentlyValid) {
+                                createBackupAfterFolderPick = true
+                                onShowMessage("يرجى اختيار مجلد لحفظ النسخ الاحتياطية أولاً")
+                                selectBackupFolderLauncher.launch(ExcelAndBackupService.getSavedBackupFolderUri(context))
+                            } else {
+                                runCatching {
+                                    val created = ExcelAndBackupService.createLocalBackup(
+                                        context,
+                                        dbHelper,
+                                        isAutoSafety = false,
+                                        isAutoDaily = false
+                                    )
+                                    backups = ExcelAndBackupService.listBackups(context)
+                                    onShowMessage("تم إنشاء النسخة الاحتياطية بنجاح (${created.studentsCount} طالب • ${created.classesCount} صف)")
+                                }.onFailure { e ->
+                                    lastError = ExcelAndBackupService.getLastBackupError(context)
+                                    onShowMessage(e.message ?: "فشل إنشاء النسخة الاحتياطية")
+                                }
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
@@ -1499,7 +1604,7 @@ fun ExcelAndBackupScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        ExcelAndBackupService.deleteBackup(target)
+                        ExcelAndBackupService.deleteBackup(context, target)
                         backups = ExcelAndBackupService.listBackups(context)
                         pendingDeleteBackup = null
                         onShowMessage("تم حذف النسخة الاحتياطية")

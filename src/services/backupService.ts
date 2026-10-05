@@ -13,6 +13,7 @@ const BACKUP_STORE = 'snapshots';
 const MAX_LOCAL_BACKUPS = 7;
 const LAST_AUTO_BACKUP_DATE_KEY = 'student_tracker_last_auto_backup_date';
 const BACKUP_ERROR_LOGS_KEY = 'student_tracker_backup_diagnostics';
+const BACKUP_FOLDER_PATH_KEY = 'student_tracker_backup_folder_path';
 
 export interface BackupDiagnosticLog {
   timestamp: string;
@@ -70,6 +71,22 @@ function openBackupVaultDB(): Promise<IDBDatabase> {
 }
 
 export class BackupService {
+  static getSavedBackupFolderPath(): string | null {
+    try {
+      return localStorage.getItem(BACKUP_FOLDER_PATH_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  static setSavedBackupFolderPath(folderPath: string): void {
+    try {
+      localStorage.setItem(BACKUP_FOLDER_PATH_KEY, folderPath.trim());
+    } catch {
+      // ignore
+    }
+  }
+
   static logDiagnosticError(operation: string, err: unknown): string {
     const message =
       err instanceof Error ? err.message : 'حدث خطأ غير متوقع أثناء عملية النسخ الاحتياطي.';
@@ -368,7 +385,9 @@ export class BackupService {
    */
   static downloadRawSQLiteFile(): void {
     const binary = exportDatabaseBinary();
-    const blob = new Blob([binary], { type: 'application/x-sqlite3' });
+    const copy = new Uint8Array(binary.byteLength);
+    copy.set(binary);
+    const blob = new Blob([copy.buffer], { type: 'application/x-sqlite3' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const baseName = formatBackupFileName(new Date());

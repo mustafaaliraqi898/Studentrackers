@@ -1,7 +1,10 @@
 package com.studenttracker.app.service
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import com.studenttracker.app.data.AppDatabaseHelper
 import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
@@ -325,17 +328,145 @@ object ExcelAndBackupService {
     }
 
     // =========================================================================
-    // 3. LOCAL SQLITE BACKUP & RESTORE (Auto Daily + 7-Backup Retention + Safety)
+    // 3. LOCAL SQLITE BACKUP & RESTORE (SAF User-Selected Folder + 7-Backup Retention + Safety)
     // =========================================================================
     private const val PREFS_NAME = "student_tracker_backup_prefs"
     private const val KEY_LAST_AUTO_BACKUP_DATE = "last_auto_backup_date"
     private const val KEY_LAST_ERROR_LOG = "last_backup_error_log"
+    private const val KEY_BACKUP_FOLDER_URI = "user_selected_backup_folder_uri"
+    private const val KEY_BACKUP_STATS_CACHE = "backup_stats_cache_v1"
     private const val MAX_LOCAL_BACKUPS = 7
 
     private fun getBackupsDirectory(context: Context): File {
         val dir = File(context.filesDir, "sqlite_backups")
         if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    /**
+     * Saves the user-chosen SAF directory Uri and persists read/write permissions across reboots.
+     */
+    fun saveBackupFolderUri(context: Context, treeUri: Uri) {
+        val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(treeUri, takeFlags)
+        }
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_BACKUP_FOLDER_URI, treeUri.toString()).commit()
+    }
+
+    /**
+     * Returns the saved SAF Tree Uri if configured, or null if not yet selected.
+     */
+    fun getSavedBackupFolderUri(context: Context): Uri? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val uriStr = prefs.getString(KEY_BACKUP_FOLDER_URI, null) ?: return null
+        return runCatching { Uri.parse(uriStr) }.getOrNull()
+    }
+
+    /**
+     * Verifies whether the user has selected a backup folder AND that the folder still exists
+     * and has valid read/write permission.
+     */
+    fun isBackupFolderValidAndAccessible(context: Context): Boolean {
+        val treeUri = getSavedBackupFolderUri(context) ?: return false
+        return runCatching {
+            val persisted = context.contentResolver.persistedUriPermissions.any { perm ->
+                perm.uri == treeUri && perm.isReadPermission && perm.isWritePermission
+            }
+            val docDir = DocumentFile.fromTreeUri(context, treeUri)
+            persisted && docDir != null && docDir.exists() && docDir.isDirectory && docDir.canWrite()
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Formats the SAF Tree Uri into a clear, human-readable folder path for display in the UI
+     * (e.g. "Download/سجل متابعة الطلاب/النسخ الاحتياطية").
+     */
+    fun getBackupFolderDisplayPath(context: Context): String? {
+        val treeUri = getSavedBackupFolderUri(context) ?: return null
+        return runCatching {
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val decoded = Uri.decode(docId)
+            when {
+                decoded.startsWith("primary:") -> decoded.removePrefix("primary:").ifEmpty { "الذاكرة الداخلية" }
+                decoded.startsWith("home:") -> "المستندات/" + decoded.removePrefix("home:")
+                decoded.startsWith("downloads") -> "التنزيلات (Download)"
+                decoded.contains(":") -> decoded.substringAfter(":")
+                else -> DocumentFile.fromTreeUri(context, treeUri)?.name ?: decoded
+            }
+        }.getOrElse {
+            DocumentFile.fromTreeUri(context, treeUri)?.name ?: treeUri.lastPathSegment ?: treeUri.toString()
+        }
+    }
+
+    private fun cacheBackupStats(
+        context: Context,
+        fileName: String,
+        students: Int,
+        classes: Int,
+        sections: Int,
+        records: Int
+    ) {
+        runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("${KEY_BACKUP_STATS_CACHE}_$fileName", "$students,$classes,$sections,$records")
+                .apply()
+        }
+    }
+
+    private fun getCachedBackupStats(context: Context, fileName: String): Map<String, Int>? {
+        return runCatching {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString("${KEY_BACKUP_STATS_CACHE}_$fileName", null) ?: return null
+            val parts = raw.split(",")
+            if (parts.size == 4) {
+                mapOf(
+                    "students" to (parts[0].toIntOrNull() ?: 0),
+                    "classes" to (parts[1].toIntOrNull() ?: 0),
+                    "sections" to (parts[2].toIntOrNull() ?: 0),
+                    "records" to (parts[3].toIntOrNull() ?: 0)
+                )
+            } else null
+        }.getOrNull()
+    }
+
+    private fun inspectSafDocumentCounts(
+        context: Context,
+        dbHelper: AppDatabaseHelper,
+        docFile: DocumentFile
+    ): Map<String, Int> {
+        val name = docFile.name ?: return emptyMap()
+        getCachedBackupStats(context, name)?.let { return it }
+
+        val tempInspect = File(context.cacheDir, "inspect_saf_temp.db")
+        return try {
+            if (tempInspect.exists()) tempInspect.delete()
+            context.contentResolver.openInputStream(docFile.uri)?.use { inp ->
+                FileOutputStream(tempInspect).use { out ->
+                    inp.copyTo(out)
+                }
+            }
+            if (tempInspect.exists() && tempInspect.length() > 100) {
+                val counts = dbHelper.inspectDatabaseFileCounts(tempInspect)
+                cacheBackupStats(
+                    context,
+                    name,
+                    counts["students"] ?: 0,
+                    counts["classes"] ?: 0,
+                    counts["sections"] ?: 0,
+                    counts["records"] ?: 0
+                )
+                counts
+            } else {
+                emptyMap()
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        } finally {
+            if (tempInspect.exists()) tempInspect.delete()
+        }
     }
 
     fun recordBackupError(context: Context, operation: String, e: Throwable) {
@@ -362,10 +493,45 @@ object ExcelAndBackupService {
     }
 
     fun listBackups(context: Context): List<BackupFileEntry> {
-        val dir = getBackupsDirectory(context)
-        val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") } ?: emptyList()
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
         val dbHelper = AppDatabaseHelper.getInstance(context)
+
+        // If the user has selected a valid SAF folder, list backups directly from that SAF folder
+        if (isBackupFolderValidAndAccessible(context)) {
+            val treeUri = getSavedBackupFolderUri(context)!!
+            val docDir = DocumentFile.fromTreeUri(context, treeUri)
+            if (docDir != null && docDir.exists()) {
+                val docFiles = docDir.listFiles().filter { f ->
+                    val name = f.name ?: ""
+                    f.isFile && (name.endsWith(".db") || name.endsWith(".sqlite")) && f.length() > 100
+                }
+                return docFiles.sortedByDescending { it.lastModified() }.map { f ->
+                    val fName = f.name ?: "StudentTracker_Backup.db"
+                    val lastMod = f.lastModified().takeIf { it > 0L } ?: System.currentTimeMillis()
+                    val modifiedTime = java.time.Instant.ofEpochMilli(lastMod)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toLocalDateTime()
+                        .format(formatter)
+                    val counts = inspectSafDocumentCounts(context, dbHelper, f)
+                    BackupFileEntry(
+                        fileName = fName,
+                        filePath = f.uri.toString(),
+                        createdAt = modifiedTime,
+                        sizeBytes = f.length(),
+                        isAutoPreRestore = fName.contains("_Safety") || fName.startsWith("auto_safety_"),
+                        isAutoDaily = fName.contains("_AutoDaily") || fName.contains("_AutoExit"),
+                        studentsCount = counts["students"] ?: 0,
+                        classesCount = counts["classes"] ?: 0,
+                        sectionsCount = counts["sections"] ?: 0,
+                        recordsCount = counts["records"] ?: 0
+                    )
+                }
+            }
+        }
+
+        // Fallback if no SAF folder is selected yet: list internal backups if any exist
+        val dir = getBackupsDirectory(context)
+        val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") } ?: emptyList()
         return files.sortedByDescending { it.lastModified() }.map { f ->
             val modifiedTime = java.time.Instant.ofEpochMilli(f.lastModified())
                 .atZone(java.time.ZoneId.systemDefault())
@@ -377,8 +543,8 @@ object ExcelAndBackupService {
                 filePath = f.absolutePath,
                 createdAt = modifiedTime,
                 sizeBytes = f.length(),
-                isAutoPreRestore = f.name.contains("_Safety_") || f.name.startsWith("auto_safety_"),
-                isAutoDaily = f.name.contains("_AutoDaily_"),
+                isAutoPreRestore = f.name.contains("_Safety") || f.name.startsWith("auto_safety_"),
+                isAutoDaily = f.name.contains("_AutoDaily") || f.name.contains("_AutoExit"),
                 studentsCount = counts["students"] ?: 0,
                 classesCount = counts["classes"] ?: 0,
                 sectionsCount = counts["sections"] ?: 0,
@@ -389,6 +555,24 @@ object ExcelAndBackupService {
 
     fun pruneOldBackups(context: Context, maxCount: Int = MAX_LOCAL_BACKUPS) {
         runCatching {
+            if (isBackupFolderValidAndAccessible(context)) {
+                val treeUri = getSavedBackupFolderUri(context)!!
+                val docDir = DocumentFile.fromTreeUri(context, treeUri)
+                if (docDir != null && docDir.exists()) {
+                    val safBackups = docDir.listFiles().filter { f ->
+                        val name = f.name ?: ""
+                        f.isFile && name.startsWith("StudentTracker_Backup_") && name.endsWith(".db")
+                    }.sortedByDescending { it.lastModified() }
+
+                    if (safBackups.size > maxCount) {
+                        safBackups.drop(maxCount).forEach { oldDoc ->
+                            oldDoc.delete()
+                        }
+                    }
+                }
+            }
+
+            // Also keep internal fallback directory pruned
             val dir = getBackupsDirectory(context)
             val files = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".db") }
                 ?.sortedByDescending { it.lastModified() } ?: return
@@ -409,6 +593,12 @@ object ExcelAndBackupService {
         isAutoDaily: Boolean = false
     ): BackupFileEntry {
         try {
+            // For manual or auto-exit backups, require that the user has selected a valid SAF folder
+            val hasValidSafFolder = isBackupFolderValidAndAccessible(context)
+            if (!hasValidSafFolder && !isAutoSafety) {
+                throw IllegalStateException("يرجى تحديد مجلد حفظ النسخ الاحتياطية أولاً")
+            }
+
             // 1. Read expected live counts from the active SQLite connection before creating backup
             val db = dbHelper.writableDatabase
             val expectedStudents = db.rawQuery("SELECT COUNT(*) FROM Students", null).use {
@@ -429,16 +619,16 @@ object ExcelAndBackupService {
                 else -> ""
             }
             val fileName = "StudentTracker_Backup_${stamp}${tag}.db"
-            val targetFile = File(getBackupsDirectory(context), fileName)
-            if (targetFile.exists()) {
-                targetFile.delete()
+            val stagingFile = File(getBackupsDirectory(context), fileName)
+            if (stagingFile.exists()) {
+                stagingFile.delete()
             }
 
             // 3. Create a self-contained, WAL-free snapshot using VACUUM INTO (or fallback to closed-connection copy)
             val vacuumSucceeded = runCatching {
-                val escapedPath = targetFile.absolutePath.replace("'", "''")
+                val escapedPath = stagingFile.absolutePath.replace("'", "''")
                 db.execSQL("VACUUM INTO '$escapedPath';")
-                targetFile.exists() && targetFile.length() > 100
+                stagingFile.exists() && stagingFile.length() > 100
             }.getOrDefault(false)
 
             if (!vacuumSucceeded) {
@@ -448,23 +638,63 @@ object ExcelAndBackupService {
                 require(srcFile.exists() && srcFile.length() > 0) {
                     "ملف قاعدة البيانات غير موجود أو فارغ"
                 }
-                srcFile.copyTo(targetFile, overwrite = true)
+                srcFile.copyTo(stagingFile, overwrite = true)
                 // Re-open connection
                 dbHelper.writableDatabase
             }
 
-            // 4. Verify the created backup file actually contains the current students & classes
-            require(targetFile.exists() && targetFile.length() > 100) {
+            // 4. Verify the created snapshot file actually contains the current students & classes
+            require(stagingFile.exists() && stagingFile.length() > 100) {
                 "فشل إنشاء ملف النسخة الاحتياطية على الجهاز"
             }
-            val backupCounts = dbHelper.inspectDatabaseFileCounts(targetFile)
+            val backupCounts = dbHelper.inspectDatabaseFileCounts(stagingFile)
             val backedUpStudents = backupCounts["students"] ?: -1
             val backedUpClasses = backupCounts["classes"] ?: -1
+            val backedUpSections = backupCounts["sections"] ?: 0
+            val backedUpRecords = backupCounts["records"] ?: 0
+
             require(backedUpStudents == expectedStudents && backedUpClasses == expectedClasses) {
                 "فشل التحقق من النسخة الاحتياطية: المتوقع ($expectedStudents طالب) والمحفوظ ($backedUpStudents طالب)"
             }
 
-            // 5. Enforce keeping only the latest 7 local backups
+            cacheBackupStats(
+                context,
+                fileName,
+                backedUpStudents,
+                backedUpClasses,
+                backedUpSections,
+                backedUpRecords
+            )
+
+            // 5. Write the verified SQLite snapshot directly into the user's selected SAF folder
+            var finalFilePath = stagingFile.absolutePath
+            var finalSizeBytes = stagingFile.length()
+
+            if (hasValidSafFolder) {
+                val treeUri = getSavedBackupFolderUri(context)!!
+                val docDir = DocumentFile.fromTreeUri(context, treeUri)
+                    ?: throw IllegalStateException("تعذر الوصول إلى مجلد النسخ الاحتياطي المختار. يرجى إعادة تحديده.")
+
+                // Remove any existing file with the same name
+                docDir.findFile(fileName)?.delete()
+
+                val createdDoc = docDir.createFile("application/octet-stream", fileName)
+                    ?: throw IllegalStateException("تعذر إنشاء ملف النسخة الاحتياطية داخل المجلد المختار. يرجى التأكد من الصلاحية.")
+
+                context.contentResolver.openOutputStream(createdDoc.uri)?.use { out ->
+                    stagingFile.inputStream().use { inp ->
+                        inp.copyTo(out)
+                    }
+                } ?: throw IllegalStateException("تعذر الكتابة داخل المجلد المختار")
+
+                finalFilePath = createdDoc.uri.toString()
+                finalSizeBytes = createdDoc.length().takeIf { it > 0L } ?: stagingFile.length()
+
+                // Remove internal staging copy so backups live in the user-chosen folder
+                stagingFile.delete()
+            }
+
+            // 6. Enforce keeping only the latest 7 local backups
             pruneOldBackups(context, MAX_LOCAL_BACKUPS)
 
             // Mark today's date as having a successful backup
@@ -475,16 +705,16 @@ object ExcelAndBackupService {
                 .apply()
 
             return BackupFileEntry(
-                fileName = targetFile.name,
-                filePath = targetFile.absolutePath,
+                fileName = fileName,
+                filePath = finalFilePath,
                 createdAt = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-                sizeBytes = targetFile.length(),
+                sizeBytes = finalSizeBytes,
                 isAutoPreRestore = isAutoSafety,
                 isAutoDaily = isAutoDaily,
                 studentsCount = backedUpStudents,
                 classesCount = backedUpClasses,
-                sectionsCount = backupCounts["sections"] ?: 0,
-                recordsCount = backupCounts["records"] ?: 0
+                sectionsCount = backedUpSections,
+                recordsCount = backedUpRecords
             )
         } catch (e: Exception) {
             recordBackupError(context, "createLocalBackup", e)
@@ -508,6 +738,11 @@ object ExcelAndBackupService {
         context: Context,
         dbHelper: AppDatabaseHelper
     ): BackupFileEntry? {
+        // Only run automatic exit backup if the user has chosen a valid SAF backup folder
+        if (!isBackupFolderValidAndAccessible(context)) {
+            return null
+        }
+
         val nowMs = System.currentTimeMillis()
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val persistedLastMs = prefs.getLong(KEY_LAST_EXIT_BACKUP_MS, 0L)
@@ -548,6 +783,9 @@ object ExcelAndBackupService {
         context: Context,
         dbHelper: AppDatabaseHelper
     ): BackupFileEntry? {
+        if (!isBackupFolderValidAndAccessible(context)) {
+            return null
+        }
         return try {
             val todayStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -577,14 +815,29 @@ object ExcelAndBackupService {
         dbHelper: AppDatabaseHelper,
         backupEntry: BackupFileEntry
     ): BackupFileEntry {
+        val tempRestoreFile = File(context.cacheDir, "restore_entry_temp.db")
         try {
-            val backupFile = File(backupEntry.filePath)
-            require(backupFile.exists() && backupFile.length() > 100) {
+            if (tempRestoreFile.exists()) tempRestoreFile.delete()
+
+            val backupSourceFile: File = if (backupEntry.filePath.startsWith("content://")) {
+                val docUri = Uri.parse(backupEntry.filePath)
+                context.contentResolver.openInputStream(docUri)?.use { inp ->
+                    FileOutputStream(tempRestoreFile).use { out ->
+                        inp.copyTo(out)
+                        out.fd.sync()
+                    }
+                } ?: throw IllegalArgumentException("تعذر قراءة ملف النسخة الاحتياطية من المجلد المختار")
+                tempRestoreFile
+            } else {
+                File(backupEntry.filePath)
+            }
+
+            require(backupSourceFile.exists() && backupSourceFile.length() > 100) {
                 "ملف النسخة الاحتياطية غير موجود أو تالف"
             }
 
             // Inspect backup file before restoring to know exact expected counts
-            val expectedBackupCounts = dbHelper.inspectDatabaseFileCounts(backupFile)
+            val expectedBackupCounts = dbHelper.inspectDatabaseFileCounts(backupSourceFile)
             val expectedStudents = expectedBackupCounts["students"] ?: 0
             val expectedClasses = expectedBackupCounts["classes"] ?: 0
 
@@ -606,7 +859,7 @@ object ExcelAndBackupService {
 
             // 3. Copy the backup file into the primary SQLite database location
             FileOutputStream(destFile).use { out ->
-                backupFile.inputStream().use { inp ->
+                backupSourceFile.inputStream().use { inp ->
                     inp.copyTo(out)
                 }
                 out.fd.sync()
@@ -633,11 +886,20 @@ object ExcelAndBackupService {
         } catch (e: Exception) {
             recordBackupError(context, "restoreBackup", e)
             throw e
+        } finally {
+            if (tempRestoreFile.exists()) tempRestoreFile.delete()
         }
     }
 
-    fun deleteBackup(entry: BackupFileEntry) {
-        File(entry.filePath).delete()
+    fun deleteBackup(context: Context, entry: BackupFileEntry) {
+        if (entry.filePath.startsWith("content://")) {
+            runCatching {
+                val uri = Uri.parse(entry.filePath)
+                DocumentFile.fromSingleUri(context, uri)?.delete()
+            }
+        } else {
+            File(entry.filePath).delete()
+        }
     }
 
     fun exportDatabaseToUri(context: Context, dbHelper: AppDatabaseHelper, uri: Uri) {
