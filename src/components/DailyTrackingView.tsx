@@ -263,6 +263,15 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     setSavedEntriesMap(nextDraft);
     setIsSavedRecord(true);
     setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
+    if (targetStatus === 'absent') {
+      setExplicitlyMarkedPresentIds((prev) => {
+        const next = new Set(prev);
+        next.delete(student.id);
+        return next;
+      });
+    } else {
+      setExplicitlyMarkedPresentIds((prev) => new Set([...prev, student.id]));
+    }
     await onSaveComplete();
 
     setSaveBannerMessage(
@@ -273,6 +282,27 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     setTimeout(() => {
       setSaveBannerMessage(null);
     }, 4000);
+  };
+
+  const executeImmediateAbsent = async (student: StudentEntity) => {
+    await executeImmediateAttendanceStatus(student, 'absent');
+  };
+
+  const handleQuickAbsentFromSearch = async (student: StudentEntity) => {
+    const currentEntry =
+      draftEntries[student.id] || createDefaultStudentEntry(student.id);
+    if (currentEntry.attendance === 'absent') {
+      return;
+    }
+    const wasPreviouslySavedPresent =
+      savedEntriesMap[student.id]?.attendance === 'present' ||
+      explicitlyMarkedPresentIds.has(student.id);
+
+    if (wasPreviouslySavedPresent) {
+      setPendingConfirmAbsentStudent(student);
+    } else {
+      await executeImmediateAbsent(student);
+    }
   };
 
   useEffect(() => {
@@ -286,11 +316,18 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     if (searchText.trim() !== '') {
       const st = sectionStudents.find((s) => s.id === studentId);
       if (st) {
-        void executeImmediateAttendanceStatus(st, status);
+        if (status === 'absent') {
+          void handleQuickAbsentFromSearch(st);
+        } else {
+          void executeImmediateAttendanceStatus(st, 'present');
+        }
         return;
       }
     }
     if (isLocked) return;
+    if (status === 'present') {
+      setExplicitlyMarkedPresentIds((prev) => new Set([...prev, studentId]));
+    }
     setDraftEntries((prev) => ({
       ...prev,
       [studentId]: {
@@ -667,9 +704,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                             ) : (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  executeImmediateAttendanceStatus(st, 'absent')
-                                }
+                                onClick={() => handleQuickAbsentFromSearch(st)}
                                 className="min-h-[38px] px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
                               >
                                 <UserX className="w-4 h-4" />
@@ -957,6 +992,54 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirmation Modal for Changing Present Student to Absent */}
+      {pendingConfirmAbsentStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-slate-200 space-y-4"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                <UserX className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  تأكيد تغيير الحالة إلى غائب
+                </h3>
+                <p className="text-sm text-slate-700 mt-1 leading-relaxed font-medium">
+                  الطالب ({pendingConfirmAbsentStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم (
+                  {formatDisplayDate(selectedDate)}). هل تريد تغيير حالته من حاضر إلى غائب (درجة حضور اليوم = 0)؟
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = pendingConfirmAbsentStudent;
+                  setPendingConfirmAbsentStudent(null);
+                  if (target) {
+                    await executeImmediateAbsent(target);
+                  }
+                }}
+                className="flex-1 min-h-[44px] bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl transition-colors"
+              >
+                تأكيد الغياب
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingConfirmAbsentStudent(null)}
+                className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
+              >
+                إلغاء
+              </button>
             </div>
           </div>
         </div>

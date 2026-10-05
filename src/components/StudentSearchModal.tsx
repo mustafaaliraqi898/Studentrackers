@@ -110,9 +110,18 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
 
   const handleQuickMark = async (
     student: StudentEntity,
-    status: AttendanceStatus
+    status: AttendanceStatus,
+    skipConfirm = false
   ) => {
     if (!onQuickAttendanceToggle) return;
+    const currentRecorded = recordedStatusMap[student.id];
+    if (status === 'absent' && currentRecorded === 'absent') {
+      return;
+    }
+    if (status === 'absent' && currentRecorded === 'present' && !skipConfirm) {
+      setPendingConfirmAbsentStudent(student);
+      return;
+    }
     await onQuickAttendanceToggle(student, status);
     setRecordedStatusMap((prev) => ({ ...prev, [student.id]: status }));
   };
@@ -323,6 +332,36 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
             })
           )}
         </div>
+
+        {pendingConfirmAbsentStudent && (
+          <div className="p-4 bg-rose-50 border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs font-extrabold text-rose-900">
+              الطالب ({pendingConfirmAbsentStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم. هل تريد تأكيد تغيير حالته إلى غائب؟
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = pendingConfirmAbsentStudent;
+                  setPendingConfirmAbsentStudent(null);
+                  if (target) {
+                    await handleQuickMark(target, 'absent', true);
+                  }
+                }}
+                className="min-h-[36px] px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-extrabold"
+              >
+                تأكيد الغياب
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingConfirmAbsentStudent(null)}
+                className="min-h-[36px] px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-bold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

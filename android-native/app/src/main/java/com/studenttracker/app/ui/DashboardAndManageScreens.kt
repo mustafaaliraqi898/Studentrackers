@@ -991,6 +991,7 @@ fun QuickSearchScreen(
     var filterClassId by remember(defaultClassId) { mutableStateOf(defaultClassId) }
     var filterSectionId by remember(defaultSectionId) { mutableStateOf(defaultSectionId) }
     var localRefresh by remember { mutableIntStateOf(0) }
+    var pendingConfirmAbsentStudent by remember { mutableStateOf<StudentEntity?>(null) }
 
     val dayStatus = remember(selectedDate, holidays) {
         GradingService.checkDateStatus(selectedDate, holidays)
@@ -1023,6 +1024,10 @@ fun QuickSearchScreen(
         } else {
             onShowMessage("تم تسجيل الطالب (${st.studentName}) حاضراً لتاريخ ${GradingService.formatDisplayDate(selectedDate)} وحفظه فوراً (درجة الحضور = 19)")
         }
+    }
+
+    fun executeDirectAbsent(st: StudentEntity) {
+        executeDirectAttendanceStatus(st, AttendanceStatus.ABSENT)
     }
 
     LazyColumn(
@@ -1211,7 +1216,11 @@ fun QuickSearchScreen(
                             } else {
                                 Button(
                                     onClick = {
-                                        executeDirectAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                        if (isSavedPresent) {
+                                            pendingConfirmAbsentStudent = st
+                                        } else {
+                                            executeDirectAbsent(st)
+                                        }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = Red600),
                                     modifier = Modifier.weight(1f)
@@ -1235,6 +1244,38 @@ fun QuickSearchScreen(
                 }
             }
         }
+    }
+
+    if (pendingConfirmAbsentStudent != null) {
+        val target = pendingConfirmAbsentStudent!!
+        AlertDialog(
+            onDismissRequest = { pendingConfirmAbsentStudent = null },
+            title = {
+                Text("تأكيد تغيير الحالة إلى غائب", fontWeight = FontWeight.ExtraBold, color = Red700)
+            },
+            text = {
+                Text(
+                    "الطالب (${target.studentName}) مسجل حاضر مسبقاً لتاريخ ${GradingService.formatDisplayDate(selectedDate)}.\nهل تريد تغيير حالته إلى غائب (درجة الحضور = 0)؟",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingConfirmAbsentStudent = null
+                        executeDirectAbsent(target)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد الغياب", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmAbsentStudent = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
 

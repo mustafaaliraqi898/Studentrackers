@@ -76,6 +76,10 @@ fun DailyTrackingScreen(
         mutableStateOf(setOf<Long>())
     }
 
+    var pendingConfirmAbsentStudent by remember(selectedClassId, selectedSectionId, selectedDate) {
+        mutableStateOf<StudentEntity?>(null)
+    }
+
     var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
 
     val filteredStudents = remember(students, searchQuery) {
@@ -111,6 +115,20 @@ fun DailyTrackingScreen(
             onShowMessage("تم تسجيل الطالب (${student.studentName}) حاضراً وحفظ السجل فوراً (درجة حضور اليوم = 19)")
         }
         onDataChanged()
+    }
+
+    fun executeImmediateAbsent(student: StudentEntity) {
+        executeImmediateAttendanceStatus(student, AttendanceStatus.ABSENT)
+    }
+
+    fun requestMarkAbsentFromSearch(student: StudentEntity) {
+        val wasExplicitlyPresent = savedEntriesSnapshot[student.id]?.attendance == AttendanceStatus.PRESENT ||
+            explicitlyTouchedPresentIds.contains(student.id)
+        if (wasExplicitlyPresent) {
+            pendingConfirmAbsentStudent = student
+        } else {
+            executeImmediateAbsent(student)
+        }
     }
 
     val dayStatus = remember(selectedDate, holidays) {
@@ -389,7 +407,7 @@ fun DailyTrackingScreen(
                                                     } else {
                                                         Button(
                                                             onClick = {
-                                                                executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                                                requestMarkAbsentFromSearch(st)
                                                             },
                                                             colors = ButtonDefaults.buttonColors(containerColor = Red600),
                                                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
@@ -516,7 +534,7 @@ fun DailyTrackingScreen(
                                     .weight(1f)
                                     .clickable(enabled = canEdit || searchQuery.trim().isNotEmpty()) {
                                         if (searchQuery.trim().isNotEmpty()) {
-                                            executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                            requestMarkAbsentFromSearch(st)
                                         } else {
                                             entriesMap = entriesMap.toMutableMap().apply {
                                                 put(
