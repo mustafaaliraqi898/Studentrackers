@@ -207,14 +207,34 @@ export default function App() {
       student.sectionId,
       selectedDate
     );
-    const currentEntry =
-      existingMap[student.id] || createDefaultStudentEntry(student.id);
-    const updatedMap = {
+    const sectionSts = students.filter(
+      (s) =>
+        s.isActive &&
+        s.classId === student.classId &&
+        s.sectionId === student.sectionId
+    );
+    const updatedMap: Record<number, ReturnType<typeof createDefaultStudentEntry>> = {
       ...existingMap,
-      [student.id]: {
-        ...currentEntry,
-        attendance: status,
-      },
+    };
+    for (const st of sectionSts) {
+      if (!updatedMap[st.id]) {
+        updatedMap[st.id] = createDefaultStudentEntry(st.id);
+      }
+    }
+    const currentEntry =
+      updatedMap[student.id] || createDefaultStudentEntry(student.id);
+    updatedMap[student.id] = {
+      ...currentEntry,
+      attendance: status,
+      ...(status === 'absent'
+        ? {
+            participation: null,
+            notebook: null,
+            homework: null,
+            behavior: null,
+            dailyTestScore: null,
+          }
+        : {}),
     };
     await TrackerRepository.saveDailySession(
       student.classId,
@@ -664,8 +684,8 @@ export default function App() {
         onClose={() => setIsSearchModalOpen(false)}
         classes={classes}
         sections={sections}
-        defaultClassId="ALL"
-        defaultSectionId="ALL"
+        defaultClassId={selectedClassId}
+        defaultSectionId={selectedSectionId}
         currentDate={selectedDate}
         onOpenStudentProfile={(st) => {
           handleNavigate('student-profile', { studentId: st.id });

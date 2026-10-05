@@ -975,26 +975,50 @@ fun StudentsScreen(
 fun QuickSearchScreen(
     classes: List<ClassEntity>,
     sections: List<SectionEntity>,
+    defaultClassId: Long? = null,
+    defaultSectionId: Long? = null,
+    selectedDate: String = "2026-10-04",
+    holidays: List<HolidayEntity> = emptyList(),
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
     refreshTick: Int,
     onOpenStudentProfile: (Long) -> Unit,
-    onJumpToDailyTracking: (Long, Long) -> Unit
+    onJumpToDailyTracking: (Long, Long) -> Unit,
+    onDataChanged: () -> Unit = {},
+    onShowMessage: (String) -> Unit = {}
 ) {
     var query by remember { mutableStateOf("") }
-    var filterClassId by remember { mutableStateOf<Long?>(null) }
-    var filterSectionId by remember { mutableStateOf<Long?>(null) }
+    var filterClassId by remember(defaultClassId) { mutableStateOf(defaultClassId) }
+    var filterSectionId by remember(defaultSectionId) { mutableStateOf(defaultSectionId) }
+    var localRefresh by remember { mutableIntStateOf(0) }
+    var pendingConfirmAbsentStudent by remember { mutableStateOf<StudentEntity?>(null) }
 
-    val results = remember(refreshTick, query, filterClassId, filterSectionId) {
+    val dayStatus = remember(selectedDate, holidays) {
+        GradingService.checkDateStatus(selectedDate, holidays)
+    }
+
+    val results = remember(refreshTick, localRefresh, query, filterClassId, filterSectionId) {
         repository.searchStudents(query, filterClassId, filterSectionId)
     }
-    val allGradesMap = remember(refreshTick, results) {
+    val allGradesMap = remember(refreshTick, localRefresh, results) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
             classId = filterClassId,
             sectionId = filterSectionId
         ).associateBy { it.studentId }
+    }
+
+    fun executeDirectAbsent(st: StudentEntity) {
+        repository.markStudentAbsentImmediately(
+            studentId = st.id,
+            classId = st.classId,
+            sectionId = st.sectionId,
+            recordDate = selectedDate
+        )
+        localRefresh++
+        onDataChanged()
+        onShowMessage("تم تسجيل الطالب (${st.studentName}) غائباً لتاريخ ${GradingService.formatDisplayDate(selectedDate)} وحفظه فوراً")
     }
 
     LazyColumn(
@@ -1064,13 +1088,48 @@ fun QuickSearchScreen(
                             }
                         }
                     }
+
+                    if (filterClassId != null) {
+                        val classSections = sections.filter { it.classId == filterClassId }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                color = if (filterSectionId == null) Teal700 else Slate100,
+                                contentColor = if (filterSectionId == null) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { filterSectionId = null }
+                            ) {
+                                Text(
+                                    text = "كل الشعب",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                            classSections.forEach { s ->
+                                val isSecSel = filterSectionId == s.id
+                                Surface(
+                                    color = if (isSecSel) Teal700 else Slate100,
+                                    contentColor = if (isSecSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { filterSectionId = s.id }
+                                ) {
+                                    Text(
+                                        text = "شعبة ${s.sectionName}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         item {
             Text(
-                text = "نتائج البحث (${results.size} طالب)",
+                text = "نتائج البحث (${results.size} طالب) — تاريخ اليوم المحدد: ${GradingService.formatDisplayDate(selectedDate)}",
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
                 color = Slate600
@@ -1079,10 +1138,16 @@ fun QuickSearchScreen(
 
         items(results, key = { it.id }) { st ->
             val g = allGradesMap[st.id]
+            val recordedStatus = remember(refreshTick, localRefresh, st.id, selectedDate) {
+                repository.getStudentAttendanceStatusForDate(st.id, selectedDate)
+            }
+            val isAlreadyAbsent = recordedStatus == AttendanceStatus.ABSENT
+            val isSavedPresent = recordedStatus == AttendanceStatus.PRESENT
+
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Slate200),
+                border = BorderStroke(1.dp, if (isAlreadyAbsent) Red600 else Slate200),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1091,17 +1156,25 @@ fun QuickSearchScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = st.studentName,
                                 fontWeight = FontWeight.ExtraBold,
                                 fontSize = 15.sp,
-                                color = Slate900
+                                color = Slate900,
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${st.className} — شعبة ${st.sectionName}",
+                                text = "${st.className} — شعبة ${st.sectionName}" + when {
+                                    isAlreadyAbsent -> " • الحالة اليوم: غائب (0/19)"
+                                    isSavedPresent -> " • الحالة اليوم: حاضر"
+                                    else -> ""
+                                },
                                 fontSize = 12.sp,
-                                color = Slate600
+                                fontWeight = if (isAlreadyAbsent) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isAlreadyAbsent) Red700 else Slate600
                             )
                         }
                         if (g != null) {
@@ -1118,27 +1191,84 @@ fun QuickSearchScreen(
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!dayStatus.isNonWorkingDay) {
+                            if (isAlreadyAbsent) {
+                                Button(
+                                    onClick = {},
+                                    enabled = false,
+                                    colors = ButtonDefaults.buttonColors(
+                                        disabledContainerColor = Red100,
+                                        disabledContentColor = Red700
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("غائب بالفعل", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        if (isSavedPresent) {
+                                            pendingConfirmAbsentStudent = st
+                                        } else {
+                                            executeDirectAbsent(st)
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Red600),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.PersonOff, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("غائب", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                }
+                            }
+                        }
+
                         OutlinedButton(
                             onClick = { onOpenStudentProfile(st.id) },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("ملف الطالب والدرجات", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { onJumpToDailyTracking(st.classId, st.sectionId) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Teal700),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.FactCheck, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("فتح المتابعة اليومية", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("ملف الطالب", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
         }
+    }
+
+    if (pendingConfirmAbsentStudent != null) {
+        val target = pendingConfirmAbsentStudent!!
+        AlertDialog(
+            onDismissRequest = { pendingConfirmAbsentStudent = null },
+            title = {
+                Text("تأكيد تغيير الحالة إلى غائب", fontWeight = FontWeight.ExtraBold, color = Red700)
+            },
+            text = {
+                Text(
+                    "الطالب (${target.studentName}) مسجل حاضر مسبقاً لتاريخ ${GradingService.formatDisplayDate(selectedDate)}.\nهل تريد تغيير حالته إلى غائب (درجة الحضور = 0)؟",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingConfirmAbsentStudent = null
+                        executeDirectAbsent(target)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد الغياب", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmAbsentStudent = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
 

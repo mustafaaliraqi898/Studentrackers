@@ -324,6 +324,10 @@ fun StudentTrackerMainApp(
                 AppScreen.QUICK_SEARCH -> QuickSearchScreen(
                     classes = classes,
                     sections = sections,
+                    defaultClassId = selectedClassId,
+                    defaultSectionId = selectedSectionId,
+                    selectedDate = selectedDate,
+                    holidays = holidays,
                     dbHelper = dbHelper,
                     repository = repository,
                     refreshTick = refreshTick,
@@ -335,7 +339,9 @@ fun StudentTrackerMainApp(
                         selectedClassId = clsId
                         selectedSectionId = secId
                         currentScreen = AppScreen.DAILY_TRACKING
-                    }
+                    },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.SAVED_RECORDS -> SavedRecordsScreen(

@@ -492,6 +492,71 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         return map
     }
 
+    fun getStudentAttendanceStatusForDate(
+        studentId: Long,
+        recordDate: String
+    ): AttendanceStatus? {
+        val db = dbHelper.readableDatabase
+        val cursor = db.rawQuery(
+            """
+            SELECT a.Status
+            FROM DailyRecords dr
+            JOIN Attendance a ON a.StudentID = dr.StudentID AND a.RecordDate = dr.RecordDate
+            WHERE dr.StudentID = ? AND dr.RecordDate = ?
+            """.trimIndent(),
+            arrayOf(studentId.toString(), recordDate)
+        )
+        cursor.use {
+            if (it.moveToFirst() && !it.isNull(0)) {
+                return AttendanceStatus.fromDb(it.getString(0))
+            }
+        }
+        return null
+    }
+
+    /**
+     * Immediately marks a student as ABSENT for the given date in SQLite (0 attendance for this day),
+     * clears any evaluations/quiz for that day so no conflicting present ratings remain,
+     * and ensures all other active students in the same section have a saved DailyRecords row
+     * if the session was not yet initialized.
+     */
+    fun markStudentAbsentImmediately(
+        studentId: Long,
+        classId: Long,
+        sectionId: Long,
+        recordDate: String,
+        currentDraftEntries: Map<Long, StudentDailyEntry>? = null
+    ): Map<Long, StudentDailyEntry> {
+        val existingSaved = getSessionEntries(classId, sectionId, recordDate)
+        val sectionStudents = getStudents(classId, sectionId, includeInactive = false)
+        val merged = mutableMapOf<Long, StudentDailyEntry>()
+
+        for (st in sectionStudents) {
+            val baseEntry = currentDraftEntries?.get(st.id)
+                ?: existingSaved[st.id]
+                ?: StudentDailyEntry(studentId = st.id, attendance = AttendanceStatus.PRESENT)
+            merged[st.id] = baseEntry
+        }
+
+        merged[studentId] = StudentDailyEntry(
+            studentId = studentId,
+            attendance = AttendanceStatus.ABSENT,
+            participation = null,
+            notebook = null,
+            homework = null,
+            behavior = null,
+            dailyTestScore = null
+        )
+
+        saveDailySession(
+            classId = classId,
+            sectionId = sectionId,
+            recordDate = recordDate,
+            entries = merged
+        )
+        return merged
+    }
+
     fun saveDailySession(
         classId: Long,
         sectionId: Long,

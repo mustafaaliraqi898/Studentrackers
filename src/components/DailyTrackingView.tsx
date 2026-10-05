@@ -91,6 +91,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
 
   const [isSavedRecord, setIsSavedRecord] = useState(false);
   const [isEditingSaved, setIsEditingSaved] = useState(true);
+  const [savedEntriesMap, setSavedEntriesMap] = useState<Record<number, StudentDailyEntry>>({});
   const [draftEntries, setDraftEntries] = useState<Record<number, StudentDailyEntry>>({});
   const [draftQuizStrings, setDraftQuizStrings] = useState<Record<number, string>>({});
   const [liveGrades, setLiveGrades] = useState<Record<number, StudentCalculatedGrade>>({});
@@ -98,6 +99,8 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
   const [savedDatesSet, setSavedDatesSet] = useState<Set<string>>(new Set());
   const [searchText, setSearchText] = useState<string>('');
   const [showAbsentOnly, setShowAbsentOnly] = useState<boolean>(false);
+  const [explicitlyMarkedPresentIds, setExplicitlyMarkedPresentIds] = useState<Set<number>>(new Set());
+  const [pendingConfirmAbsentStudent, setPendingConfirmAbsentStudent] = useState<StudentEntity | null>(null);
 
   const dayStatus = checkDateHolidayStatus(selectedDate, holidays);
 
@@ -143,8 +146,10 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
         }
       }
 
+      setSavedEntriesMap(savedMap);
       setDraftEntries(nextDraft);
       setDraftQuizStrings(nextQuizStr);
+      setExplicitlyMarkedPresentIds(new Set());
       setIsSavedRecord(hasSaved);
       setIsEditingSaved(!hasSaved);
       setIsDirty(false);
@@ -198,6 +203,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     );
     await onSaveComplete();
 
+    setSavedEntriesMap({ ...draftEntries });
     setIsSavedRecord(true);
     setIsEditingSaved(false);
     setIsDirty(false);
@@ -210,6 +216,70 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     }, 4000);
   };
 
+  const executeImmediateAbsent = async (student: StudentEntity) => {
+    if (!currentClass || !currentSection || dayStatus.isNonWorkingDay) return;
+
+    const absentEntry: StudentDailyEntry = {
+      studentId: student.id,
+      attendance: 'absent',
+      participation: null,
+      notebook: null,
+      homework: null,
+      behavior: null,
+      dailyTestScore: null,
+    };
+
+    const nextDraft: Record<number, StudentDailyEntry> = { ...draftEntries };
+    for (const st of sectionStudents) {
+      if (!nextDraft[st.id]) {
+        nextDraft[st.id] = createDefaultStudentEntry(st.id);
+      }
+    }
+    nextDraft[student.id] = absentEntry;
+
+    setDraftEntries(nextDraft);
+    setDraftQuizStrings((prev) => ({ ...prev, [student.id]: '' }));
+
+    await TrackerRepository.saveDailySession(
+      currentClass.id,
+      currentSection.id,
+      selectedDate,
+      nextDraft
+    );
+    setSavedEntriesMap(nextDraft);
+    setIsSavedRecord(true);
+    setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
+    setExplicitlyMarkedPresentIds((prev) => {
+      const next = new Set(prev);
+      next.delete(student.id);
+      return next;
+    });
+    await onSaveComplete();
+
+    setSaveBannerMessage(
+      `تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)`
+    );
+    setTimeout(() => {
+      setSaveBannerMessage(null);
+    }, 4000);
+  };
+
+  const handleQuickAbsentFromSearch = async (student: StudentEntity) => {
+    const currentEntry = draftEntries[student.id] || createDefaultStudentEntry(student.id);
+    if (currentEntry.attendance === 'absent') {
+      return;
+    }
+    const wasPreviouslySavedPresent =
+      savedEntriesMap[student.id]?.attendance === 'present' ||
+      explicitlyMarkedPresentIds.has(student.id);
+
+    if (wasPreviouslySavedPresent) {
+      setPendingConfirmAbsentStudent(student);
+    } else {
+      await executeImmediateAbsent(student);
+    }
+  };
+
   useEffect(() => {
     registerPendingSaveHandler(handleSaveSession);
   });
@@ -218,12 +288,31 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     dayStatus.isNonWorkingDay || (isSavedRecord && !isEditingSaved);
 
   const updateAttendance = (studentId: number, status: AttendanceStatus) => {
+    if (status === 'absent' && searchText.trim() !== '') {
+      const st = sectionStudents.find((s) => s.id === studentId);
+      if (st) {
+        void handleQuickAbsentFromSearch(st);
+        return;
+      }
+    }
     if (isLocked) return;
+    if (status === 'present') {
+      setExplicitlyMarkedPresentIds((prev) => new Set([...prev, studentId]));
+    }
     setDraftEntries((prev) => ({
       ...prev,
       [studentId]: {
         ...(prev[studentId] || createDefaultStudentEntry(studentId)),
         attendance: status,
+        ...(status === 'absent'
+          ? {
+              participation: null,
+              notebook: null,
+              homework: null,
+              behavior: null,
+              dailyTestScore: null,
+            }
+          : {}),
       },
     }));
     setIsDirty(true);
@@ -474,52 +563,131 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
         /* WORKING DAY: Search & Absent-Only Filter + Student Cards */
         <div className="space-y-4">
           {/* Fast Search & Absent-Only Filter Bar */}
-          <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="بحث عن طالب داخل الشعبة (اكتب الاسم أو جزءاً منه)..."
-                className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
-              />
-              {searchText && (
+          <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-slate-200/80 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="بحث عن طالب داخل الشعبة لتسجيله غائباً مباشرة (اكتب الاسم أو جزءاً منه)..."
+                  className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
+                />
+                {searchText && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchText('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 hover:text-slate-900 px-2 py-1 bg-slate-200/70 rounded-lg"
+                  >
+                    مسح
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setSearchText('')}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500 hover:text-slate-900 px-2 py-1 bg-slate-200/70 rounded-lg"
-                >
-                  مسح
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowAbsentOnly(!showAbsentOnly)}
-                className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all whitespace-nowrap border ${
-                  showAbsentOnly
-                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                <UserX className="w-4 h-4" />
-                <span>عرض الغائبين فقط</span>
-                <span
-                  className={`px-1.5 py-0.5 rounded-md font-mono-num text-[11px] ${
-                    showAbsentOnly ? 'bg-rose-700 text-white' : 'bg-slate-200 text-slate-800'
+                  onClick={() => setShowAbsentOnly(!showAbsentOnly)}
+                  className={`min-h-[44px] px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all whitespace-nowrap border ${
+                    showAbsentOnly
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  {
-                    sectionStudents.filter(
-                      (st) =>
-                        (draftEntries[st.id]?.attendance || 'present') === 'absent'
-                    ).length
-                  }
-                </span>
-              </button>
+                  <UserX className="w-4 h-4" />
+                  <span>عرض الغائبين فقط</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md font-mono-num text-[11px] ${
+                      showAbsentOnly ? 'bg-rose-700 text-white' : 'bg-slate-200 text-slate-800'
+                    }`}
+                  >
+                    {
+                      sectionStudents.filter(
+                        (st) =>
+                          (draftEntries[st.id]?.attendance || 'present') === 'absent'
+                      ).length
+                    }
+                  </span>
+                </button>
+              </div>
             </div>
+
+            {searchText.trim() !== '' && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <p className="text-xs font-extrabold text-slate-700">
+                  نتائج البحث السريع — اضغط &quot;غائب&quot; لتسجيل الغياب وحفظه فوراً في قاعدة البيانات:
+                </p>
+                {sectionStudents.filter((st) =>
+                  st.studentName.includes(searchText.trim())
+                ).length === 0 ? (
+                  <p className="text-xs font-bold text-rose-700 py-2">
+                    لا يوجد طالب مطابق للاسم &quot;{searchText}&quot; في هذه الشعبة
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {sectionStudents
+                      .filter((st) => st.studentName.includes(searchText.trim()))
+                      .map((st) => {
+                        const stEntry =
+                          draftEntries[st.id] || createDefaultStudentEntry(st.id);
+                        const isAlreadyAbsent = stEntry.attendance === 'absent';
+                        const wasSavedPresent =
+                          savedEntriesMap[st.id]?.attendance === 'present';
+
+                        return (
+                          <div
+                            key={`search-quick-${st.id}`}
+                            className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 ${
+                              isAlreadyAbsent
+                                ? 'bg-rose-50/80 border-rose-200'
+                                : 'bg-slate-50 border-slate-200/80'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-extrabold text-slate-900 truncate">
+                                {st.studentName}
+                              </p>
+                              <p
+                                className={`text-[11px] font-bold mt-0.5 ${
+                                  isAlreadyAbsent
+                                    ? 'text-rose-700'
+                                    : 'text-emerald-700'
+                                }`}
+                              >
+                                {isAlreadyAbsent
+                                  ? 'الحالة الحالية: غائب (درجة حضور اليوم = 0)'
+                                  : wasSavedPresent
+                                  ? 'الحالة الحالية: حاضر (مسجل مسبقاً)'
+                                  : 'الحالة الحالية: حاضر'}
+                              </p>
+                            </div>
+
+                            {isAlreadyAbsent ? (
+                              <button
+                                type="button"
+                                disabled
+                                className="min-h-[38px] px-3.5 py-1.5 bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-not-allowed shrink-0"
+                              >
+                                <UserX className="w-4 h-4" />
+                                <span>غائب بالفعل</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleQuickAbsentFromSearch(st)}
+                                className="min-h-[38px] px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
+                              >
+                                <UserX className="w-4 h-4" />
+                                <span>غائب</span>
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {sectionStudents
@@ -794,6 +962,54 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Confirmation Modal for Changing Present Student to Absent */}
+      {pendingConfirmAbsentStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-slate-200 space-y-4"
+          >
+            <div className="flex items-start gap-3.5">
+              <div className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
+                <UserX className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  تأكيد تغيير الحالة إلى غائب
+                </h3>
+                <p className="text-sm text-slate-700 mt-1 leading-relaxed font-medium">
+                  الطالب ({pendingConfirmAbsentStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم (
+                  {formatDisplayDate(selectedDate)}). هل تريد تغيير حالته من حاضر إلى غائب (درجة حضور اليوم = 0)؟
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = pendingConfirmAbsentStudent;
+                  setPendingConfirmAbsentStudent(null);
+                  if (target) {
+                    await executeImmediateAbsent(target);
+                  }
+                }}
+                className="flex-1 min-h-[44px] bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl transition-colors"
+              >
+                تأكيد الغياب
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingConfirmAbsentStudent(null)}
+                className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
+              >
+                إلغاء
+              </button>
             </div>
           </div>
         </div>

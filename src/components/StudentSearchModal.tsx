@@ -51,9 +51,11 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
     defaultSectionId
   );
   const [results, setResults] = useState<StudentEntity[]>([]);
-  const [quickMarkedStatus, setQuickMarkedStatus] = useState<
-    Record<number, AttendanceStatus>
+  const [recordedStatusMap, setRecordedStatusMap] = useState<
+    Record<number, AttendanceStatus | undefined>
   >({});
+  const [pendingConfirmAbsentStudent, setPendingConfirmAbsentStudent] =
+    useState<StudentEntity | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -72,13 +74,32 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
         filterSectionId,
         false
       );
-      if (active) setResults(list);
+      if (!active) return;
+      setResults(list);
+
+      // Load current date saved attendance status for matching sections
+      const statusAcc: Record<number, AttendanceStatus | undefined> = {};
+      const pairKeys = Array.from(
+        new Set(list.map((st) => `${st.classId}:${st.sectionId}`))
+      );
+      for (const key of pairKeys) {
+        const [cId, sId] = key.split(':').map(Number);
+        const sessionMap = await TrackerRepository.getSessionEntries(
+          cId,
+          sId,
+          currentDate
+        );
+        for (const [stIdStr, entry] of Object.entries(sessionMap)) {
+          statusAcc[Number(stIdStr)] = entry.attendance;
+        }
+      }
+      if (active) setRecordedStatusMap(statusAcc);
     }
     runSearch();
     return () => {
       active = false;
     };
-  }, [isOpen, query, filterClassId, filterSectionId]);
+  }, [isOpen, query, filterClassId, filterSectionId, currentDate]);
 
   if (!isOpen) return null;
 
@@ -89,11 +110,20 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
 
   const handleQuickMark = async (
     student: StudentEntity,
-    status: AttendanceStatus
+    status: AttendanceStatus,
+    skipConfirm = false
   ) => {
     if (!onQuickAttendanceToggle) return;
+    const currentRecorded = recordedStatusMap[student.id];
+    if (status === 'absent' && currentRecorded === 'absent') {
+      return;
+    }
+    if (status === 'absent' && currentRecorded === 'present' && !skipConfirm) {
+      setPendingConfirmAbsentStudent(student);
+      return;
+    }
     await onQuickAttendanceToggle(student, status);
-    setQuickMarkedStatus((prev) => ({ ...prev, [student.id]: status }));
+    setRecordedStatusMap((prev) => ({ ...prev, [student.id]: status }));
   };
 
   return (
@@ -212,7 +242,8 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
             </div>
           ) : (
             results.map((st) => {
-              const marked = quickMarkedStatus[st.id];
+              const marked = recordedStatusMap[st.id];
+              const isAlreadyAbsent = marked === 'absent';
               return (
                 <div
                   key={st.id}
@@ -231,40 +262,43 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
                     </button>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {st.className} – شعبة {st.sectionName}
+                      {isAlreadyAbsent && (
+                        <span className="text-rose-700 font-bold mr-1.5">
+                          • الحالة اليوم: غائب (0/19)
+                        </span>
+                      )}
+                      {marked === 'present' && (
+                        <span className="text-emerald-700 font-bold mr-1.5">
+                          • الحالة اليوم: حاضر
+                        </span>
+                      )}
                     </p>
                   </div>
 
-                  {/* Quick Actions: Present / Absent / Open in Daily / Profile */}
+                  {/* Quick Actions: Absent / Open in Daily / Profile */}
                   <div className="flex flex-wrap items-center gap-1.5">
                     {onQuickAttendanceToggle && (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => handleQuickMark(st, 'present')}
-                          className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1 transition-all ${
-                            marked === 'present'
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                          }`}
-                          title={`تسجيل حاضر لتاريخ ${currentDate}`}
-                        >
-                          <UserCheck className="w-3.5 h-3.5" />
-                          <span>حاضر</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleQuickMark(st, 'absent')}
-                          className={`min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1 transition-all ${
-                            marked === 'absent'
-                              ? 'bg-rose-600 text-white'
-                              : 'bg-rose-50 text-rose-800 hover:bg-rose-100'
-                          }`}
-                          title={`تسجيل غائب لتاريخ ${currentDate}`}
-                        >
-                          <UserX className="w-3.5 h-3.5" />
-                          <span>غائب</span>
-                        </button>
+                        {isAlreadyAbsent ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1 bg-rose-100 text-rose-700 cursor-not-allowed"
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            <span>غائب بالفعل</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleQuickMark(st, 'absent')}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1 transition-all bg-rose-600 text-white hover:bg-rose-700"
+                            title={`تسجيل غائب لتاريخ ${currentDate}`}
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            <span>غائب</span>
+                          </button>
+                        )}
                       </>
                     )}
 
@@ -297,6 +331,36 @@ export const StudentSearchModal: React.FC<StudentSearchModalProps> = ({
             })
           )}
         </div>
+
+        {pendingConfirmAbsentStudent && (
+          <div className="p-4 bg-rose-50 border-t border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <p className="text-xs font-extrabold text-rose-900">
+              الطالب ({pendingConfirmAbsentStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم. هل تريد تأكيد تغيير حالته إلى غائب؟
+            </p>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={async () => {
+                  const target = pendingConfirmAbsentStudent;
+                  setPendingConfirmAbsentStudent(null);
+                  if (target) {
+                    await handleQuickMark(target, 'absent', true);
+                  }
+                }}
+                className="min-h-[36px] px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-extrabold"
+              >
+                تأكيد الغياب
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingConfirmAbsentStudent(null)}
+                className="min-h-[36px] px-3 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-bold"
+              >
+                إلغاء
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

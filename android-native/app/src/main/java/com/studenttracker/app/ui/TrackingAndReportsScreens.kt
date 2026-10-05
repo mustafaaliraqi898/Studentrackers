@@ -58,13 +58,70 @@ fun DailyTrackingScreen(
         mutableStateOf(!hasSaved)
     }
 
+    var savedEntriesSnapshot by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, students) {
+        mutableStateOf(repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate))
+    }
+
     var entriesMap by remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, students) {
-        val saved = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
+        val saved = savedEntriesSnapshot
         val initial = mutableMapOf<Long, StudentDailyEntry>()
         students.forEach { st ->
             initial[st.id] = saved[st.id] ?: StudentDailyEntry(studentId = st.id)
         }
         mutableStateOf<Map<Long, StudentDailyEntry>>(initial)
+    }
+
+    // Track students whose attendance was explicitly touched by the user in this session
+    var explicitlyTouchedPresentIds by remember(selectedClassId, selectedSectionId, selectedDate) {
+        mutableStateOf(setOf<Long>())
+    }
+
+    var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
+    var pendingConfirmAbsentStudent by remember { mutableStateOf<StudentEntity?>(null) }
+
+    val filteredStudents = remember(students, searchQuery) {
+        val q = TrackerRepository.normalizeStudentName(searchQuery)
+        if (q.isEmpty()) {
+            students
+        } else {
+            val qKey = TrackerRepository.canonicalArabicComparisonKey(q)
+            students.filter { st ->
+                st.studentName.contains(q) ||
+                    TrackerRepository.canonicalArabicComparisonKey(st.studentName).contains(qKey)
+            }
+        }
+    }
+
+    fun executeImmediateAbsent(student: StudentEntity) {
+        val updatedEntries = repository.markStudentAbsentImmediately(
+            studentId = student.id,
+            classId = selectedClassId,
+            sectionId = selectedSectionId,
+            recordDate = selectedDate,
+            currentDraftEntries = entriesMap
+        )
+        entriesMap = updatedEntries
+        savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
+        hasSaved = true
+        explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
+        onDataChanged()
+        onShowMessage("تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)")
+    }
+
+    fun handleMarkAbsentAction(student: StudentEntity) {
+        val currentEntry = entriesMap[student.id] ?: StudentDailyEntry(studentId = student.id)
+        if (currentEntry.attendance == AttendanceStatus.ABSENT) {
+            return
+        }
+        val wasPreviouslySavedPresent =
+            savedEntriesSnapshot[student.id]?.attendance == AttendanceStatus.PRESENT ||
+                explicitlyTouchedPresentIds.contains(student.id)
+
+        if (wasPreviouslySavedPresent) {
+            pendingConfirmAbsentStudent = student
+        } else {
+            executeImmediateAbsent(student)
+        }
     }
 
     val dayStatus = remember(selectedDate, holidays) {
@@ -221,7 +278,7 @@ fun DailyTrackingScreen(
                                     color = Emerald700
                                 )
                                 Text(
-                                    text = "لإجراء أي تعديل على هذا اليوم اضغط على زر تعديل السجل",
+                                    text = "لإجراء أي تعديل على هذا اليوم اضغط على زر تعديل السجل أو استخدم البحث لتسجيل غياب مباشر",
                                     fontSize = 11.sp,
                                     color = Slate700
                                 )
@@ -239,7 +296,132 @@ fun DailyTrackingScreen(
                 }
             }
 
-            items(students, key = { it.id }) { st ->
+            if (!dayStatus.isNonWorkingDay) {
+                item {
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                placeholder = { Text("ابحث عن طالب بالاسم لتسجيله غائباً مباشرة...") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Search, contentDescription = "بحث", tint = Teal700)
+                                },
+                                trailingIcon = {
+                                    if (searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = { searchQuery = "" }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "مسح البحث")
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            if (searchQuery.trim().isNotEmpty()) {
+                                Text(
+                                    text = "نتائج البحث (${filteredStudents.size} طالب) — اضغط 'غائب' للتسجيل والحفظ الفوري:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate700
+                                )
+
+                                if (filteredStudents.isEmpty()) {
+                                    Text(
+                                        text = "لا يوجد طالب مطابق للاسم \"$searchQuery\" في هذه الشعبة",
+                                        fontSize = 12.sp,
+                                        color = Red700,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                } else {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        filteredStudents.forEach { st ->
+                                            val stEntry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
+                                            val isAlreadyAbsent = stEntry.attendance == AttendanceStatus.ABSENT
+                                            val wasSavedPresent = savedEntriesSnapshot[st.id]?.attendance == AttendanceStatus.PRESENT
+
+                                            Surface(
+                                                color = if (isAlreadyAbsent) Red50 else Slate50,
+                                                shape = RoundedCornerShape(10.dp),
+                                                border = BorderStroke(1.dp, if (isAlreadyAbsent) Red600 else Slate200),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(
+                                                            text = st.studentName,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            fontSize = 14.sp,
+                                                            color = Slate900,
+                                                            maxLines = 1,
+                                                            softWrap = false,
+                                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = when {
+                                                                isAlreadyAbsent -> "الحالة الحالية: غائب (درجة حضور اليوم = 0)"
+                                                                wasSavedPresent -> "الحالة الحالية: حاضر (مسجل مسبقاً)"
+                                                                else -> "الحالة الحالية: حاضر"
+                                                            },
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = if (isAlreadyAbsent) Red700 else Emerald700
+                                                        )
+                                                    }
+
+                                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                                    if (isAlreadyAbsent) {
+                                                        Button(
+                                                            onClick = {},
+                                                            enabled = false,
+                                                            colors = ButtonDefaults.buttonColors(
+                                                                disabledContainerColor = Red100,
+                                                                disabledContentColor = Red700
+                                                            ),
+                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text("غائب بالفعل", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                                        }
+                                                    } else {
+                                                        Button(
+                                                            onClick = { handleMarkAbsentAction(st) },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Red600),
+                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.PersonOff, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Spacer(modifier = Modifier.width(4.dp))
+                                                            Text("غائب", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            items(filteredStudents, key = { it.id }) { st ->
                 val entry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
                 val grade = liveGradesMap[st.id]
                 val isPresent = entry.attendance == AttendanceStatus.PRESENT
@@ -318,6 +500,7 @@ fun DailyTrackingScreen(
                                         entriesMap = entriesMap.toMutableMap().apply {
                                             put(st.id, entry.copy(attendance = AttendanceStatus.PRESENT))
                                         }
+                                        explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + st.id
                                         onDirtyChange(true)
                                     }
                             ) {
@@ -338,21 +521,25 @@ fun DailyTrackingScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable(enabled = canEdit) {
-                                        entriesMap = entriesMap.toMutableMap().apply {
-                                            put(
-                                                st.id,
-                                                entry.copy(
-                                                    attendance = AttendanceStatus.ABSENT,
-                                                    participation = null,
-                                                    notebook = null,
-                                                    homework = null,
-                                                    behavior = null,
-                                                    dailyTestScore = null
+                                    .clickable(enabled = (canEdit || searchQuery.trim().isNotEmpty()) && isPresent) {
+                                        if (searchQuery.trim().isNotEmpty()) {
+                                            handleMarkAbsentAction(st)
+                                        } else {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                put(
+                                                    st.id,
+                                                    entry.copy(
+                                                        attendance = AttendanceStatus.ABSENT,
+                                                        participation = null,
+                                                        notebook = null,
+                                                        homework = null,
+                                                        behavior = null,
+                                                        dailyTestScore = null
+                                                    )
                                                 )
-                                            )
+                                            }
+                                            onDirtyChange(true)
                                         }
-                                        onDirtyChange(true)
                                     }
                             ) {
                                 Row(
@@ -362,7 +549,11 @@ fun DailyTrackingScreen(
                                 ) {
                                     Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("غائب (0/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Text(
+                                        text = if (!isPresent) "غائب بالفعل (0/19)" else "غائب (0/19)",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
                                 }
                             }
                         }
@@ -505,6 +696,7 @@ fun DailyTrackingScreen(
                                 recordDate = selectedDate,
                                 entries = entriesMap
                             )
+                            savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
                             hasSaved = true
                             isEditingSaved = false
                             onDirtyChange(false)
@@ -529,6 +721,42 @@ fun DailyTrackingScreen(
                 }
             }
         }
+    }
+
+    if (pendingConfirmAbsentStudent != null) {
+        val targetStudent = pendingConfirmAbsentStudent!!
+        AlertDialog(
+            onDismissRequest = { pendingConfirmAbsentStudent = null },
+            title = {
+                Text(
+                    text = "تأكيد تغيير الحالة إلى غائب",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Red700
+                )
+            },
+            text = {
+                Text(
+                    text = "الطالب (${targetStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم (${GradingService.formatDisplayDate(selectedDate)}).\nهل تريد تغيير حالته من حاضر إلى غائب (درجة الحضور لليوم = 0)؟",
+                    fontSize = 13.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingConfirmAbsentStudent = null
+                        executeImmediateAbsent(targetStudent)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد الغياب", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingConfirmAbsentStudent = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 
     if (showDateDialog) {
