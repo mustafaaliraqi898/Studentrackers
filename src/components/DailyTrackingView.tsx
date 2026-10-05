@@ -216,18 +216,30 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     }, 4000);
   };
 
-  const executeImmediateAbsent = async (student: StudentEntity) => {
+  const executeImmediateAttendanceStatus = async (
+    student: StudentEntity,
+    targetStatus: AttendanceStatus
+  ) => {
     if (!currentClass || !currentSection || dayStatus.isNonWorkingDay) return;
 
-    const absentEntry: StudentDailyEntry = {
-      studentId: student.id,
-      attendance: 'absent',
-      participation: null,
-      notebook: null,
-      homework: null,
-      behavior: null,
-      dailyTestScore: null,
-    };
+    const currentEntry =
+      draftEntries[student.id] || createDefaultStudentEntry(student.id);
+    const updatedStudentEntry: StudentDailyEntry =
+      targetStatus === 'absent'
+        ? {
+            studentId: student.id,
+            attendance: 'absent',
+            participation: null,
+            notebook: null,
+            homework: null,
+            behavior: null,
+            dailyTestScore: null,
+          }
+        : {
+            ...currentEntry,
+            studentId: student.id,
+            attendance: 'present',
+          };
 
     const nextDraft: Record<number, StudentDailyEntry> = { ...draftEntries };
     for (const st of sectionStudents) {
@@ -235,10 +247,12 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
         nextDraft[st.id] = createDefaultStudentEntry(st.id);
       }
     }
-    nextDraft[student.id] = absentEntry;
+    nextDraft[student.id] = updatedStudentEntry;
 
     setDraftEntries(nextDraft);
-    setDraftQuizStrings((prev) => ({ ...prev, [student.id]: '' }));
+    if (targetStatus === 'absent') {
+      setDraftQuizStrings((prev) => ({ ...prev, [student.id]: '' }));
+    }
 
     await TrackerRepository.saveDailySession(
       currentClass.id,
@@ -249,35 +263,16 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     setSavedEntriesMap(nextDraft);
     setIsSavedRecord(true);
     setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
-    setExplicitlyMarkedPresentIds((prev) => {
-      const next = new Set(prev);
-      next.delete(student.id);
-      return next;
-    });
     await onSaveComplete();
 
     setSaveBannerMessage(
-      `تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)`
+      targetStatus === 'absent'
+        ? `تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)`
+        : `تم تسجيل الطالب (${student.studentName}) حاضراً وحفظ السجل فوراً (درجة حضور اليوم = 19)`
     );
     setTimeout(() => {
       setSaveBannerMessage(null);
     }, 4000);
-  };
-
-  const handleQuickAbsentFromSearch = async (student: StudentEntity) => {
-    const currentEntry = draftEntries[student.id] || createDefaultStudentEntry(student.id);
-    if (currentEntry.attendance === 'absent') {
-      return;
-    }
-    const wasPreviouslySavedPresent =
-      savedEntriesMap[student.id]?.attendance === 'present' ||
-      explicitlyMarkedPresentIds.has(student.id);
-
-    if (wasPreviouslySavedPresent) {
-      setPendingConfirmAbsentStudent(student);
-    } else {
-      await executeImmediateAbsent(student);
-    }
   };
 
   useEffect(() => {
@@ -288,17 +283,14 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     dayStatus.isNonWorkingDay || (isSavedRecord && !isEditingSaved);
 
   const updateAttendance = (studentId: number, status: AttendanceStatus) => {
-    if (status === 'absent' && searchText.trim() !== '') {
+    if (searchText.trim() !== '') {
       const st = sectionStudents.find((s) => s.id === studentId);
       if (st) {
-        void handleQuickAbsentFromSearch(st);
+        void executeImmediateAttendanceStatus(st, status);
         return;
       }
     }
     if (isLocked) return;
-    if (status === 'present') {
-      setExplicitlyMarkedPresentIds((prev) => new Set([...prev, studentId]));
-    }
     setDraftEntries((prev) => ({
       ...prev,
       [studentId]: {
@@ -615,7 +607,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
             {searchText.trim() !== '' && (
               <div className="pt-2 border-t border-slate-100 space-y-2">
                 <p className="text-xs font-extrabold text-slate-700">
-                  نتائج البحث السريع — اضغط &quot;غائب&quot; لتسجيل الغياب وحفظه فوراً في قاعدة البيانات:
+                  نتائج البحث السريع — بدّل الحالة مباشرة بين حاضر وغائب مع الحفظ الفوري في قاعدة البيانات:
                 </p>
                 {sectionStudents.filter((st) =>
                   st.studentName.includes(searchText.trim())
@@ -631,8 +623,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         const stEntry =
                           draftEntries[st.id] || createDefaultStudentEntry(st.id);
                         const isAlreadyAbsent = stEntry.attendance === 'absent';
-                        const wasSavedPresent =
-                          savedEntriesMap[st.id]?.attendance === 'present';
+                        const wasSavedInDb = Boolean(savedEntriesMap[st.id]);
 
                         return (
                           <div
@@ -645,7 +636,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                           >
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-extrabold text-slate-900 truncate">
-                                {st.studentName}
+                                {st.studentName} — {isAlreadyAbsent ? 'غائب' : 'حاضر'}
                               </p>
                               <p
                                 className={`text-[11px] font-bold mt-0.5 ${
@@ -656,25 +647,29 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                               >
                                 {isAlreadyAbsent
                                   ? 'الحالة الحالية: غائب (درجة حضور اليوم = 0)'
-                                  : wasSavedPresent
-                                  ? 'الحالة الحالية: حاضر (مسجل مسبقاً)'
-                                  : 'الحالة الحالية: حاضر'}
+                                  : wasSavedInDb
+                                  ? 'الحالة الحالية: حاضر (درجة حضور اليوم = 19)'
+                                  : 'الحالة الحالية: غير مسجل / حاضر افتراضياً (19)'}
                               </p>
                             </div>
 
                             {isAlreadyAbsent ? (
                               <button
                                 type="button"
-                                disabled
-                                className="min-h-[38px] px-3.5 py-1.5 bg-rose-100 text-rose-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-not-allowed shrink-0"
+                                onClick={() =>
+                                  executeImmediateAttendanceStatus(st, 'present')
+                                }
+                                className="min-h-[38px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
                               >
-                                <UserX className="w-4 h-4" />
-                                <span>غائب بالفعل</span>
+                                <UserCheck className="w-4 h-4" />
+                                <span>حاضر</span>
                               </button>
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => handleQuickAbsentFromSearch(st)}
+                                onClick={() =>
+                                  executeImmediateAttendanceStatus(st, 'absent')
+                                }
                                 className="min-h-[38px] px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
                               >
                                 <UserX className="w-4 h-4" />
@@ -751,13 +746,13 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                     <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/70 w-full sm:w-auto min-w-[190px]">
                       <button
                         type="button"
-                        disabled={isLocked}
+                        disabled={isLocked && searchText.trim() === ''}
                         onClick={() => updateAttendance(student.id, 'present')}
                         className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                           isPresent
                             ? 'bg-emerald-600 text-white shadow-xs'
                             : 'text-slate-600 hover:text-slate-900'
-                        } ${isLocked ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
+                        } ${isLocked && searchText.trim() === '' ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
                       >
                         <UserCheck className="w-4 h-4" />
                         <span>حاضر</span>
@@ -765,13 +760,13 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
 
                       <button
                         type="button"
-                        disabled={isLocked}
+                        disabled={isLocked && searchText.trim() === ''}
                         onClick={() => updateAttendance(student.id, 'absent')}
                         className={`min-h-[44px] px-3.5 py-2 rounded-lg text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 whitespace-nowrap ${
                           !isPresent
                             ? 'bg-rose-600 text-white shadow-xs'
                             : 'text-slate-600 hover:text-slate-900'
-                        } ${isLocked ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
+                        } ${isLocked && searchText.trim() === '' ? 'opacity-60 cursor-not-allowed' : 'active:scale-[0.98]'}`}
                       >
                         <UserX className="w-4 h-4" />
                         <span>غائب</span>
@@ -962,54 +957,6 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                   )}
                 </button>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* Confirmation Modal for Changing Present Student to Absent */}
-      {pendingConfirmAbsentStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div
-            role="dialog"
-            aria-modal="true"
-            className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl border border-slate-200 space-y-4"
-          >
-            <div className="flex items-start gap-3.5">
-              <div className="w-11 h-11 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center shrink-0">
-                <UserX className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">
-                  تأكيد تغيير الحالة إلى غائب
-                </h3>
-                <p className="text-sm text-slate-700 mt-1 leading-relaxed font-medium">
-                  الطالب ({pendingConfirmAbsentStudent.studentName}) مسجل حاضر مسبقاً لهذا اليوم (
-                  {formatDisplayDate(selectedDate)}). هل تريد تغيير حالته من حاضر إلى غائب (درجة حضور اليوم = 0)؟
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={async () => {
-                  const target = pendingConfirmAbsentStudent;
-                  setPendingConfirmAbsentStudent(null);
-                  if (target) {
-                    await executeImmediateAbsent(target);
-                  }
-                }}
-                className="flex-1 min-h-[44px] bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl transition-colors"
-              >
-                تأكيد الغياب
-              </button>
-              <button
-                type="button"
-                onClick={() => setPendingConfirmAbsentStudent(null)}
-                className="flex-1 min-h-[44px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs rounded-xl transition-colors"
-              >
-                إلغاء
-              </button>
             </div>
           </div>
         </div>

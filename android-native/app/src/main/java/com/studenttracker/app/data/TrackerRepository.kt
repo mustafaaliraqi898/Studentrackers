@@ -520,11 +520,17 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
      * and ensures all other active students in the same section have a saved DailyRecords row
      * if the session was not yet initialized.
      */
-    fun markStudentAbsentImmediately(
+    /**
+     * Immediately updates or creates a student's attendance status (PRESENT or ABSENT) for the given
+     * date in SQLite without creating duplicate DailyRecords (uses ON CONFLICT(StudentID, RecordDate) DO UPDATE).
+     * Only affects the specified recordDate; previous days' records remain untouched.
+     */
+    fun setStudentAttendanceImmediately(
         studentId: Long,
         classId: Long,
         sectionId: Long,
         recordDate: String,
+        targetStatus: AttendanceStatus,
         currentDraftEntries: Map<Long, StudentDailyEntry>? = null
     ): Map<Long, StudentDailyEntry> {
         val existingSaved = getSessionEntries(classId, sectionId, recordDate)
@@ -538,15 +544,20 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             merged[st.id] = baseEntry
         }
 
-        merged[studentId] = StudentDailyEntry(
-            studentId = studentId,
-            attendance = AttendanceStatus.ABSENT,
-            participation = null,
-            notebook = null,
-            homework = null,
-            behavior = null,
-            dailyTestScore = null
-        )
+        val currentStudentEntry = merged[studentId] ?: StudentDailyEntry(studentId = studentId)
+        merged[studentId] = if (targetStatus == AttendanceStatus.ABSENT) {
+            StudentDailyEntry(
+                studentId = studentId,
+                attendance = AttendanceStatus.ABSENT,
+                participation = null,
+                notebook = null,
+                homework = null,
+                behavior = null,
+                dailyTestScore = null
+            )
+        } else {
+            currentStudentEntry.copy(attendance = AttendanceStatus.PRESENT)
+        }
 
         saveDailySession(
             classId = classId,
@@ -555,6 +566,23 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             entries = merged
         )
         return merged
+    }
+
+    fun markStudentAbsentImmediately(
+        studentId: Long,
+        classId: Long,
+        sectionId: Long,
+        recordDate: String,
+        currentDraftEntries: Map<Long, StudentDailyEntry>? = null
+    ): Map<Long, StudentDailyEntry> {
+        return setStudentAttendanceImmediately(
+            studentId = studentId,
+            classId = classId,
+            sectionId = sectionId,
+            recordDate = recordDate,
+            targetStatus = AttendanceStatus.ABSENT,
+            currentDraftEntries = currentDraftEntries
+        )
     }
 
     fun saveDailySession(

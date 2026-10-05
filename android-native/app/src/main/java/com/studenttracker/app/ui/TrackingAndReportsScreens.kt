@@ -77,7 +77,6 @@ fun DailyTrackingScreen(
     }
 
     var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
-    var pendingConfirmAbsentStudent by remember { mutableStateOf<StudentEntity?>(null) }
 
     val filteredStudents = remember(students, searchQuery) {
         val q = TrackerRepository.normalizeStudentName(searchQuery)
@@ -92,36 +91,26 @@ fun DailyTrackingScreen(
         }
     }
 
-    fun executeImmediateAbsent(student: StudentEntity) {
-        val updatedEntries = repository.markStudentAbsentImmediately(
+    fun executeImmediateAttendanceStatus(student: StudentEntity, targetStatus: AttendanceStatus) {
+        val updatedEntries = repository.setStudentAttendanceImmediately(
             studentId = student.id,
             classId = selectedClassId,
             sectionId = selectedSectionId,
             recordDate = selectedDate,
+            targetStatus = targetStatus,
             currentDraftEntries = entriesMap
         )
         entriesMap = updatedEntries
         savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
         hasSaved = true
-        explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
-        onDataChanged()
-        onShowMessage("تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)")
-    }
-
-    fun handleMarkAbsentAction(student: StudentEntity) {
-        val currentEntry = entriesMap[student.id] ?: StudentDailyEntry(studentId = student.id)
-        if (currentEntry.attendance == AttendanceStatus.ABSENT) {
-            return
-        }
-        val wasPreviouslySavedPresent =
-            savedEntriesSnapshot[student.id]?.attendance == AttendanceStatus.PRESENT ||
-                explicitlyTouchedPresentIds.contains(student.id)
-
-        if (wasPreviouslySavedPresent) {
-            pendingConfirmAbsentStudent = student
+        if (targetStatus == AttendanceStatus.ABSENT) {
+            explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
+            onShowMessage("تم تسجيل الطالب (${student.studentName}) غائباً وحفظ السجل فوراً (درجة حضور اليوم = 0)")
         } else {
-            executeImmediateAbsent(student)
+            explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + student.id
+            onShowMessage("تم تسجيل الطالب (${student.studentName}) حاضراً وحفظ السجل فوراً (درجة حضور اليوم = 19)")
         }
+        onDataChanged()
     }
 
     val dayStatus = remember(selectedDate, holidays) {
@@ -328,7 +317,7 @@ fun DailyTrackingScreen(
 
                             if (searchQuery.trim().isNotEmpty()) {
                                 Text(
-                                    text = "نتائج البحث (${filteredStudents.size} طالب) — اضغط 'غائب' للتسجيل والحفظ الفوري:",
+                                    text = "نتائج البحث (${filteredStudents.size} طالب) — بدّل الحالة مباشرة مع الحفظ الفوري:",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     color = Slate700
@@ -346,7 +335,7 @@ fun DailyTrackingScreen(
                                         filteredStudents.forEach { st ->
                                             val stEntry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
                                             val isAlreadyAbsent = stEntry.attendance == AttendanceStatus.ABSENT
-                                            val wasSavedPresent = savedEntriesSnapshot[st.id]?.attendance == AttendanceStatus.PRESENT
+                                            val wasSavedInDb = savedEntriesSnapshot.containsKey(st.id)
 
                                             Surface(
                                                 color = if (isAlreadyAbsent) Red50 else Slate50,
@@ -363,7 +352,7 @@ fun DailyTrackingScreen(
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(
-                                                            text = st.studentName,
+                                                            text = "${st.studentName} — ${if (isAlreadyAbsent) "غائب" else "حاضر"}",
                                                             fontWeight = FontWeight.ExtraBold,
                                                             fontSize = 14.sp,
                                                             color = Slate900,
@@ -373,9 +362,9 @@ fun DailyTrackingScreen(
                                                         )
                                                         Text(
                                                             text = when {
-                                                                isAlreadyAbsent -> "الحالة الحالية: غائب (درجة حضور اليوم = 0)"
-                                                                wasSavedPresent -> "الحالة الحالية: حاضر (مسجل مسبقاً)"
-                                                                else -> "الحالة الحالية: حاضر"
+                                                                isAlreadyAbsent -> "الحالة الحالية: غائب (درجة الحضور لليوم = 0 / 19)"
+                                                                wasSavedInDb -> "الحالة الحالية: حاضر (درجة الحضور لليوم = 19 / 19)"
+                                                                else -> "الحالة الحالية: غير مسجل / حاضر افتراضياً (19 / 19)"
                                                             },
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
@@ -387,21 +376,21 @@ fun DailyTrackingScreen(
 
                                                     if (isAlreadyAbsent) {
                                                         Button(
-                                                            onClick = {},
-                                                            enabled = false,
-                                                            colors = ButtonDefaults.buttonColors(
-                                                                disabledContainerColor = Red100,
-                                                                disabledContentColor = Red700
-                                                            ),
-                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                            onClick = {
+                                                                executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                                         ) {
-                                                            Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(15.dp))
+                                                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
                                                             Spacer(modifier = Modifier.width(4.dp))
-                                                            Text("غائب بالفعل", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                                            Text("حاضر", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
                                                         }
                                                     } else {
                                                         Button(
-                                                            onClick = { handleMarkAbsentAction(st) },
+                                                            onClick = {
+                                                                executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                                            },
                                                             colors = ButtonDefaults.buttonColors(containerColor = Red600),
                                                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
                                                         ) {
@@ -496,12 +485,16 @@ fun DailyTrackingScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable(enabled = canEdit) {
-                                        entriesMap = entriesMap.toMutableMap().apply {
-                                            put(st.id, entry.copy(attendance = AttendanceStatus.PRESENT))
+                                    .clickable(enabled = canEdit || searchQuery.trim().isNotEmpty()) {
+                                        if (searchQuery.trim().isNotEmpty()) {
+                                            executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
+                                        } else {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                put(st.id, entry.copy(attendance = AttendanceStatus.PRESENT))
+                                            }
+                                            explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + st.id
+                                            onDirtyChange(true)
                                         }
-                                        explicitlyTouchedPresentIds = explicitlyTouchedPresentIds + st.id
-                                        onDirtyChange(true)
                                     }
                             ) {
                                 Row(
@@ -521,9 +514,9 @@ fun DailyTrackingScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clickable(enabled = (canEdit || searchQuery.trim().isNotEmpty()) && isPresent) {
+                                    .clickable(enabled = canEdit || searchQuery.trim().isNotEmpty()) {
                                         if (searchQuery.trim().isNotEmpty()) {
-                                            handleMarkAbsentAction(st)
+                                            executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
                                         } else {
                                             entriesMap = entriesMap.toMutableMap().apply {
                                                 put(
@@ -549,11 +542,7 @@ fun DailyTrackingScreen(
                                 ) {
                                     Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = if (!isPresent) "غائب بالفعل (0/19)" else "غائب (0/19)",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp
-                                    )
+                                    Text("غائب (0/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 }
                             }
                         }
