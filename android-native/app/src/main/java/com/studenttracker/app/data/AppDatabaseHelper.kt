@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 4
+        const val DATABASE_VERSION = 5
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -59,6 +59,32 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 4) {
             migrateStudentsUniqueConstraintToClassLevel(db)
         }
+        if (oldVersion < 5) {
+            createDailyScheduleTableAndIndexes(db)
+        }
+    }
+
+    private fun createDailyScheduleTableAndIndexes(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS DailySchedule (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                DayOfWeek TEXT NOT NULL,
+                ClassID INTEGER NOT NULL,
+                SectionID INTEGER NOT NULL,
+                LessonNumber INTEGER NOT NULL CHECK(LessonNumber >= 1),
+                StartTime TEXT NOT NULL,
+                EndTime TEXT NOT NULL,
+                CreatedDate TEXT NOT NULL,
+                FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+                FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+                UNIQUE(DayOfWeek, ClassID, SectionID, LessonNumber)
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedule_day_lesson ON DailySchedule(DayOfWeek, LessonNumber, StartTime);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedule_class_sec ON DailySchedule(ClassID, SectionID);")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayOfWeek, ClassID, SectionID, LessonNumber);")
     }
 
     /**
@@ -274,6 +300,7 @@ class AppDatabaseHelper(private val context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_evaluations_student_date ON Evaluations(StudentID, RecordDate);")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailytests_student_date ON DailyTests(StudentID, RecordDate);")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_holidays_date ON Holidays(HolidayDate);")
+        createDailyScheduleTableAndIndexes(db)
     }
 
     fun seedInitialDemoData(db: SQLiteDatabase) {
@@ -436,6 +463,7 @@ class AppDatabaseHelper(private val context: Context) :
             db.execSQL("DELETE FROM Sections;")
             db.execSQL("DELETE FROM Classes;")
             db.execSQL("DELETE FROM Holidays;")
+            runCatching { db.execSQL("DELETE FROM DailySchedule;") }
             if (includeDemo) {
                 seedInitialDemoData(db)
             } else {

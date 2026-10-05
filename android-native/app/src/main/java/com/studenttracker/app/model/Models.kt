@@ -140,3 +140,17 @@ data class StudentAbsenceSummary(
     val absentDatesNewestFirst: List<String>
 )
 
+data class DailyScheduleEntity(
+    val id: Long,
+    val dayOfWeek: String,
+    val classId: Long,
+    val className: String,
+    val sectionId: Long,
+    val sectionName: String,
+    val lessonNumber: Int,
+    val startTime: String,
+    val endTime: String,
+    val createdDate: String
+)
+
+

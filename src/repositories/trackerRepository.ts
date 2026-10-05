@@ -1,6 +1,7 @@
 import {
   AttendanceStatus,
   ClassEntity,
+  DailyScheduleEntity,
   HolidayEntity,
   RatingValue,
   SavedSessionSummary,
@@ -807,5 +808,142 @@ export class TrackerRepository {
       recordsCount: countTable('DailyRecords'),
       holidaysCount: countTable('Holidays'),
     };
+  }
+
+  // ---------------- DAILY SCHEDULE ("الجدول اليومي") ----------------
+  static async getDailySchedules(): Promise<DailyScheduleEntity[]> {
+    const db = await getDatabase();
+    const res = db.exec(`
+      SELECT
+        ds.ID,
+        ds.DayOfWeek,
+        ds.ClassID,
+        c.ClassName,
+        ds.SectionID,
+        s.SectionName,
+        ds.LessonNumber,
+        ds.StartTime,
+        ds.EndTime,
+        ds.CreatedDate
+      FROM DailySchedule ds
+      JOIN Classes c ON c.ID = ds.ClassID
+      JOIN Sections s ON s.ID = ds.SectionID
+      ORDER BY
+        CASE ds.DayOfWeek
+          WHEN 'الأحد' THEN 1
+          WHEN 'الاثنين' THEN 2
+          WHEN 'الثلاثاء' THEN 3
+          WHEN 'الأربعاء' THEN 4
+          WHEN 'الخميس' THEN 5
+          WHEN 'الجمعة' THEN 6
+          WHEN 'السبت' THEN 7
+          ELSE 8
+        END ASC,
+        ds.LessonNumber ASC,
+        ds.StartTime ASC,
+        ds.ID ASC;
+    `);
+    if (res.length === 0) return [];
+    return res[0].values.map((row) => ({
+      id: Number(row[0]),
+      dayOfWeek: String(row[1]),
+      classId: Number(row[2]),
+      className: String(row[3]),
+      sectionId: Number(row[4]),
+      sectionName: String(row[5]),
+      lessonNumber: Number(row[6]),
+      startTime: String(row[7]),
+      endTime: String(row[8]),
+      createdDate: String(row[9] || ''),
+    }));
+  }
+
+  static async isDuplicateDailyScheduleSlot(
+    dayOfWeek: string,
+    classId: number,
+    sectionId: number,
+    lessonNumber: number,
+    excludeId?: number
+  ): Promise<boolean> {
+    const db = await getDatabase();
+    const res =
+      excludeId !== undefined
+        ? db.exec(
+            `SELECT COUNT(*) FROM DailySchedule WHERE DayOfWeek = ? AND ClassID = ? AND SectionID = ? AND LessonNumber = ? AND ID != ?;`,
+            [dayOfWeek, classId, sectionId, lessonNumber, excludeId]
+          )
+        : db.exec(
+            `SELECT COUNT(*) FROM DailySchedule WHERE DayOfWeek = ? AND ClassID = ? AND SectionID = ? AND LessonNumber = ?;`,
+            [dayOfWeek, classId, sectionId, lessonNumber]
+          );
+    return res.length > 0 && Number(res[0].values[0][0]) > 0;
+  }
+
+  static async addDailyScheduleEntry(
+    dayOfWeek: string,
+    classId: number,
+    sectionId: number,
+    lessonNumber: number,
+    startTime: string,
+    endTime: string
+  ): Promise<{ id: number; isDuplicate: boolean }> {
+    const isDup = await this.isDuplicateDailyScheduleSlot(
+      dayOfWeek,
+      classId,
+      sectionId,
+      lessonNumber
+    );
+    if (isDup) {
+      return { id: -1, isDuplicate: true };
+    }
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO DailySchedule (DayOfWeek, ClassID, SectionID, LessonNumber, StartTime, EndTime, CreatedDate)
+       VALUES (?, ?, ?, ?, ?, ?, ?);`,
+      [dayOfWeek.trim(), classId, sectionId, lessonNumber, startTime.trim(), endTime.trim(), now]
+    );
+    const idRes = db.exec('SELECT last_insert_rowid();');
+    await persistDatabaseToStorage();
+    return {
+      id: idRes.length > 0 ? Number(idRes[0].values[0][0]) : -1,
+      isDuplicate: false,
+    };
+  }
+
+  static async updateDailyScheduleEntry(
+    id: number,
+    dayOfWeek: string,
+    classId: number,
+    sectionId: number,
+    lessonNumber: number,
+    startTime: string,
+    endTime: string
+  ): Promise<{ isDuplicate: boolean }> {
+    const isDup = await this.isDuplicateDailyScheduleSlot(
+      dayOfWeek,
+      classId,
+      sectionId,
+      lessonNumber,
+      id
+    );
+    if (isDup) {
+      return { isDuplicate: true };
+    }
+    const db = await getDatabase();
+    db.run(
+      `UPDATE DailySchedule
+       SET DayOfWeek = ?, ClassID = ?, SectionID = ?, LessonNumber = ?, StartTime = ?, EndTime = ?
+       WHERE ID = ?;`,
+      [dayOfWeek.trim(), classId, sectionId, lessonNumber, startTime.trim(), endTime.trim(), id]
+    );
+    await persistDatabaseToStorage();
+    return { isDuplicate: false };
+  }
+
+  static async deleteDailyScheduleEntry(id: number): Promise<void> {
+    const db = await getDatabase();
+    db.run('DELETE FROM DailySchedule WHERE ID = ?;', [id]);
+    await persistDatabaseToStorage();
   }
 }

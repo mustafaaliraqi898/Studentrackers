@@ -765,4 +765,156 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             "holidays" to count("Holidays")
         )
     }
+
+    // ---------------- DAILY SCHEDULE ("الجدول اليومي") ----------------
+    fun getDailySchedules(): List<DailyScheduleEntity> {
+        val db = dbHelper.readableDatabase
+        val dayOrderCase = """
+            CASE ds.DayOfWeek
+                WHEN 'الأحد' THEN 1
+                WHEN 'الاثنين' THEN 2
+                WHEN 'الثلاثاء' THEN 3
+                WHEN 'الأربعاء' THEN 4
+                WHEN 'الخميس' THEN 5
+                WHEN 'الجمعة' THEN 6
+                WHEN 'السبت' THEN 7
+                ELSE 8
+            END
+        """.trimIndent()
+
+        val cursor = db.rawQuery(
+            """
+            SELECT
+                ds.ID,
+                ds.DayOfWeek,
+                ds.ClassID,
+                c.ClassName,
+                ds.SectionID,
+                s.SectionName,
+                ds.LessonNumber,
+                ds.StartTime,
+                ds.EndTime,
+                ds.CreatedDate
+            FROM DailySchedule ds
+            JOIN Classes c ON c.ID = ds.ClassID
+            JOIN Sections s ON s.ID = ds.SectionID
+            ORDER BY $dayOrderCase ASC, ds.LessonNumber ASC, ds.StartTime ASC, ds.ID ASC
+            """.trimIndent(),
+            null
+        )
+        val list = mutableListOf<DailyScheduleEntity>()
+        cursor.use {
+            while (it.moveToNext()) {
+                list.add(
+                    DailyScheduleEntity(
+                        id = it.getLong(0),
+                        dayOfWeek = it.getString(1),
+                        classId = it.getLong(2),
+                        className = it.getString(3),
+                        sectionId = it.getLong(4),
+                        sectionName = it.getString(5),
+                        lessonNumber = it.getInt(6),
+                        startTime = it.getString(7),
+                        endTime = it.getString(8),
+                        createdDate = it.getString(9) ?: ""
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun isDuplicateDailyScheduleSlot(
+        dayOfWeek: String,
+        classId: Long,
+        sectionId: Long,
+        lessonNumber: Int,
+        excludeId: Long? = null
+    ): Boolean {
+        val db = dbHelper.readableDatabase
+        val cursor = if (excludeId != null) {
+            db.rawQuery(
+                """
+                SELECT COUNT(*) FROM DailySchedule
+                WHERE DayOfWeek = ? AND ClassID = ? AND SectionID = ? AND LessonNumber = ? AND ID != ?
+                """.trimIndent(),
+                arrayOf(dayOfWeek, classId.toString(), sectionId.toString(), lessonNumber.toString(), excludeId.toString())
+            )
+        } else {
+            db.rawQuery(
+                """
+                SELECT COUNT(*) FROM DailySchedule
+                WHERE DayOfWeek = ? AND ClassID = ? AND SectionID = ? AND LessonNumber = ?
+                """.trimIndent(),
+                arrayOf(dayOfWeek, classId.toString(), sectionId.toString(), lessonNumber.toString())
+            )
+        }
+        cursor.use {
+            if (it.moveToFirst()) {
+                return it.getInt(0) > 0
+            }
+        }
+        return false
+    }
+
+    fun addDailyScheduleEntry(
+        dayOfWeek: String,
+        classId: Long,
+        sectionId: Long,
+        lessonNumber: Int,
+        startTime: String,
+        endTime: String
+    ): Pair<Long, Boolean> {
+        if (isDuplicateDailyScheduleSlot(dayOfWeek, classId, sectionId, lessonNumber, excludeId = null)) {
+            return -1L to true
+        }
+        val db = dbHelper.writableDatabase
+        val now = Instant.now().toString()
+        val cv = ContentValues().apply {
+            put("DayOfWeek", dayOfWeek.trim())
+            put("ClassID", classId)
+            put("SectionID", sectionId)
+            put("LessonNumber", lessonNumber)
+            put("StartTime", startTime.trim())
+            put("EndTime", endTime.trim())
+            put("CreatedDate", now)
+        }
+        val insertedId = db.insertWithOnConflict("DailySchedule", null, cv, SQLiteDatabase.CONFLICT_IGNORE)
+        if (insertedId == -1L) {
+            return -1L to true
+        }
+        return insertedId to false
+    }
+
+    fun updateDailyScheduleEntry(
+        id: Long,
+        dayOfWeek: String,
+        classId: Long,
+        sectionId: Long,
+        lessonNumber: Int,
+        startTime: String,
+        endTime: String
+    ): Boolean {
+        if (isDuplicateDailyScheduleSlot(dayOfWeek, classId, sectionId, lessonNumber, excludeId = id)) {
+            return true
+        }
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("DayOfWeek", dayOfWeek.trim())
+            put("ClassID", classId)
+            put("SectionID", sectionId)
+            put("LessonNumber", lessonNumber)
+            put("StartTime", startTime.trim())
+            put("EndTime", endTime.trim())
+        }
+        val rows = runCatching {
+            db.updateWithOnConflict("DailySchedule", cv, "ID = ?", arrayOf(id.toString()), SQLiteDatabase.CONFLICT_ABORT)
+        }.getOrElse { -1 }
+        return rows == -1
+    }
+
+    fun deleteDailyScheduleEntry(id: Long) {
+        val db = dbHelper.writableDatabase
+        db.delete("DailySchedule", "ID = ?", arrayOf(id.toString()))
+    }
 }

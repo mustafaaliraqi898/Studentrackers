@@ -161,12 +161,26 @@ export interface StudentAbsenceSummary {
   absentDatesNewestFirst: string[];
 }
 
+export interface DailyScheduleEntity {
+  id: number;
+  dayOfWeek: string;
+  classId: number;
+  className: string;
+  sectionId: number;
+  sectionName: string;
+  lessonNumber: number;
+  startTime: string;
+  endTime: string;
+  createdDate: string;
+}
+
 export type AppScreen =
   | 'dashboard'
   | 'classes-sections'
   | 'students'
   | 'daily-tracking'
   | 'absence-tracking'
+  | 'daily-schedule'
   | 'holidays'
   | 'saved-records'
   | 'student-profile'

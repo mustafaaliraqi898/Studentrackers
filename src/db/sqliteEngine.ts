@@ -8,7 +8,7 @@ let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbInstance: Database | null = null;
 let lastMigrationWarning: string | null = null;
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export function getLastMigrationWarning(): string | null {
   return lastMigrationWarning;
@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS Holidays (
   Notes TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS DailySchedule (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  DayOfWeek TEXT NOT NULL,
+  ClassID INTEGER NOT NULL,
+  SectionID INTEGER NOT NULL,
+  LessonNumber INTEGER NOT NULL CHECK(LessonNumber >= 1),
+  StartTime TEXT NOT NULL,
+  EndTime TEXT NOT NULL,
+  CreatedDate TEXT NOT NULL,
+  FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+  FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+  UNIQUE(DayOfWeek, ClassID, SectionID, LessonNumber)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sections_class ON Sections(ClassID);
 CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);
 CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);
@@ -118,6 +132,9 @@ CREATE INDEX IF NOT EXISTS idx_attendance_student_date ON Attendance(StudentID, 
 CREATE INDEX IF NOT EXISTS idx_evaluations_student_date ON Evaluations(StudentID, RecordDate);
 CREATE INDEX IF NOT EXISTS idx_dailytests_student_date ON DailyTests(StudentID, RecordDate);
 CREATE INDEX IF NOT EXISTS idx_holidays_date ON Holidays(HolidayDate);
+CREATE INDEX IF NOT EXISTS idx_schedule_day_lesson ON DailySchedule(DayOfWeek, LessonNumber, StartTime);
+CREATE INDEX IF NOT EXISTS idx_schedule_class_sec ON DailySchedule(ClassID, SectionID);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayOfWeek, ClassID, SectionID, LessonNumber);
 `;
 
 function openIndexedDB(): Promise<IDBDatabase> {
@@ -283,6 +300,44 @@ function runMigrations(db: Database): void {
       );
     } catch (err) {
       console.warn('Migration v4 warning:', err);
+    }
+  }
+
+  if (currentVer < 5) {
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS DailySchedule (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          DayOfWeek TEXT NOT NULL,
+          ClassID INTEGER NOT NULL,
+          SectionID INTEGER NOT NULL,
+          LessonNumber INTEGER NOT NULL CHECK(LessonNumber >= 1),
+          StartTime TEXT NOT NULL,
+          EndTime TEXT NOT NULL,
+          CreatedDate TEXT NOT NULL,
+          FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+          FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+          UNIQUE(DayOfWeek, ClassID, SectionID, LessonNumber)
+        );
+      `);
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_schedule_day_lesson ON DailySchedule(DayOfWeek, LessonNumber, StartTime);'
+      );
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_schedule_class_sec ON DailySchedule(ClassID, SectionID);'
+      );
+      db.run(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayOfWeek, ClassID, SectionID, LessonNumber);'
+      );
+      db.run(
+        `INSERT INTO SchemaMigrations (Version, AppliedAt, Description) VALUES (5, ?, ?);`,
+        [
+          new Date().toISOString(),
+          'Added DailySchedule table with foreign keys to Classes and Sections, indexes, and unique slot constraint',
+        ]
+      );
+    } catch (err) {
+      console.warn('Migration v5 warning:', err);
     }
   }
 }

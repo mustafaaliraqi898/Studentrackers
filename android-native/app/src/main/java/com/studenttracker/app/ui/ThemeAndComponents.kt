@@ -56,6 +56,7 @@ enum class AppScreen(val titleAr: String) {
     DASHBOARD("الرئيسية"),
     DAILY_TRACKING("المتابعة اليومية"),
     ABSENCE_TRACKING("عدد أيام الغياب"),
+    DAILY_SCHEDULE("الجدول اليومي"),
     STUDENTS("الطلاب"),
     CLASSES_SECTIONS("الصفوف والشعب"),
     QUICK_SEARCH("البحث السريع"),

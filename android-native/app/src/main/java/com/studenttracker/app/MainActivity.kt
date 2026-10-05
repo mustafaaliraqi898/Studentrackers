@@ -307,6 +307,15 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.DAILY_SCHEDULE -> DailyScheduleScreen(
+                    classes = classes,
+                    sections = sections,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
                 AppScreen.STUDENTS -> StudentsScreen(
                     classes = classes,
                     sections = sections,
