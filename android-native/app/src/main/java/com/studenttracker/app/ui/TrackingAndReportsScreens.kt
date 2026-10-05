@@ -1245,24 +1245,197 @@ fun AbsenceTrackingScreen(
     repository: TrackerRepository,
     refreshTick: Int,
     onSelectClass: (Long) -> Unit,
-    onSelectSection: (Long) -> Unit
+    onSelectSection: (Long) -> Unit,
+    onShowMessage: (String) -> Unit = {}
 ) {
-    val summaries = remember(refreshTick, classes, sections) {
+    val context = LocalContext.current
+    var filterClassId by remember { mutableStateOf<Long?>(null) }
+    var filterSectionId by remember { mutableStateOf<Long?>(null) }
+
+    val availableSections = remember(sections, filterClassId) {
+        if (filterClassId == null) emptyList() else sections.filter { it.classId == filterClassId }
+    }
+
+    LaunchedEffect(filterClassId, availableSections) {
+        if (filterClassId == null) {
+            filterSectionId = null
+        } else if (filterSectionId != null && availableSections.none { it.id == filterSectionId }) {
+            filterSectionId = null
+        }
+    }
+
+    val summaries = remember(refreshTick, filterClassId, filterSectionId, classes, sections) {
         GradingService.calculateAbsenceSummaries(
             dbHelper = dbHelper,
             repository = repository,
-            classId = null,
-            sectionId = null,
+            classId = filterClassId,
+            sectionId = if (filterClassId == null) null else filterSectionId,
             monthPrefix = "ALL"
         )
+    }
+
+    val exportAbsenceLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                val bytes = ExcelAndBackupService.generateAbsenceXlsx(summaries)
+                context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                onShowMessage("تم تصدير سجل أيام الغياب إلى Excel بنجاح (${summaries.size} طالب)")
+            }.onFailure {
+                onShowMessage("تعذر تصدير ملف Excel")
+            }
+        }
     }
 
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Filters + Export to Excel Card
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // 1. Class Filter ("الصف: الكل + جميع الصفوف")
+                    Text(
+                        text = "الصف:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (filterClassId == null) Slate900 else Slate100,
+                            contentColor = if (filterClassId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                filterClassId = null
+                                filterSectionId = null
+                            }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        classes.forEach { cls ->
+                            val isSelected = filterClassId == cls.id
+                            Surface(
+                                color = if (isSelected) Slate900 else Slate100,
+                                contentColor = if (isSelected) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    if (filterClassId != cls.id) {
+                                        filterClassId = cls.id
+                                        filterSectionId = null
+                                        onSelectClass(cls.id)
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    text = cls.className,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Section Filter ("الشعبة: الكل + الشعب الموجودة في الصف المحدد")
+                    Text(
+                        text = "الشعبة:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (filterSectionId == null) Teal700 else Slate100,
+                            contentColor = if (filterSectionId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                filterSectionId = null
+                            }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        availableSections.forEach { sec ->
+                            val isSelected = filterSectionId == sec.id
+                            Surface(
+                                color = if (isSelected) Teal700 else Slate100,
+                                contentColor = if (isSelected) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterSectionId = sec.id
+                                    onSelectSection(sec.id)
+                                }
+                            ) {
+                                Text(
+                                    text = sec.sectionName,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 3. Export to Excel Button
+                    Button(
+                        onClick = {
+                            val selectedClassObj = classes.find { it.id == filterClassId }
+                            val selectedSecObj = availableSections.find { it.id == filterSectionId }
+                            val fileName = ExcelAndBackupService.buildAbsenceExportFileName(
+                                className = selectedClassObj?.className,
+                                sectionName = selectedSecObj?.sectionName
+                            )
+                            exportAbsenceLauncher.launch(fileName)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.TableView, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "تصدير إلى Excel",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Table Header: اسم الطالب | الصف والشعبة | عدد أيام الغياب
         item {
             Surface(
                 color = Slate900,
@@ -1272,21 +1445,28 @@ fun AbsenceTrackingScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "اسم الطالب",
                         color = Color.White,
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1.3f)
+                    )
+                    Text(
+                        text = "الصف والشعبة",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1.1f)
                     )
                     Text(
                         text = "عدد أيام الغياب",
                         color = Color.White,
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.sp
+                        fontSize = 13.sp
                     )
                 }
             }
@@ -1301,7 +1481,7 @@ fun AbsenceTrackingScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "لا يوجد طلاب مسجلون حالياً",
+                        text = "لا يوجد طلاب ضمن الفلتر المحدد حالياً",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = Slate600,
@@ -1319,25 +1499,35 @@ fun AbsenceTrackingScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                            .padding(horizontal = 12.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = item.studentName,
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp,
+                            fontSize = 14.sp,
                             color = Slate900,
                             maxLines = 1,
                             softWrap = false,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1.3f)
                         )
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${item.className} / ${item.sectionName}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Slate700,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1.1f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = GradingService.formatAbsenceDaysLabel(item.absentDays),
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp,
+                            fontSize = 13.sp,
                             color = if (item.absentDays > 0) Red700 else Slate700
                         )
                     }

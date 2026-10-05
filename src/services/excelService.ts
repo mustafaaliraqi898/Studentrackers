@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import {
   ExcelImportResult,
   ExcelRowError,
+  StudentAbsenceSummary,
   StudentCalculatedGrade,
 } from '../types';
 import { TrackerRepository } from '../repositories/trackerRepository';
@@ -376,6 +377,49 @@ export class ExcelService {
     const safeSec = sectionLabel.replace(/\s+/g, '_');
     const safeDate = periodLabel.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
     const fileName = `نتائج_اليومي_${safeClass}_${safeSec}_${safeDate}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+    return fileName;
+  }
+
+  /**
+   * 4. تصدير سجل عدد أيام الغياب إلى Excel (.xlsx)
+   * يحتوي على الأعمدة الأربعة المطلوبة:
+   * اسم الطالب | الصف | الشعبة | عدد أيام الغياب
+   */
+  static exportAbsenceToExcel(
+    summaries: StudentAbsenceSummary[],
+    className?: string,
+    sectionName?: string
+  ): string {
+    const exportRows = summaries.map((item) => ({
+      'اسم الطالب': item.studentName,
+      'الصف': item.className,
+      'الشعبة': item.sectionName,
+      'عدد أيام الغياب': item.absentDays,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows, {
+      header: ['اسم الطالب', 'الصف', 'الشعبة', 'عدد أيام الغياب'],
+    });
+    worksheet['!cols'] = [{ wch: 28 }, { wch: 20 }, { wch: 14 }, { wch: 18 }];
+
+    const workbook = XLSX.utils.book_new();
+    if (!workbook.Workbook) workbook.Workbook = {};
+    workbook.Workbook.Views = [{ RTL: true }];
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'عدد أيام الغياب');
+
+    const dateIso = new Date().toISOString().slice(0, 10);
+    const safeClass = className?.trim().replace(/\s+/g, '_');
+    const safeSec = sectionName?.trim().replace(/\s+/g, '_');
+
+    let fileName = `سجل_أيام_الغياب_${dateIso}.xlsx`;
+    if (safeClass && safeSec) {
+      fileName = `سجل_غياب_${safeClass}_${safeSec}_${dateIso}.xlsx`;
+    } else if (safeClass) {
+      fileName = `سجل_غياب_${safeClass}_${dateIso}.xlsx`;
+    }
 
     XLSX.writeFile(workbook, fileName);
     return fileName;

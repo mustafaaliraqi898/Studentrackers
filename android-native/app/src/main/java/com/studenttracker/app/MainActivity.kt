@@ -303,7 +303,8 @@ fun StudentTrackerMainApp(
                         val firstSec = sections.firstOrNull { it.classId == clsId }
                         if (firstSec != null) selectedSectionId = firstSec.id
                     },
-                    onSelectSection = { secId -> selectedSectionId = secId }
+                    onSelectSection = { secId -> selectedSectionId = secId },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.STUDENTS -> StudentsScreen(

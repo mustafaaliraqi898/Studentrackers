@@ -159,6 +159,43 @@ object ExcelAndBackupService {
         return buildXlsxBytes("نتائج اليومي", rows)
     }
 
+    fun generateAbsenceXlsx(summaries: List<StudentAbsenceSummary>): ByteArray {
+        val rows = mutableListOf<List<String>>()
+        rows.add(
+            listOf(
+                "اسم الطالب",
+                "الصف",
+                "الشعبة",
+                "عدد أيام الغياب"
+            )
+        )
+        summaries.forEach { item ->
+            rows.add(
+                listOf(
+                    item.studentName,
+                    item.className,
+                    item.sectionName,
+                    item.absentDays.toString()
+                )
+            )
+        }
+        return buildXlsxBytes("عدد أيام الغياب", rows)
+    }
+
+    fun buildAbsenceExportFileName(
+        className: String? = null,
+        sectionName: String? = null,
+        dateIso: String = java.time.LocalDate.now().toString()
+    ): String {
+        val safeClass = className?.trim()?.replace(Regex("\\s+"), "_")?.takeIf { it.isNotEmpty() }
+        val safeSec = sectionName?.trim()?.replace(Regex("\\s+"), "_")?.takeIf { it.isNotEmpty() }
+        return when {
+            safeClass != null && safeSec != null -> "سجل_غياب_${safeClass}_${safeSec}_${dateIso}.xlsx"
+            safeClass != null -> "سجل_غياب_${safeClass}_${dateIso}.xlsx"
+            else -> "سجل_أيام_الغياب_${dateIso}.xlsx"
+        }
+    }
+
     // =========================================================================
     // 2. NATIVE .XLSX READER & VALIDATOR (Supports sharedStrings + inlineStr)
     // =========================================================================
