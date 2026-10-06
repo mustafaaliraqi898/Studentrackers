@@ -174,6 +174,17 @@ export interface DailyScheduleEntity {
   createdDate: string;
 }
 
+export type StudyPeriodStatus = 'OPEN' | 'CLOSED';
+
+export interface StudyPeriodEntity {
+  id: number;
+  periodName: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string | null; // YYYY-MM-DD or null when OPEN
+  status: StudyPeriodStatus;
+  createdDate: string;
+}
+
 export type AppScreen =
   | 'dashboard'
   | 'classes-sections'
@@ -181,6 +192,7 @@ export type AppScreen =
   | 'daily-tracking'
   | 'absence-tracking'
   | 'daily-schedule'
+  | 'study-periods'
   | 'holidays'
   | 'saved-records'
   | 'student-profile'

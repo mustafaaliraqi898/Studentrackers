@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 5
+        const val DATABASE_VERSION = 6
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -62,6 +62,27 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 5) {
             createDailyScheduleTableAndIndexes(db)
         }
+        if (oldVersion < 6) {
+            createStudyPeriodsTableAndIndexes(db)
+        }
+    }
+
+    private fun createStudyPeriodsTableAndIndexes(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS StudyPeriods (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                PeriodName TEXT NOT NULL,
+                StartDate TEXT NOT NULL,
+                EndDate TEXT NULL,
+                Status TEXT NOT NULL CHECK(Status IN ('OPEN', 'CLOSED')),
+                CreatedDate TEXT NOT NULL
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_status ON StudyPeriods(Status);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_dates ON StudyPeriods(StartDate, EndDate);")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(Status) WHERE Status = 'OPEN';")
     }
 
     private fun createDailyScheduleTableAndIndexes(db: SQLiteDatabase) {
@@ -301,6 +322,7 @@ class AppDatabaseHelper(private val context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailytests_student_date ON DailyTests(StudentID, RecordDate);")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_holidays_date ON Holidays(HolidayDate);")
         createDailyScheduleTableAndIndexes(db)
+        createStudyPeriodsTableAndIndexes(db)
     }
 
     fun seedInitialDemoData(db: SQLiteDatabase) {
@@ -464,6 +486,7 @@ class AppDatabaseHelper(private val context: Context) :
             db.execSQL("DELETE FROM Classes;")
             db.execSQL("DELETE FROM Holidays;")
             runCatching { db.execSQL("DELETE FROM DailySchedule;") }
+            runCatching { db.execSQL("DELETE FROM StudyPeriods;") }
             if (includeDemo) {
                 seedInitialDemoData(db)
             } else {

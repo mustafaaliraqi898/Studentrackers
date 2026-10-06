@@ -917,4 +917,224 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val db = dbHelper.writableDatabase
         db.delete("DailySchedule", "ID = ?", arrayOf(id.toString()))
     }
+
+    // ---------------- STUDY PERIODS ("الفترات الدراسية") ----------------
+    fun getStudyPeriods(): List<StudyPeriodEntity> {
+        val db = dbHelper.readableDatabase
+        val cursor = db.rawQuery(
+            """
+            SELECT ID, PeriodName, StartDate, EndDate, Status, CreatedDate
+            FROM StudyPeriods
+            ORDER BY StartDate ASC, ID ASC
+            """.trimIndent(),
+            null
+        )
+        val list = mutableListOf<StudyPeriodEntity>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val endDateRaw = if (it.isNull(3)) null else it.getString(3)?.takeIf { s -> s.isNotBlank() }
+                list.add(
+                    StudyPeriodEntity(
+                        id = it.getLong(0),
+                        periodName = it.getString(1) ?: "",
+                        startDate = it.getString(2) ?: "",
+                        endDate = endDateRaw,
+                        status = StudyPeriodStatus.fromDb(it.getString(4)),
+                        createdDate = it.getString(5) ?: ""
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun getOpenStudyPeriod(): StudyPeriodEntity? {
+        return getStudyPeriods().firstOrNull { it.status == StudyPeriodStatus.OPEN }
+    }
+
+    fun getSuggestedNextPeriodName(): String {
+        val count = getStudyPeriods().size
+        return when (count + 1) {
+            1 -> "الفترة الأولى"
+            2 -> "الفترة الثانية"
+            3 -> "الفترة الثالثة"
+            4 -> "الفترة الرابعة"
+            5 -> "الفترة الخامسة"
+            6 -> "الفترة السادسة"
+            7 -> "الفترة السابعة"
+            8 -> "الفترة الثامنة"
+            9 -> "الفترة التاسعة"
+            10 -> "الفترة العاشرة"
+            else -> "الفترة ${count + 1}"
+        }
+    }
+
+    /**
+     * Checks whether a date range [startDate, endDate] overlaps with any other existing period
+     * (excluding [excludeId] if provided), or starts on/before the end of a previous closed period.
+     * Returns an Arabic validation error message if invalid, or null if valid.
+     */
+    fun validateStudyPeriodDates(
+        startDate: String,
+        endDate: String?,
+        excludeId: Long? = null
+    ): String? {
+        if (startDate.isBlank()) {
+            return "يرجى تحديد تاريخ بداية الفترة"
+        }
+        if (endDate != null) {
+            if (endDate.isBlank()) {
+                return "يرجى تحديد تاريخ نهاية الفترة"
+            }
+            if (endDate < startDate) {
+                return "لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية"
+            }
+        }
+
+        val others = getStudyPeriods().filter { it.id != excludeId }
+        for (other in others) {
+            val otherStart = other.startDate
+            val otherEnd = other.endDate
+            if (otherEnd != null) {
+                // Other period is CLOSED with [otherStart, otherEnd]
+                if (endDate == null) {
+                    // Creating or editing an OPEN period starting at startDate:
+                    // Must be strictly after all previous closed periods' end dates
+                    if (startDate <= otherEnd) {
+                        return "تاريخ البداية غير منطقي بالنسبة للفترات السابقة؛ يجب أن يكون بعد تاريخ نهاية «${other.periodName}» (${formatIsoDateToDisplay(otherEnd)})"
+                    }
+                } else {
+                    // Both periods have start and end dates: check overlap
+                    val overlaps = startDate <= otherEnd && endDate >= otherStart
+                    if (overlaps) {
+                        return "التواريخ المحددة تتداخل مع «${other.periodName}» (${formatIsoDateToDisplay(otherStart)} → ${formatIsoDateToDisplay(otherEnd)})"
+                    }
+                }
+            } else {
+                // Other period is OPEN starting at otherStart
+                if (endDate != null && endDate >= otherStart) {
+                    return "تاريخ النهاية يتداخل مع بداية الفترة المفتوحة «${other.periodName}» (${formatIsoDateToDisplay(otherStart)})"
+                }
+            }
+        }
+        return null
+    }
+
+    private fun formatIsoDateToDisplay(isoDate: String): String {
+        val parts = isoDate.trim().split("-")
+        if (parts.size != 3) return isoDate
+        return "${parts[2]}/${parts[1]}/${parts[0]}"
+    }
+
+    fun startNewStudyPeriod(
+        periodName: String,
+        startDate: String
+    ): Pair<Long, String?> {
+        val openPeriod = getOpenStudyPeriod()
+        if (openPeriod != null) {
+            return -1L to "توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة."
+        }
+        val cleanName = periodName.trim().ifBlank { getSuggestedNextPeriodName() }
+        val cleanStart = startDate.trim()
+        val dateErr = validateStudyPeriodDates(startDate = cleanStart, endDate = null, excludeId = null)
+        if (dateErr != null) {
+            return -1L to dateErr
+        }
+
+        val db = dbHelper.writableDatabase
+        val now = Instant.now().toString()
+        val cv = ContentValues().apply {
+            put("PeriodName", cleanName)
+            put("StartDate", cleanStart)
+            putNull("EndDate")
+            put("Status", StudyPeriodStatus.OPEN.dbValue)
+            put("CreatedDate", now)
+        }
+        val insertedId = runCatching {
+            db.insertOrThrow("StudyPeriods", null, cv)
+        }.getOrElse { -1L }
+
+        if (insertedId == -1L) {
+            return -1L to "توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة."
+        }
+        return insertedId to null
+    }
+
+    fun closeStudyPeriod(
+        id: Long,
+        endDate: String
+    ): String? {
+        val target = getStudyPeriods().firstOrNull { it.id == id }
+            ?: return "الفترة الدراسية غير موجودة"
+
+        val cleanEnd = endDate.trim()
+        if (cleanEnd.isBlank()) {
+            return "يرجى تحديد تاريخ نهاية الفترة"
+        }
+        if (cleanEnd < target.startDate) {
+            return "لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية (${formatIsoDateToDisplay(target.startDate)})"
+        }
+        val dateErr = validateStudyPeriodDates(
+            startDate = target.startDate,
+            endDate = cleanEnd,
+            excludeId = id
+        )
+        if (dateErr != null) return dateErr
+
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("EndDate", cleanEnd)
+            put("Status", StudyPeriodStatus.CLOSED.dbValue)
+        }
+        db.update("StudyPeriods", cv, "ID = ?", arrayOf(id.toString()))
+        return null
+    }
+
+    fun updateStudyPeriod(
+        id: Long,
+        periodName: String,
+        startDate: String,
+        endDate: String?
+    ): String? {
+        val target = getStudyPeriods().firstOrNull { it.id == id }
+            ?: return "الفترة الدراسية غير موجودة"
+
+        val cleanName = periodName.trim()
+        if (cleanName.isBlank()) {
+            return "يرجى إدخال اسم الفترة الدراسية"
+        }
+        val cleanStart = startDate.trim()
+        val effectiveStart = if (target.status == StudyPeriodStatus.OPEN) cleanStart else target.startDate
+        val effectiveEnd = if (target.status == StudyPeriodStatus.CLOSED) endDate?.trim() else null
+
+        if (target.status == StudyPeriodStatus.CLOSED && effectiveEnd.isNullOrBlank()) {
+            return "يرجى تحديد تاريخ النهاية للفترة المغلقة"
+        }
+
+        val dateErr = validateStudyPeriodDates(
+            startDate = effectiveStart,
+            endDate = effectiveEnd,
+            excludeId = id
+        )
+        if (dateErr != null) return dateErr
+
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("PeriodName", cleanName)
+            if (target.status == StudyPeriodStatus.OPEN) {
+                put("StartDate", effectiveStart)
+            }
+            if (target.status == StudyPeriodStatus.CLOSED && effectiveEnd != null) {
+                put("EndDate", effectiveEnd)
+            }
+        }
+        db.update("StudyPeriods", cv, "ID = ?", arrayOf(id.toString()))
+        return null
+    }
+
+    fun deleteStudyPeriod(id: Long) {
+        // Deletes only the StudyPeriod time definition; never touches students, attendance, or evaluations.
+        val db = dbHelper.writableDatabase
+        db.delete("StudyPeriods", "ID = ?", arrayOf(id.toString()))
+    }
 }

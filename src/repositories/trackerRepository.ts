@@ -8,6 +8,8 @@ import {
   SectionEntity,
   StudentDailyEntry,
   StudentEntity,
+  StudyPeriodEntity,
+  StudyPeriodStatus,
 } from '../types';
 import { getDatabase, persistDatabaseToStorage } from '../db/sqliteEngine';
 
@@ -944,6 +946,252 @@ export class TrackerRepository {
   static async deleteDailyScheduleEntry(id: number): Promise<void> {
     const db = await getDatabase();
     db.run('DELETE FROM DailySchedule WHERE ID = ?;', [id]);
+    await persistDatabaseToStorage();
+  }
+
+  // ---------------- STUDY PERIODS ("الفترات الدراسية") ----------------
+  static async getStudyPeriods(): Promise<StudyPeriodEntity[]> {
+    const db = await getDatabase();
+    const res = db.exec(`
+      SELECT ID, PeriodName, StartDate, EndDate, Status, CreatedDate
+      FROM StudyPeriods
+      ORDER BY StartDate ASC, ID ASC;
+    `);
+    if (res.length === 0) return [];
+    return res[0].values.map((row) => ({
+      id: Number(row[0]),
+      periodName: String(row[1] || ''),
+      startDate: String(row[2] || ''),
+      endDate: row[3] !== null && String(row[3]).trim() !== '' ? String(row[3]) : null,
+      status: (String(row[4]) === 'CLOSED' ? 'CLOSED' : 'OPEN') as StudyPeriodStatus,
+      createdDate: String(row[5] || ''),
+    }));
+  }
+
+  static async getOpenStudyPeriod(): Promise<StudyPeriodEntity | null> {
+    const list = await this.getStudyPeriods();
+    return list.find((p) => p.status === 'OPEN') || null;
+  }
+
+  static async getSuggestedNextPeriodName(): Promise<string> {
+    const list = await this.getStudyPeriods();
+    const nextNum = list.length + 1;
+    switch (nextNum) {
+      case 1:
+        return 'الفترة الأولى';
+      case 2:
+        return 'الفترة الثانية';
+      case 3:
+        return 'الفترة الثالثة';
+      case 4:
+        return 'الفترة الرابعة';
+      case 5:
+        return 'الفترة الخامسة';
+      case 6:
+        return 'الفترة السادسة';
+      case 7:
+        return 'الفترة السابعة';
+      case 8:
+        return 'الفترة الثامنة';
+      case 9:
+        return 'الفترة التاسعة';
+      case 10:
+        return 'الفترة العاشرة';
+      default:
+        return `الفترة ${nextNum}`;
+    }
+  }
+
+  private static formatIsoToDisplay(isoDate: string): string {
+    const parts = isoDate.trim().split('-');
+    if (parts.length !== 3) return isoDate;
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+
+  static async validateStudyPeriodDates(
+    startDate: string,
+    endDate: string | null,
+    excludeId?: number
+  ): Promise<string | null> {
+    if (!startDate.trim()) {
+      return 'يرجى تحديد تاريخ بداية الفترة';
+    }
+    if (endDate !== null) {
+      if (!endDate.trim()) {
+        return 'يرجى تحديد تاريخ نهاية الفترة';
+      }
+      if (endDate < startDate) {
+        return 'لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية';
+      }
+    }
+
+    const all = await this.getStudyPeriods();
+    const others = all.filter((p) => p.id !== excludeId);
+    for (const other of others) {
+      const otherStart = other.startDate;
+      const otherEnd = other.endDate;
+      if (otherEnd !== null) {
+        if (endDate === null) {
+          if (startDate <= otherEnd) {
+            return `تاريخ البداية غير منطقي بالنسبة للفترات السابقة؛ يجب أن يكون بعد تاريخ نهاية «${other.periodName}» (${this.formatIsoToDisplay(
+              otherEnd
+            )})`;
+          }
+        } else {
+          const overlaps = startDate <= otherEnd && endDate >= otherStart;
+          if (overlaps) {
+            return `التواريخ المحددة تتداخل مع «${other.periodName}» (${this.formatIsoToDisplay(
+              otherStart
+            )} → ${this.formatIsoToDisplay(otherEnd)})`;
+          }
+        }
+      } else {
+        if (endDate !== null && endDate >= otherStart) {
+          return `تاريخ النهاية يتداخل مع بداية الفترة المفتوحة «${other.periodName}» (${this.formatIsoToDisplay(
+            otherStart
+          )})`;
+        }
+      }
+    }
+    return null;
+  }
+
+  static async startNewStudyPeriod(
+    periodName: string,
+    startDate: string
+  ): Promise<{ id: number; error: string | null }> {
+    const openPeriod = await this.getOpenStudyPeriod();
+    if (openPeriod) {
+      return {
+        id: -1,
+        error: 'توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة.',
+      };
+    }
+
+    const suggested = await this.getSuggestedNextPeriodName();
+    const cleanName = periodName.trim() || suggested;
+    const cleanStart = startDate.trim();
+    const dateErr = await this.validateStudyPeriodDates(cleanStart, null);
+    if (dateErr) {
+      return { id: -1, error: dateErr };
+    }
+
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    try {
+      db.run(
+        `INSERT INTO StudyPeriods (PeriodName, StartDate, EndDate, Status, CreatedDate)
+         VALUES (?, ?, NULL, 'OPEN', ?);`,
+        [cleanName, cleanStart, now]
+      );
+    } catch {
+      return {
+        id: -1,
+        error: 'توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة.',
+      };
+    }
+    const idRes = db.exec('SELECT last_insert_rowid();');
+    await persistDatabaseToStorage();
+    return {
+      id: idRes.length > 0 ? Number(idRes[0].values[0][0]) : -1,
+      error: null,
+    };
+  }
+
+  static async closeStudyPeriod(
+    id: number,
+    endDate: string
+  ): Promise<{ error: string | null }> {
+    const all = await this.getStudyPeriods();
+    const target = all.find((p) => p.id === id);
+    if (!target) {
+      return { error: 'الفترة الدراسية غير موجودة' };
+    }
+
+    const cleanEnd = endDate.trim();
+    if (!cleanEnd) {
+      return { error: 'يرجى تحديد تاريخ نهاية الفترة' };
+    }
+    if (cleanEnd < target.startDate) {
+      return {
+        error: `لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية (${this.formatIsoToDisplay(
+          target.startDate
+        )})`,
+      };
+    }
+
+    const dateErr = await this.validateStudyPeriodDates(
+      target.startDate,
+      cleanEnd,
+      id
+    );
+    if (dateErr) {
+      return { error: dateErr };
+    }
+
+    const db = await getDatabase();
+    db.run(
+      `UPDATE StudyPeriods SET EndDate = ?, Status = 'CLOSED' WHERE ID = ?;`,
+      [cleanEnd, id]
+    );
+    await persistDatabaseToStorage();
+    return { error: null };
+  }
+
+  static async updateStudyPeriod(
+    id: number,
+    periodName: string,
+    startDate: string,
+    endDate: string | null
+  ): Promise<{ error: string | null }> {
+    const all = await this.getStudyPeriods();
+    const target = all.find((p) => p.id === id);
+    if (!target) {
+      return { error: 'الفترة الدراسية غير موجودة' };
+    }
+
+    const cleanName = periodName.trim();
+    if (!cleanName) {
+      return { error: 'يرجى إدخال اسم الفترة الدراسية' };
+    }
+
+    const effectiveStart =
+      target.status === 'OPEN' ? startDate.trim() : target.startDate;
+    const effectiveEnd =
+      target.status === 'CLOSED' ? (endDate?.trim() || null) : null;
+
+    if (target.status === 'CLOSED' && !effectiveEnd) {
+      return { error: 'يرجى تحديد تاريخ النهاية للفترة المغلقة' };
+    }
+
+    const dateErr = await this.validateStudyPeriodDates(
+      effectiveStart,
+      effectiveEnd,
+      id
+    );
+    if (dateErr) {
+      return { error: dateErr };
+    }
+
+    const db = await getDatabase();
+    if (target.status === 'OPEN') {
+      db.run(
+        `UPDATE StudyPeriods SET PeriodName = ?, StartDate = ? WHERE ID = ?;`,
+        [cleanName, effectiveStart, id]
+      );
+    } else {
+      db.run(
+        `UPDATE StudyPeriods SET PeriodName = ?, EndDate = ? WHERE ID = ?;`,
+        [cleanName, effectiveEnd, id]
+      );
+    }
+    await persistDatabaseToStorage();
+    return { error: null };
+  }
+
+  static async deleteStudyPeriod(id: number): Promise<void> {
+    const db = await getDatabase();
+    db.run('DELETE FROM StudyPeriods WHERE ID = ?;', [id]);
     await persistDatabaseToStorage();
   }
 }

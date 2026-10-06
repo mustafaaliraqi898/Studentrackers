@@ -4,6 +4,7 @@ import {
   CalendarCheck,
   CalendarClock,
   CalendarOff,
+  CalendarRange,
   ChevronLeft,
   ClipboardList,
   Database,
@@ -293,6 +294,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <h4 className="text-sm font-extrabold text-slate-900">الجدول اليومي</h4>
               <p className="text-xs text-slate-500 mt-0.5">
                 جدول الحصص الأسبوعي للمدرس (اليوم والصف والشعبة والدرس والوقت)
+              </p>
+            </div>
+          </div>
+          <ChevronLeft className="w-4 h-4 text-slate-400" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate('study-periods')}
+          className="bg-white hover:bg-slate-50/80 rounded-2xl p-4 border border-slate-200/80 text-right transition-all flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+              <CalendarRange className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-900">الفترات الدراسية</h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                تحديد تاريخ بداية ونهاية كل فترة دراسية (مفتوحة / مغلقة)
               </p>
             </div>
           </div>

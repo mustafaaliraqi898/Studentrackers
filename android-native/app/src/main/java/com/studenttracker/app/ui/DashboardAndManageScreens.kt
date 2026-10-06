@@ -233,6 +233,14 @@ fun DashboardScreen(
                         tint = Teal700,
                         onClick = { onNavigate(AppScreen.DAILY_SCHEDULE) }
                     )
+                    NavActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "الفترات الدراسية",
+                        subtitle = "تحديد بداية ونهاية كل فترة",
+                        icon = Icons.Default.DateRange,
+                        tint = Emerald700,
+                        onClick = { onNavigate(AppScreen.STUDY_PERIODS) }
+                    )
                 }
             }
         }
@@ -2189,6 +2197,877 @@ fun DailyScheduleScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeleteItem = null }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
+    }
+}
+
+// ============================================================================
+// STUDY PERIODS SCREEN ("الفترات الدراسية")
+// ============================================================================
+@Composable
+fun StudyPeriodsScreen(
+    repository: TrackerRepository,
+    refreshTick: Int,
+    onDataChanged: () -> Unit,
+    onShowMessage: (String) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val allPeriods = remember(refreshTick) {
+        repository.getStudyPeriods()
+    }
+    val openPeriod = remember(allPeriods) {
+        allPeriods.firstOrNull { it.status == StudyPeriodStatus.OPEN }
+    }
+    val closedPeriods = remember(allPeriods) {
+        allPeriods.filter { it.status == StudyPeriodStatus.CLOSED }.sortedByDescending { it.startDate }
+    }
+
+    var bannerMessage by remember { mutableStateOf<String?>(null) }
+    var bannerIsError by remember { mutableStateOf(false) }
+
+    fun showFeedback(msg: String, isError: Boolean) {
+        bannerMessage = msg
+        bannerIsError = isError
+    }
+
+    // Dialog states
+    var showStartDialog by remember { mutableStateOf(false) }
+    var newPeriodName by remember { mutableStateOf("") }
+    var newStartDate by remember { mutableStateOf("") }
+    var startDialogError by remember { mutableStateOf<String?>(null) }
+
+    var closingPeriod by remember { mutableStateOf<StudyPeriodEntity?>(null) }
+    var closeEndDate by remember { mutableStateOf("") }
+    var closeDialogError by remember { mutableStateOf<String?>(null) }
+
+    var editingPeriod by remember { mutableStateOf<StudyPeriodEntity?>(null) }
+    var editPeriodName by remember { mutableStateOf("") }
+    var editStartDate by remember { mutableStateOf("") }
+    var editEndDate by remember { mutableStateOf("") }
+    var editDialogError by remember { mutableStateOf<String?>(null) }
+
+    var deletingPeriod by remember { mutableStateOf<StudyPeriodEntity?>(null) }
+
+    fun openAndroidDatePicker(initialIsoDate: String, onDatePicked: (String) -> Unit) {
+        val parts = initialIsoDate.trim().split("-")
+        val nowCal = java.util.Calendar.getInstance()
+        val initYear = parts.getOrNull(0)?.toIntOrNull() ?: 2026
+        val initMonth = (parts.getOrNull(1)?.toIntOrNull()?.minus(1))?.coerceIn(0, 11) ?: nowCal.get(java.util.Calendar.MONTH)
+        val initDay = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(1, 31) ?: nowCal.get(java.util.Calendar.DAY_OF_MONTH)
+
+        android.app.DatePickerDialog(
+            context,
+            { _, year, monthOfYear, dayOfMonth ->
+                val iso = String.format(java.util.Locale.US, "%04d-%02d-%02d", year, monthOfYear + 1, dayOfMonth)
+                onDatePicked(iso)
+            },
+            initYear,
+            initMonth,
+            initDay
+        ).show()
+    }
+
+    fun getSuggestedNextStartDate(): String {
+        val lastClosed = allPeriods
+            .filter { it.status == StudyPeriodStatus.CLOSED && !it.endDate.isNullOrBlank() }
+            .maxByOrNull { it.endDate!! }
+        if (lastClosed?.endDate != null) {
+            return runCatching {
+                java.time.LocalDate.parse(lastClosed.endDate).plusDays(1).toString()
+            }.getOrDefault("2026-10-05")
+        }
+        return "2026-10-05"
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Top Header & "بدء فترة جديدة" Action Card
+        item {
+            Surface(
+                color = Slate900,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "نظام الفترات الدراسية",
+                                color = Color.White,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "حدد تاريخ بداية ونهاية كل فترة دراسية بنفسك دون تقيد بشهر ميلادي ثابت",
+                                color = Slate200,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            if (openPeriod != null) {
+                                val msg = "توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة."
+                                showFeedback(msg, isError = true)
+                                onShowMessage(msg)
+                            } else {
+                                newPeriodName = repository.getSuggestedNextPeriodName()
+                                newStartDate = getSuggestedNextStartDate()
+                                startDialogError = null
+                                showStartDialog = true
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (openPeriod == null) Emerald600 else Slate700
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.AddCircleOutline, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "بدء فترة جديدة",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        // Feedback Banner
+        if (bannerMessage != null) {
+            item {
+                Surface(
+                    color = if (bannerIsError) Red50 else Emerald50,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, if (bannerIsError) Red600 else Emerald600),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = bannerMessage!!,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (bannerIsError) Red700 else Emerald700,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { bannerMessage = null }) {
+                            Text("إغلاق", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Slate700)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section 1: الفترة الحالية (Open Period)
+        item {
+            Text(
+                text = "الفترة الحالية",
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 15.sp,
+                color = Slate900
+            )
+        }
+
+        item {
+            if (openPeriod != null) {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(2.dp, Emerald600),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = openPeriod.periodName,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 17.sp,
+                                color = Slate900
+                            )
+                            Surface(
+                                color = Emerald100,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Emerald600)
+                            ) {
+                                Text(
+                                    text = "مفتوحة",
+                                    color = Emerald700,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = Emerald50,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "${GradingService.formatDisplayDate(openPeriod.startDate)} → مفتوحة",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 15.sp,
+                                    color = Emerald700
+                                )
+                                Text(
+                                    text = "من: ${GradingService.formatDisplayDate(openPeriod.startDate)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate800
+                                )
+                                Text(
+                                    text = "إلى: مفتوحة",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate800
+                                )
+                                Text(
+                                    text = "الحالة: مفتوحة",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Emerald700
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    closingPeriod = openPeriod
+                                    closeEndDate = openPeriod.startDate
+                                    closeDialogError = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Amber600),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("إنهاء الفترة", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    editingPeriod = openPeriod
+                                    editPeriodName = openPeriod.periodName
+                                    editStartDate = openPeriod.startDate
+                                    editEndDate = ""
+                                    editDialogError = null
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp), tint = Slate800)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("تعديل", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Slate800)
+                            }
+
+                            OutlinedButton(
+                                onClick = { deletingPeriod = openPeriod },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Red100),
+                                modifier = Modifier.height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp), tint = Red600)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.DateRange, contentDescription = null, tint = Slate500, modifier = Modifier.size(28.dp))
+                        Text(
+                            text = "لا توجد فترة دراسية مفتوحة حالياً",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = Slate800
+                        )
+                        Text(
+                            text = "اضغط على «بدء فترة جديدة» في الأعلى لتحديد تاريخ البداية وفتح فترة جديدة",
+                            fontSize = 12.sp,
+                            color = Slate600
+                        )
+                    }
+                }
+            }
+        }
+
+        // Section 2: الفترات السابقة / جميع الفترات المسجلة
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "الفترات السابقة (${closedPeriods.size})",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    color = Slate900
+                )
+            }
+        }
+
+        if (closedPeriods.isEmpty()) {
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "لا توجد فترات دراسية مغلقة حتى الآن.",
+                        fontSize = 13.sp,
+                        color = Slate600,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        } else {
+            items(closedPeriods, key = { it.id }) { period ->
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = period.periodName,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                            Surface(
+                                color = Slate100,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, Slate200)
+                            ) {
+                                Text(
+                                    text = "مغلقة",
+                                    color = Slate700,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "${GradingService.formatDisplayDate(period.startDate)} → ${GradingService.formatDisplayDate(period.endDate ?: "")}",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = Teal700
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "البداية: ${GradingService.formatDisplayDate(period.startDate)} · النهاية: ${GradingService.formatDisplayDate(period.endDate ?: "")}",
+                                fontSize = 12.sp,
+                                color = Slate600,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        editingPeriod = period
+                                        editPeriodName = period.periodName
+                                        editStartDate = period.startDate
+                                        editEndDate = period.endDate ?: period.startDate
+                                        editDialogError = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp), tint = Slate800)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("تعديل", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate800)
+                                }
+                                OutlinedButton(
+                                    onClick = { deletingPeriod = period },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, Red100)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = Red600)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Red600)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 1. Dialog: Start New Study Period ("بدء فترة جديدة")
+    if (showStartDialog) {
+        AlertDialog(
+            onDismissRequest = { showStartDialog = false },
+            title = {
+                Text(
+                    text = "بدء فترة دراسية جديدة",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 17.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (startDialogError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = startDialogError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newPeriodName,
+                        onValueChange = {
+                            newPeriodName = it
+                            startDialogError = null
+                        },
+                        label = { Text("اسم الفترة الدراسية") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text(
+                        text = "تاريخ البداية (مطلوب):",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp,
+                        color = Slate800
+                    )
+
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openAndroidDatePicker(newStartDate.ifBlank { "2026-10-05" }) { picked ->
+                                    newStartDate = picked
+                                    startDialogError = null
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (newStartDate.isNotBlank()) GradingService.formatDisplayDate(newStartDate) else "اختر تاريخ البداية",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = Slate900
+                            )
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Teal700)
+                        }
+                    }
+
+                    Text(
+                        text = "ستصبح هذه الفترة «مفتوحة» مباشرة، ولا يُطلب تحديد تاريخ النهاية إلا عند الضغط على «إنهاء الفترة».",
+                        fontSize = 11.sp,
+                        color = Slate600
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val (_, err) = repository.startNewStudyPeriod(
+                            periodName = newPeriodName,
+                            startDate = newStartDate
+                        )
+                        if (err != null) {
+                            startDialogError = err
+                        } else {
+                            showStartDialog = false
+                            onDataChanged()
+                            showFeedback("تم بدء الفترة الدراسية الجديدة بنجاح (مفتوحة)", isError = false)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                ) {
+                    Text("بدء الفترة", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartDialog = false }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
+    }
+
+    // 2. Dialog: Close Open Study Period ("إنهاء الفترة")
+    if (closingPeriod != null) {
+        val target = closingPeriod!!
+        AlertDialog(
+            onDismissRequest = { closingPeriod = null },
+            title = {
+                Text(
+                    text = "إنهاء ${target.periodName}",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 17.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (closeDialogError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = closeDialogError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "تاريخ البداية المسجل: ${GradingService.formatDisplayDate(target.startDate)}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate700
+                    )
+
+                    Text(
+                        text = "حدد تاريخ النهاية:",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp,
+                        color = Slate800
+                    )
+
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openAndroidDatePicker(closeEndDate.ifBlank { target.startDate }) { picked ->
+                                    closeEndDate = picked
+                                    closeDialogError = null
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (closeEndDate.isNotBlank()) GradingService.formatDisplayDate(closeEndDate) else "اختر تاريخ النهاية",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = Slate900
+                            )
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Amber600)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val err = repository.closeStudyPeriod(
+                            id = target.id,
+                            endDate = closeEndDate
+                        )
+                        if (err != null) {
+                            closeDialogError = err
+                        } else {
+                            closingPeriod = null
+                            onDataChanged()
+                            showFeedback("تم إنهاء «${target.periodName}» وتحويل حالتها إلى مغلقة", isError = false)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber600)
+                ) {
+                    Text("حفظ وإنهاء الفترة", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { closingPeriod = null }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
+    }
+
+    // 3. Dialog: Edit Study Period ("تعديل الفترة")
+    if (editingPeriod != null) {
+        val target = editingPeriod!!
+        val isOpen = target.status == StudyPeriodStatus.OPEN
+        AlertDialog(
+            onDismissRequest = { editingPeriod = null },
+            title = {
+                Text(
+                    text = "تعديل بيانات الفترة",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 17.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (editDialogError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = editDialogError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = editPeriodName,
+                        onValueChange = {
+                            editPeriodName = it
+                            editDialogError = null
+                        },
+                        label = { Text("اسم الفترة") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (isOpen) {
+                        Text(
+                            text = "تاريخ البداية (الفترة مفتوحة):",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp,
+                            color = Slate800
+                        )
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    openAndroidDatePicker(editStartDate) { picked ->
+                                        editStartDate = picked
+                                        editDialogError = null
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = GradingService.formatDisplayDate(editStartDate),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    color = Slate900
+                                )
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Teal700)
+                            }
+                        }
+                    } else {
+                        Text(
+                            text = "تاريخ البداية (ثابت بعد الإغلاق): ${GradingService.formatDisplayDate(target.startDate)}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate600
+                        )
+
+                        Text(
+                            text = "تعديل تاريخ النهاية (للفترة المغلقة):",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp,
+                            color = Slate800
+                        )
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    openAndroidDatePicker(editEndDate.ifBlank { target.startDate }) { picked ->
+                                        editEndDate = picked
+                                        editDialogError = null
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = GradingService.formatDisplayDate(editEndDate),
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    color = Slate900
+                                )
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Teal700)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val err = repository.updateStudyPeriod(
+                            id = target.id,
+                            periodName = editPeriodName,
+                            startDate = editStartDate,
+                            endDate = if (isOpen) null else editEndDate
+                        )
+                        if (err != null) {
+                            editDialogError = err
+                        } else {
+                            editingPeriod = null
+                            onDataChanged()
+                            showFeedback("تم حفظ تعديلات الفترة بنجاح", isError = false)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Teal700)
+                ) {
+                    Text("حفظ التعديلات", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingPeriod = null }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
+    }
+
+    // 4. Dialog: Delete Confirmation ("حذف الفترة")
+    if (deletingPeriod != null) {
+        val target = deletingPeriod!!
+        AlertDialog(
+            onDismissRequest = { deletingPeriod = null },
+            title = {
+                Text(
+                    text = "تأكيد حذف الفترة",
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Red700
+                )
+            },
+            text = {
+                Text(
+                    text = "هل أنت متأكد من حذف هذه الفترة؟\n(${target.periodName}: ${GradingService.formatDisplayDate(target.startDate)} → ${if (target.endDate != null) GradingService.formatDisplayDate(target.endDate) else "مفتوحة"})\n\nملاحظة: لن يتم حذف أي سجلات طلاب أو حضور أو تقييمات عند حذف الفترة.",
+                    fontSize = 13.sp,
+                    color = Slate800
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        repository.deleteStudyPeriod(target.id)
+                        deletingPeriod = null
+                        onDataChanged()
+                        showFeedback("تم حذف الفترة الدراسية دون المساس بسجلات الطلاب", isError = false)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("حذف الفترة", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingPeriod = null }) {
                     Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
                 }
             }

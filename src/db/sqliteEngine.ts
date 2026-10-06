@@ -8,7 +8,7 @@ let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbInstance: Database | null = null;
 let lastMigrationWarning: string | null = null;
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export function getLastMigrationWarning(): string | null {
   return lastMigrationWarning;
@@ -124,6 +124,15 @@ CREATE TABLE IF NOT EXISTS DailySchedule (
   UNIQUE(DayOfWeek, ClassID, SectionID, LessonNumber)
 );
 
+CREATE TABLE IF NOT EXISTS StudyPeriods (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  PeriodName TEXT NOT NULL,
+  StartDate TEXT NOT NULL,
+  EndDate TEXT NULL,
+  Status TEXT NOT NULL CHECK(Status IN ('OPEN', 'CLOSED')),
+  CreatedDate TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sections_class ON Sections(ClassID);
 CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);
 CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);
@@ -135,6 +144,9 @@ CREATE INDEX IF NOT EXISTS idx_holidays_date ON Holidays(HolidayDate);
 CREATE INDEX IF NOT EXISTS idx_schedule_day_lesson ON DailySchedule(DayOfWeek, LessonNumber, StartTime);
 CREATE INDEX IF NOT EXISTS idx_schedule_class_sec ON DailySchedule(ClassID, SectionID);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayOfWeek, ClassID, SectionID, LessonNumber);
+CREATE INDEX IF NOT EXISTS idx_studyperiods_status ON StudyPeriods(Status);
+CREATE INDEX IF NOT EXISTS idx_studyperiods_dates ON StudyPeriods(StartDate, EndDate);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(Status) WHERE Status = 'OPEN';
 `;
 
 function openIndexedDB(): Promise<IDBDatabase> {
@@ -338,6 +350,39 @@ function runMigrations(db: Database): void {
       );
     } catch (err) {
       console.warn('Migration v5 warning:', err);
+    }
+  }
+
+  if (currentVer < 6) {
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS StudyPeriods (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          PeriodName TEXT NOT NULL,
+          StartDate TEXT NOT NULL,
+          EndDate TEXT NULL,
+          Status TEXT NOT NULL CHECK(Status IN ('OPEN', 'CLOSED')),
+          CreatedDate TEXT NOT NULL
+        );
+      `);
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_studyperiods_status ON StudyPeriods(Status);'
+      );
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_studyperiods_dates ON StudyPeriods(StartDate, EndDate);'
+      );
+      db.run(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(Status) WHERE Status = 'OPEN';"
+      );
+      db.run(
+        `INSERT INTO SchemaMigrations (Version, AppliedAt, Description) VALUES (6, ?, ?);`,
+        [
+          new Date().toISOString(),
+          'Added StudyPeriods table with OPEN/CLOSED status, date indexes, and single open period unique constraint',
+        ]
+      );
+    } catch (err) {
+      console.warn('Migration v6 warning:', err);
     }
   }
 }

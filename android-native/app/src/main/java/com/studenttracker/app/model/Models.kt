@@ -153,4 +153,23 @@ data class DailyScheduleEntity(
     val createdDate: String
 )
 
+enum class StudyPeriodStatus(val dbValue: String, val arabicLabel: String) {
+    OPEN("OPEN", "مفتوحة"),
+    CLOSED("CLOSED", "مغلقة");
+
+    companion object {
+        fun fromDb(v: String?): StudyPeriodStatus =
+            if (v == "CLOSED") CLOSED else OPEN
+    }
+}
+
+data class StudyPeriodEntity(
+    val id: Long,
+    val periodName: String,
+    val startDate: String, // YYYY-MM-DD
+    val endDate: String?,  // YYYY-MM-DD or null when OPEN
+    val status: StudyPeriodStatus,
+    val createdDate: String
+)
+
 

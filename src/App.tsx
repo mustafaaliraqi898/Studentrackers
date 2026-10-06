@@ -31,6 +31,7 @@ import { StudentsView } from './components/StudentsView';
 import { DailyTrackingView } from './components/DailyTrackingView';
 import { AbsenceTrackingView } from './components/AbsenceTrackingView';
 import { DailyScheduleView } from './components/DailyScheduleView';
+import { StudyPeriodsView } from './components/StudyPeriodsView';
 import { HolidaysView } from './components/HolidaysView';
 import { SavedRecordsView } from './components/SavedRecordsView';
 import { StudentProfileView } from './components/StudentProfileView';
@@ -537,6 +538,13 @@ export default function App() {
             sections={sections}
             recordsVersion={refreshVersion}
             onScheduleChanged={refreshAllFromSQLite}
+          />
+        )}
+
+        {currentScreen === 'study-periods' && (
+          <StudyPeriodsView
+            recordsVersion={refreshVersion}
+            onPeriodsChanged={refreshAllFromSQLite}
           />
         )}
 
