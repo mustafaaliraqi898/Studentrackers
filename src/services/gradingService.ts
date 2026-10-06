@@ -4,7 +4,9 @@ import {
   RatingValue,
   StudentAbsenceSummary,
   StudentCalculatedGrade,
+  StudentComprehensiveGradeReport,
   StudentDailyEntry,
+  StudentPeriodGradeBreakdown,
 } from '../types';
 import { TrackerRepository } from '../repositories/trackerRepository';
 
@@ -121,9 +123,17 @@ export class GradingService {
     liveDraftOverride?: {
       recordDate: string;
       entries: Record<number, StudentDailyEntry>;
-    }
+    },
+    startDateInclusive?: string | null,
+    endDateInclusive?: string | null
   ): Promise<StudentCalculatedGrade[]> {
-    const raw = await TrackerRepository.getRawStudentHistory(classId, sectionId, monthFilter);
+    const raw = await TrackerRepository.getRawStudentHistory(
+      classId,
+      sectionId,
+      monthFilter,
+      startDateInclusive,
+      endDateInclusive
+    );
 
     // Helper to check if a date is excluded from working days (Friday, Saturday, or registered Holiday)
     const isExcludedDate = (dateStr: string): boolean => {
@@ -431,5 +441,105 @@ export class GradingService {
       }
       return a.studentName.localeCompare(b.studentName, 'ar');
     });
+  }
+
+  static async calculateComprehensiveStudentReports(
+    classId?: number,
+    sectionId?: number,
+    baseDateFilter: string = 'ALL'
+  ): Promise<StudentComprehensiveGradeReport[]> {
+    const baseGrades = await this.calculateGradesForClass(
+      classId,
+      sectionId,
+      baseDateFilter
+    );
+    const periods = await TrackerRepository.getStudyPeriods();
+    const storedPeriodGrades = await TrackerRepository.getPeriodGrades();
+    const storedMap = new Map<string, (typeof storedPeriodGrades)[number]>();
+    for (const pg of storedPeriodGrades) {
+      storedMap.set(`${pg.studentId}:${pg.periodId}`, pg);
+    }
+
+    const periodGradesMap = new Map<number, Map<number, StudentCalculatedGrade>>();
+    for (const period of periods) {
+      const pGrades = await this.calculateGradesForClass(
+        classId,
+        sectionId,
+        undefined,
+        undefined,
+        period.startDate,
+        period.endDate
+      );
+      const bySt = new Map<number, StudentCalculatedGrade>();
+      for (const g of pGrades) {
+        bySt.set(g.studentId, g);
+      }
+      periodGradesMap.set(period.id, bySt);
+    }
+
+    const reports: StudentComprehensiveGradeReport[] = [];
+    for (const baseGrade of baseGrades) {
+      const stId = baseGrade.studentId;
+      const breakdowns: StudentPeriodGradeBreakdown[] = [];
+
+      for (const period of periods) {
+        const calcDaily = periodGradesMap.get(period.id)?.get(stId) || baseGrade;
+        const dailyScore = round2(calcDaily.totalScore);
+        const stored = storedMap.get(`${stId}:${period.id}`);
+        const written =
+          stored && stored.writtenExamGrade !== null
+            ? round2(stored.writtenExamGrade)
+            : null;
+        const periodAvg =
+          written !== null ? round2((dailyScore + written) / 2) : null;
+
+        if (
+          stored &&
+          (stored.dailyGrade !== dailyScore || stored.periodAverage !== periodAvg)
+        ) {
+          await TrackerRepository.upsertPeriodGrade(
+            stId,
+            period.id,
+            dailyScore,
+            written
+          );
+        }
+
+        breakdowns.push({
+          period,
+          calculatedDailyGrade: calcDaily,
+          dailyGrade: dailyScore,
+          writtenExamGrade: written,
+          periodAverage: periodAvg,
+          updatedDate: stored?.updatedDate || null,
+        });
+      }
+
+      const completedAverages = breakdowns
+        .map((b) => b.periodAverage)
+        .filter((v): v is number => v !== null);
+      const finalAverage =
+        completedAverages.length > 0
+          ? round2(
+              completedAverages.reduce((acc, v) => acc + v, 0) /
+                completedAverages.length
+            )
+          : null;
+
+      reports.push({
+        studentId: stId,
+        studentName: baseGrade.studentName,
+        classId: baseGrade.classId,
+        className: baseGrade.className,
+        sectionId: baseGrade.sectionId,
+        sectionName: baseGrade.sectionName,
+        baseDailyGrade: baseGrade,
+        periodBreakdowns: breakdowns,
+        completedPeriodsCount: completedAverages.length,
+        finalAverage,
+      });
+    }
+
+    return reports;
   }
 }

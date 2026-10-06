@@ -583,6 +583,7 @@ export default function App() {
           <StudentProfileView
             student={activeStudent}
             onNavigate={handleNavigate}
+            onDataChanged={refreshAllFromSQLite}
           />
         )}
 
@@ -595,6 +596,7 @@ export default function App() {
             onSelectClass={handleSelectClass}
             onSelectSection={handleSelectSection}
             onNavigate={handleNavigate}
+            onDataChanged={refreshAllFromSQLite}
           />
         )}
 

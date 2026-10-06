@@ -185,6 +185,38 @@ export interface StudyPeriodEntity {
   createdDate: string;
 }
 
+export interface PeriodGradeEntity {
+  id: number;
+  studentId: number;
+  periodId: number;
+  dailyGrade: number | null;
+  writtenExamGrade: number | null;
+  periodAverage: number | null;
+  updatedDate: string;
+}
+
+export interface StudentPeriodGradeBreakdown {
+  period: StudyPeriodEntity;
+  calculatedDailyGrade: StudentCalculatedGrade;
+  dailyGrade: number; // out of 100
+  writtenExamGrade: number | null; // out of 100 or null if not entered yet
+  periodAverage: number | null; // (dailyGrade + writtenExamGrade) / 2 or null if writtenExamGrade is null
+  updatedDate: string | null;
+}
+
+export interface StudentComprehensiveGradeReport {
+  studentId: number;
+  studentName: string;
+  classId: number;
+  className: string;
+  sectionId: number;
+  sectionName: string;
+  baseDailyGrade: StudentCalculatedGrade;
+  periodBreakdowns: StudentPeriodGradeBreakdown[];
+  completedPeriodsCount: number;
+  finalAverage: number | null;
+}
+
 export type AppScreen =
   | 'dashboard'
   | 'classes-sections'

@@ -190,6 +190,24 @@ export const SchemaAndSettingsView: React.FC<SchemaAndSettingsViewProps> = ({
       fields: 'ID, HolidayDate (TEXT), HolidayName (TEXT), HolidayType (TEXT), Notes (TEXT)',
       desc: 'حفظ العطل الرسمية والمناسبات لاستثنائها من حساب أيام الدوام الفعلية.',
     },
+    {
+      name: 'StudyPeriods',
+      pk: 'ID (INTEGER PRIMARY KEY AUTOINCREMENT)',
+      fk: '—',
+      unique: 'idx_studyperiods_single_open (Status = OPEN)',
+      indexes: 'idx_studyperiods_dates (StartDate, EndDate)',
+      fields: 'ID, PeriodName (TEXT), StartDate (TEXT), EndDate (TEXT NULL), Status (OPEN/CLOSED), CreatedDate (TEXT)',
+      desc: 'جدول الفترات الدراسية لتحديد بداية ونهاية كل فترة دراسية وحساب المعدلات.',
+    },
+    {
+      name: 'PeriodGrades',
+      pk: 'ID (INTEGER PRIMARY KEY AUTOINCREMENT)',
+      fk: 'StudentID → Students(ID), PeriodID → StudyPeriods(ID)',
+      unique: 'UNIQUE(StudentID, PeriodID)',
+      indexes: 'idx_periodgrades_student_period (StudentID, PeriodID)',
+      fields: 'ID, StudentID (INTEGER), PeriodID (INTEGER), WrittenExamGrade (REAL 0..100), UpdatedAt (TEXT)',
+      desc: 'جدول درجات الامتحان التحريري لكل طالب في كل فترة دراسية (من 0 إلى 100).',
+    },
   ];
 
   return (

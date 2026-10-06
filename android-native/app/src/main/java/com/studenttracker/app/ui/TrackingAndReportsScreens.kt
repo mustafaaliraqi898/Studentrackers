@@ -974,17 +974,37 @@ fun StudentProfileScreen(
     dbHelper: AppDatabaseHelper,
     repository: TrackerRepository,
     refreshTick: Int,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onDataChanged: () -> Unit = {},
+    onShowMessage: (String) -> Unit = {}
 ) {
-    var selectedMonth by remember { mutableStateOf("ALL") }
-    val allGrades = remember(refreshTick, studentId, selectedMonth) {
+    var localTick by remember { mutableIntStateOf(0) }
+    val studyPeriods = remember(refreshTick, localTick) {
+        repository.getStudyPeriods()
+    }
+    var selectedFilter by remember { mutableStateOf("ALL") }
+
+    val allGrades = remember(refreshTick, localTick, studentId, selectedFilter) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
-            monthPrefix = selectedMonth
+            monthPrefix = selectedFilter
         )
     }
     val grade = allGrades.find { it.studentId == studentId }
+
+    val comprehensiveReport = remember(refreshTick, localTick, studentId, selectedFilter) {
+        GradingService.calculateComprehensiveStudentReports(
+            dbHelper = dbHelper,
+            repository = repository,
+            baseDateFilter = selectedFilter
+        ).find { it.studentId == studentId }
+    }
+
+    // Written exam grade dialog state
+    var editingPeriodBreakdown by remember { mutableStateOf<StudentPeriodGradeBreakdown?>(null) }
+    var writtenExamInput by remember { mutableStateOf("") }
+    var writtenExamError by remember { mutableStateOf<String?>(null) }
 
     if (grade == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1003,21 +1023,23 @@ fun StudentProfileScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // 1. Student Identity + Final Average + Daily Grade Header
         item {
             val behaviorZeroCount = grade.behaviorRatings.count { it.value == 0.0 }
             val hasFrequentBehaviorZero = behaviorZeroCount >= 6
+            val finalAvg = comprehensiveReport?.finalAverage
             Surface(
                 color = Slate900,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = grade.studentName,
                                 color = if (hasFrequentBehaviorZero) Red600 else Color.White,
@@ -1030,18 +1052,312 @@ fun StudentProfileScreen(
                                 fontSize = 13.sp
                             )
                         }
-                        Surface(color = Teal700, shape = RoundedCornerShape(12.dp)) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(color = Teal700, shape = RoundedCornerShape(12.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "${GradingService.formatScore(grade.totalScore)} / 100",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text("الدرجة اليومية", color = Teal100, fontSize = 10.sp)
+                                }
+                            }
+                            Surface(color = Emerald700, shape = RoundedCornerShape(12.dp)) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = if (finalAvg != null) "${GradingService.formatScore(finalAvg)} / 100" else "--",
+                                        color = Color.White,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text("المعدل النهائي", color = Emerald50, fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    // Filter chips for Daily Details: All + StudyPeriods
+                    if (studyPeriods.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val isAll = selectedFilter == "ALL"
+                            Surface(
+                                color = if (isAll) Emerald600 else Slate800,
+                                contentColor = Color.White,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { selectedFilter = "ALL" }
                             ) {
                                 Text(
-                                    text = "${GradingService.formatScore(grade.totalScore)} / 100",
-                                    color = Color.White,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.ExtraBold
+                                    text = "كامل السجلات",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                 )
-                                Text("الدرجة النهائية", color = Teal100, fontSize = 10.sp)
+                            }
+                            studyPeriods.forEach { sp ->
+                                val key = "PERIOD:${sp.id}"
+                                val isSel = selectedFilter == key
+                                Surface(
+                                    color = if (isSel) Emerald600 else Slate800,
+                                    contentColor = Color.White,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { selectedFilter = key }
+                                ) {
+                                    Text(
+                                        text = sp.periodName,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Study Periods Grades & Written Exam & Period Average Card ("درجات الفترات والامتحان التحريري والمعدل النهائي")
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "درجات الفترات الدراسية والامتحان التحريري",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "معدل الفترة = (الدرجة اليومية + درجة الامتحان التحريري) ÷ 2",
+                                fontSize = 11.sp,
+                                color = Slate600
+                            )
+                        }
+                    }
+
+                    val breakdowns = comprehensiveReport?.periodBreakdowns ?: emptyList()
+                    if (breakdowns.isEmpty()) {
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "لم يتم إنشاء فترات دراسية بعد. يمكنك إضافة فترة دراسية من قسم «الفترات الدراسية» لحساب درجة كل فترة وإدخال درجة الامتحان التحريري وحساب المعدل النهائي.",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else {
+                        breakdowns.forEach { bd ->
+                            val period = bd.period
+                            val dateRangeLabel = "${GradingService.formatDisplayDate(period.startDate)} → ${
+                                if (period.endDate != null) GradingService.formatDisplayDate(period.endDate) else "مفتوحة"
+                            }"
+                            Surface(
+                                color = Slate50,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Slate200),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = period.periodName,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontSize = 14.sp,
+                                                    color = Slate900
+                                                )
+                                                Surface(
+                                                    color = if (period.status == StudyPeriodStatus.OPEN) Emerald100 else Slate200,
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = period.status.arabicLabel,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.ExtraBold,
+                                                        color = if (period.status == StudyPeriodStatus.OPEN) Emerald700 else Slate700,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = dateRangeLabel,
+                                                fontSize = 11.sp,
+                                                color = Slate600
+                                            )
+                                        }
+
+                                        Button(
+                                            onClick = {
+                                                editingPeriodBreakdown = bd
+                                                writtenExamInput = bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: ""
+                                                writtenExamError = null
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = Teal700),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text(
+                                                text = if (bd.writtenExamGrade != null) "تعديل التحريري" else "إدخال التحريري",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        }
+                                    }
+
+                                    // 3 Metrics Row: اليومي | التحريري | معدل الفترة
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            color = Color.White,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, Slate200),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(8.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                Text("الدرجة اليومية", fontSize = 11.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = "${GradingService.formatScore(bd.dailyGrade)} / 100",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Slate900
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            color = Color.White,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, Slate200),
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable {
+                                                    editingPeriodBreakdown = bd
+                                                    writtenExamInput = bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: ""
+                                                    writtenExamError = null
+                                                }
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(8.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                Text("الامتحان التحريري", fontSize = 11.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (bd.writtenExamGrade != null) "${GradingService.formatScore(bd.writtenExamGrade)} / 100" else "--",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = if (bd.writtenExamGrade != null) Teal700 else Slate500
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            color = if (bd.periodAverage != null) Emerald50 else Color.White,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (bd.periodAverage != null) Emerald600 else Slate200),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(8.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                Text("معدل الفترة", fontSize = 11.sp, color = Slate700, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (bd.periodAverage != null) "${GradingService.formatScore(bd.periodAverage)} / 100" else "--",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = if (bd.periodAverage != null) Emerald700 else Slate500
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Final Average Summary Bar
+                        val finalAvg = comprehensiveReport?.finalAverage
+                        val completedCount = comprehensiveReport?.completedPeriodsCount ?: 0
+                        Surface(
+                            color = Slate900,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "المعدل النهائي لجميع الفترات المكتملة",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = if (completedCount > 0) {
+                                            "محسوب من $completedCount فترة مكتملة (مجموع معدلات الفترات ÷ $completedCount)"
+                                        } else {
+                                            "أدخل درجة الامتحان التحريري لفترة واحدة على الأقل لحساب المعدل النهائي"
+                                        },
+                                        color = Slate200,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                                Text(
+                                    text = if (finalAvg != null) "${GradingService.formatScore(finalAvg)} / 100" else "--",
+                                    color = Emerald50,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 18.sp
+                                )
                             }
                         }
                     }
@@ -1083,6 +1399,154 @@ fun StudentProfileScreen(
         item {
             ProfileHistoryCard("سجل الاختبارات اليومية (من 5)", grade.dailyTests, isTest = true)
         }
+    }
+
+    // Written Exam Entry/Edit Dialog
+    if (editingPeriodBreakdown != null) {
+        val bd = editingPeriodBreakdown!!
+        AlertDialog(
+            onDismissRequest = { editingPeriodBreakdown = null },
+            title = {
+                Text(
+                    text = "درجة الامتحان التحريري — ${bd.period.periodName}",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "الطالب: ${grade.studentName}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate800
+                    )
+                    Text(
+                        text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatScore(bd.dailyGrade)} / 100",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Teal700
+                    )
+
+                    if (writtenExamError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = writtenExamError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = writtenExamInput,
+                        onValueChange = {
+                            writtenExamInput = it
+                            writtenExamError = null
+                        },
+                        label = { Text("درجة الامتحان التحريري (من 0 إلى 100)") },
+                        placeholder = { Text("مثال: 70") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    val parsedPreview = writtenExamInput.trim().toDoubleOrNull()
+                    if (parsedPreview != null && parsedPreview in 0.0..100.0) {
+                        val previewAvg = GradingService.round2((bd.dailyGrade + parsedPreview) / 2.0)
+                        Surface(
+                            color = Emerald50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Emerald600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatScore(previewAvg)} / 100",
+                                color = Emerald700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = writtenExamInput.trim()
+                        val numericVal: Double? = if (trimmed.isEmpty()) {
+                            null
+                        } else {
+                            trimmed.toDoubleOrNull()
+                        }
+                        if (trimmed.isNotEmpty() && numericVal == null) {
+                            writtenExamError = "يرجى إدخال رقم صحيح أو عشري صالح بين 0 و 100"
+                            return@Button
+                        }
+                        if (numericVal != null && (numericVal < 0.0 || numericVal > 100.0)) {
+                            writtenExamError = "يجب أن تكون درجة الامتحان التحريري بين 0 و 100"
+                            return@Button
+                        }
+                        val err = repository.upsertPeriodGrade(
+                            studentId = studentId,
+                            periodId = bd.period.id,
+                            dailyGrade = bd.dailyGrade,
+                            writtenExamGrade = numericVal
+                        )
+                        if (err != null) {
+                            writtenExamError = err
+                        } else {
+                            editingPeriodBreakdown = null
+                            localTick++
+                            onDataChanged()
+                            onShowMessage(
+                                if (numericVal != null) {
+                                    "تم حفظ درجة الامتحان التحريري وحساب معدل ${bd.period.periodName} في قاعدة البيانات"
+                                } else {
+                                    "تم مسح درجة الامتحان التحريري لـ ${bd.period.periodName}"
+                                }
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                ) {
+                    Text("حفظ الدرجة", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (bd.writtenExamGrade != null) {
+                        TextButton(
+                            onClick = {
+                                repository.upsertPeriodGrade(
+                                    studentId = studentId,
+                                    periodId = bd.period.id,
+                                    dailyGrade = bd.dailyGrade,
+                                    writtenExamGrade = null
+                                )
+                                editingPeriodBreakdown = null
+                                localTick++
+                                onDataChanged()
+                                onShowMessage("تم مسح درجة الامتحان التحريري لـ ${bd.period.periodName}")
+                            }
+                        ) {
+                            Text("مسح الدرجة", color = Red600, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    TextButton(onClick = { editingPeriodBreakdown = null }) {
+                        Text("إلغاء", color = Slate700, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
     }
 }
 
@@ -1157,33 +1621,104 @@ fun ReportsScreen(
     onSelectClass: (Long) -> Unit,
     onSelectSection: (Long) -> Unit,
     onOpenStudentProfile: (Long) -> Unit,
+    onDataChanged: () -> Unit = {},
     onShowMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
     var sortMode by remember { mutableStateOf("HIGHEST") }
+    var localTick by remember { mutableIntStateOf(0) }
 
-    val grades = remember(refreshTick, selectedClassId, selectedSectionId, sortMode, classes, sections) {
-        val raw = GradingService.calculateGradesForClass(
+    // Filter state: Class ("ALL" or specific classId), Section ("ALL" or specific sectionId), StudyPeriod ("ALL" or specific periodId)
+    var filterClassId by remember(selectedClassId) { mutableStateOf<Long?>(selectedClassId) }
+    var filterSectionId by remember(selectedSectionId) { mutableStateOf<Long?>(selectedSectionId) }
+    var selectedPeriodFilterId by remember { mutableStateOf<Long?>(null) } // null = جميع الفترات
+
+    val studyPeriods = remember(refreshTick, localTick) {
+        repository.getStudyPeriods()
+    }
+
+    val availableSections = remember(sections, filterClassId) {
+        if (filterClassId == null) emptyList() else sections.filter { it.classId == filterClassId }
+    }
+
+    LaunchedEffect(filterClassId, availableSections) {
+        if (filterClassId == null) {
+            filterSectionId = null
+        } else if (filterSectionId != null && availableSections.none { it.id == filterSectionId }) {
+            filterSectionId = null
+        }
+    }
+
+    val baseFilterStr = remember(selectedPeriodFilterId) {
+        if (selectedPeriodFilterId != null) "PERIOD:$selectedPeriodFilterId" else "ALL"
+    }
+
+    val reports = remember(
+        refreshTick,
+        localTick,
+        filterClassId,
+        filterSectionId,
+        baseFilterStr,
+        sortMode,
+        classes,
+        sections,
+        studyPeriods
+    ) {
+        val raw = GradingService.calculateComprehensiveStudentReports(
             dbHelper = dbHelper,
             repository = repository,
-            classId = selectedClassId,
-            sectionId = selectedSectionId
+            classId = filterClassId,
+            sectionId = if (filterClassId == null) null else filterSectionId,
+            baseDateFilter = baseFilterStr
         )
+
+        fun sortKeyScore(rep: StudentComprehensiveGradeReport): Double {
+            if (selectedPeriodFilterId != null) {
+                val pBd = rep.periodBreakdowns.find { it.period.id == selectedPeriodFilterId }
+                if (pBd != null) {
+                    return pBd.periodAverage ?: pBd.dailyGrade
+                }
+            }
+            return rep.finalAverage ?: rep.baseDailyGrade.totalScore
+        }
+
         when (sortMode) {
-            "HIGHEST" -> raw.sortedByDescending { it.totalScore }
-            "LOWEST" -> raw.sortedBy { it.totalScore }
+            "HIGHEST" -> raw.sortedWith(
+                compareByDescending<StudentComprehensiveGradeReport> { sortKeyScore(it) }
+                    .thenByDescending { it.baseDailyGrade.totalScore }
+                    .thenBy { it.studentName }
+            )
+            "LOWEST" -> raw.sortedWith(
+                compareBy<StudentComprehensiveGradeReport> { sortKeyScore(it) }
+                    .thenBy { it.baseDailyGrade.totalScore }
+                    .thenBy { it.studentName }
+            )
             else -> raw.sortedBy { it.studentName }
         }
     }
+
+    // Dialog state for entering/editing WrittenExamGrade directly from ReportsScreen
+    var editingReportStudent by remember { mutableStateOf<StudentComprehensiveGradeReport?>(null) }
+    var editingPeriodBreakdown by remember { mutableStateOf<StudentPeriodGradeBreakdown?>(null) }
+    var writtenExamInput by remember { mutableStateOf("") }
+    var writtenExamError by remember { mutableStateOf<String?>(null) }
 
     val exportResultsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     ) { uri ->
         if (uri != null) {
             runCatching {
-                val bytes = ExcelAndBackupService.generateResultsXlsx(grades)
+                val periodsToExport = if (selectedPeriodFilterId != null) {
+                    studyPeriods.filter { it.id == selectedPeriodFilterId }
+                } else {
+                    studyPeriods
+                }
+                val bytes = ExcelAndBackupService.generateComprehensiveResultsXlsx(
+                    reports = reports,
+                    periods = periodsToExport
+                )
                 context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                onShowMessage("تم تصدير النتائج إلى ملف Excel بنجاح")
+                onShowMessage("تم تصدير النتائج والمعدلات إلى ملف Excel بنجاح")
             }.onFailure {
                 onShowMessage("تعذر تصدير ملف Excel")
             }
@@ -1196,17 +1731,164 @@ fun ReportsScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // 1. Filters Card: Class + Section + StudyPeriod
         item {
-            ClassSectionFilterBar(
-                classes = classes,
-                sections = sections,
-                selectedClassId = selectedClassId,
-                selectedSectionId = selectedSectionId,
-                onSelectClass = onSelectClass,
-                onSelectSection = onSelectSection
-            )
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Class Filter
+                    Text(
+                        text = "الصف:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (filterClassId == null) Slate900 else Slate100,
+                            contentColor = if (filterClassId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                filterClassId = null
+                                filterSectionId = null
+                            }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        classes.forEach { cls ->
+                            val isSel = filterClassId == cls.id
+                            Surface(
+                                color = if (isSel) Slate900 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterClassId = cls.id
+                                    filterSectionId = null
+                                    onSelectClass(cls.id)
+                                }
+                            ) {
+                                Text(
+                                    text = cls.className,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Section Filter
+                    Text(
+                        text = "الشعبة:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (filterSectionId == null) Teal700 else Slate100,
+                            contentColor = if (filterSectionId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable { filterSectionId = null }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        availableSections.forEach { sec ->
+                            val isSel = filterSectionId == sec.id
+                            Surface(
+                                color = if (isSel) Teal700 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterSectionId = sec.id
+                                    onSelectSection(sec.id)
+                                }
+                            ) {
+                                Text(
+                                    text = "شعبة ${sec.sectionName}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // StudyPeriod Filter
+                    Text(
+                        text = "الفترة الدراسية:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate800
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (selectedPeriodFilterId == null) Emerald700 else Slate100,
+                            contentColor = if (selectedPeriodFilterId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable { selectedPeriodFilterId = null }
+                        ) {
+                            Text(
+                                text = "جميع الفترات والمعدل النهائي",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        studyPeriods.forEach { sp ->
+                            val isSel = selectedPeriodFilterId == sp.id
+                            Surface(
+                                color = if (isSel) Emerald700 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { selectedPeriodFilterId = sp.id }
+                            ) {
+                                Text(
+                                    text = "${sp.periodName} (${sp.status.arabicLabel})",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
+        // 2. Sort & Export Row
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1237,7 +1919,7 @@ fun ReportsScreen(
                 }
 
                 Button(
-                    onClick = { exportResultsLauncher.launch("نتائج_الطلاب_اليومي.xlsx") },
+                    onClick = { exportResultsLauncher.launch("نتائج_ومعدلات_الطلاب.xlsx") },
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1247,45 +1929,287 @@ fun ReportsScreen(
             }
         }
 
-        items(grades, key = { it.studentId }) { g ->
+        // 3. Student Report Cards (with Period Daily + Written Exam + Period Average + Final Average)
+        items(reports, key = { it.studentId }) { rep ->
+            val g = rep.baseDailyGrade
+            val visibleBreakdowns = if (selectedPeriodFilterId != null) {
+                rep.periodBreakdowns.filter { it.period.id == selectedPeriodFilterId }
+            } else {
+                rep.periodBreakdowns
+            }
+
             Surface(
                 color = Color.White,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, Slate200),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenStudentProfile(g.studentId) }
+                    .clickable { onOpenStudentProfile(rep.studentId) }
             ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = g.studentName,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp,
-                            color = Slate900
-                        )
-                        Surface(color = Teal50, shape = RoundedCornerShape(8.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "${GradingService.formatScore(g.totalScore)} / 100",
-                                color = Teal700,
+                                text = rep.studentName,
                                 fontWeight = FontWeight.ExtraBold,
-                                fontSize = 14.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                fontSize = 15.sp,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "${rep.className} / شعبة ${rep.sectionName}",
+                                fontSize = 11.sp,
+                                color = Slate600,
+                                fontWeight = FontWeight.Bold
                             )
                         }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(color = Teal50, shape = RoundedCornerShape(8.dp), border = BorderStroke(1.dp, Teal600)) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "${GradingService.formatScore(g.totalScore)} / 100",
+                                        color = Teal700,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text("اليومي", color = Teal700, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Surface(
+                                color = if (rep.finalAverage != null) Emerald50 else Slate100,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (rep.finalAverage != null) Emerald600 else Slate200)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = if (rep.finalAverage != null) "${GradingService.formatScore(rep.finalAverage)} / 100" else "--",
+                                        color = if (rep.finalAverage != null) Emerald700 else Slate600,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "المعدل النهائي",
+                                        color = if (rep.finalAverage != null) Emerald700 else Slate600,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
+
                     Text(
                         text = "الحضور: ${GradingService.formatScore(g.attendanceScore)}/19 | المشاركة: ${GradingService.formatScore(g.participationScore)}/19 | الدفتر: ${GradingService.formatScore(g.notebookScore)}/19 | الواجب: ${GradingService.formatScore(g.homeworkScore)}/19 | السلوك: ${GradingService.formatScore(g.behaviorScore)}/19 | الاختبار: ${GradingService.formatScore(g.quizScore)}/5",
                         fontSize = 11.sp,
                         color = Slate600
                     )
+
+                    // StudyPeriods Breakdown Table for this student
+                    if (visibleBreakdowns.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Slate50, RoundedCornerShape(10.dp))
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            visibleBreakdowns.forEach { bd ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1.1f)) {
+                                        Text(
+                                            text = bd.period.periodName,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 12.sp,
+                                            color = Slate900
+                                        )
+                                        Text(
+                                            text = "يومي: ${GradingService.formatScore(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatScore(it) } ?: "--"}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Slate700
+                                        )
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = {
+                                            editingReportStudent = rep
+                                            editingPeriodBreakdown = bd
+                                            writtenExamInput = bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: ""
+                                            writtenExamError = null
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp), tint = Teal700)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = if (bd.writtenExamGrade != null) "تعديل التحريري" else "إدخال التحريري",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Teal700
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    // Written Exam Entry/Edit Dialog inside ReportsScreen
+    if (editingReportStudent != null && editingPeriodBreakdown != null) {
+        val targetStudent = editingReportStudent!!
+        val bd = editingPeriodBreakdown!!
+        AlertDialog(
+            onDismissRequest = {
+                editingReportStudent = null
+                editingPeriodBreakdown = null
+            },
+            title = {
+                Text(
+                    text = "درجة الامتحان التحريري — ${bd.period.periodName}",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 16.sp,
+                    color = Slate900
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "الطالب: ${targetStudent.studentName} (${targetStudent.className} / ${targetStudent.sectionName})",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate800
+                    )
+                    Text(
+                        text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatScore(bd.dailyGrade)} / 100",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Teal700
+                    )
+
+                    if (writtenExamError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = writtenExamError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = writtenExamInput,
+                        onValueChange = {
+                            writtenExamInput = it
+                            writtenExamError = null
+                        },
+                        label = { Text("درجة الامتحان التحريري (من 0 إلى 100)") },
+                        placeholder = { Text("مثال: 70") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    val parsedPreview = writtenExamInput.trim().toDoubleOrNull()
+                    if (parsedPreview != null && parsedPreview in 0.0..100.0) {
+                        val previewAvg = GradingService.round2((bd.dailyGrade + parsedPreview) / 2.0)
+                        Surface(
+                            color = Emerald50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Emerald600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatScore(previewAvg)} / 100",
+                                color = Emerald700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = writtenExamInput.trim()
+                        val numericVal: Double? = if (trimmed.isEmpty()) {
+                            null
+                        } else {
+                            trimmed.toDoubleOrNull()
+                        }
+                        if (trimmed.isNotEmpty() && numericVal == null) {
+                            writtenExamError = "يرجى إدخال رقم صحيح أو عشري صالح بين 0 و 100"
+                            return@Button
+                        }
+                        if (numericVal != null && (numericVal < 0.0 || numericVal > 100.0)) {
+                            writtenExamError = "يجب أن تكون درجة الامتحان التحريري بين 0 و 100"
+                            return@Button
+                        }
+                        val err = repository.upsertPeriodGrade(
+                            studentId = targetStudent.studentId,
+                            periodId = bd.period.id,
+                            dailyGrade = bd.dailyGrade,
+                            writtenExamGrade = numericVal
+                        )
+                        if (err != null) {
+                            writtenExamError = err
+                        } else {
+                            editingReportStudent = null
+                            editingPeriodBreakdown = null
+                            localTick++
+                            onDataChanged()
+                            onShowMessage(
+                                if (numericVal != null) {
+                                    "تم حفظ درجة الامتحان التحريري للطالب (${targetStudent.studentName}) في ${bd.period.periodName}"
+                                } else {
+                                    "تم مسح درجة الامتحان التحريري للطالب (${targetStudent.studentName}) في ${bd.period.periodName}"
+                                }
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald600)
+                ) {
+                    Text("حفظ الدرجة", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        editingReportStudent = null
+                        editingPeriodBreakdown = null
+                    }
+                ) {
+                    Text("إلغاء", color = Slate700, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }
 

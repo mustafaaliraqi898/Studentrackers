@@ -1137,4 +1137,105 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val db = dbHelper.writableDatabase
         db.delete("StudyPeriods", "ID = ?", arrayOf(id.toString()))
     }
+
+    // ---------------- PERIOD GRADES ("درجات الفترات والامتحان التحريري والمعدل") ----------------
+    fun getPeriodGrades(
+        studentId: Long? = null,
+        periodId: Long? = null
+    ): List<PeriodGradeEntity> {
+        val db = dbHelper.readableDatabase
+        val whereClauses = mutableListOf<String>()
+        val args = mutableListOf<String>()
+        if (studentId != null) {
+            whereClauses.add("StudentID = ?")
+            args.add(studentId.toString())
+        }
+        if (periodId != null) {
+            whereClauses.add("PeriodID = ?")
+            args.add(periodId.toString())
+        }
+        val whereSql = if (whereClauses.isNotEmpty()) {
+            "WHERE " + whereClauses.joinToString(" AND ")
+        } else {
+            ""
+        }
+
+        val cursor = db.rawQuery(
+            """
+            SELECT ID, StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate
+            FROM PeriodGrades
+            $whereSql
+            ORDER BY PeriodID ASC, StudentID ASC
+            """.trimIndent(),
+            args.toTypedArray()
+        )
+        val list = mutableListOf<PeriodGradeEntity>()
+        cursor.use {
+            while (it.moveToNext()) {
+                val daily = if (it.isNull(3)) null else it.getDouble(3)
+                val written = if (it.isNull(4)) null else it.getDouble(4)
+                val avg = if (it.isNull(5)) null else it.getDouble(5)
+                list.add(
+                    PeriodGradeEntity(
+                        id = it.getLong(0),
+                        studentId = it.getLong(1),
+                        periodId = it.getLong(2),
+                        dailyGrade = daily,
+                        writtenExamGrade = written,
+                        periodAverage = avg,
+                        updatedDate = it.getString(6) ?: ""
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    /**
+     * Saves or updates a student's WrittenExamGrade (0..100 or null to clear) and synchronized
+     * DailyGrade + PeriodAverage inside PeriodGrades (UNIQUE(StudentID, PeriodID)).
+     * Returns an Arabic validation error if writtenExamGrade is outside [0, 100], or null on success.
+     */
+    fun upsertPeriodGrade(
+        studentId: Long,
+        periodId: Long,
+        dailyGrade: Double,
+        writtenExamGrade: Double?
+    ): String? {
+        if (writtenExamGrade != null) {
+            if (writtenExamGrade.isNaN() || writtenExamGrade < 0.0 || writtenExamGrade > 100.0) {
+                return "يجب أن تكون درجة الامتحان التحريري بين 0 و 100"
+            }
+        }
+        val roundedDaily = kotlin.math.round(dailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
+        val roundedWritten = writtenExamGrade?.let { kotlin.math.round(it.coerceIn(0.0, 100.0) * 100.0) / 100.0 }
+        val periodAvg = if (roundedWritten != null) {
+            kotlin.math.round(((roundedDaily + roundedWritten) / 2.0) * 100.0) / 100.0
+        } else {
+            null
+        }
+
+        val db = dbHelper.writableDatabase
+        val now = Instant.now().toString()
+        db.execSQL(
+            """
+            INSERT INTO PeriodGrades (StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(StudentID, PeriodID) DO UPDATE SET
+                DailyGrade = excluded.DailyGrade,
+                WrittenExamGrade = excluded.WrittenExamGrade,
+                PeriodAverage = excluded.PeriodAverage,
+                UpdatedDate = excluded.UpdatedDate;
+            """.trimIndent(),
+            arrayOf<Any?>(
+                studentId,
+                periodId,
+                roundedDaily,
+                roundedWritten,
+                periodAvg,
+                now
+            )
+        )
+        return null
+    }
 }

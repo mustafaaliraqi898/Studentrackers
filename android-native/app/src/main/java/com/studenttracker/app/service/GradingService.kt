@@ -136,28 +136,69 @@ object GradingService {
         repository: TrackerRepository,
         classId: Long? = null,
         sectionId: Long? = null,
-        monthPrefix: String? = null, // e.g. "2026-10" or "ALL"
+        monthPrefix: String? = null, // e.g. "2026-10", "ALL", or "PERIOD:<id>"
+        startDateInclusive: String? = null,
+        endDateInclusive: String? = null,
         liveOverrideDate: String? = null,
         liveOverrideEntries: Map<Long, StudentDailyEntry>? = null
     ): List<StudentCalculatedGrade> {
         val students = repository.getStudents(classId, sectionId, includeInactive = false)
         val holidaysSet = repository.getHolidays().map { it.holidayDate }.toSet()
 
+        // Resolve PERIOD:<id> if passed via monthPrefix
+        var effectiveStart = startDateInclusive
+        var effectiveEnd = endDateInclusive
+        var effectiveMonth = monthPrefix
+        if (!monthPrefix.isNullOrBlank() && monthPrefix.startsWith("PERIOD:")) {
+            val pid = monthPrefix.removePrefix("PERIOD:").toLongOrNull()
+            val period = pid?.let { id -> repository.getStudyPeriods().firstOrNull { it.id == id } }
+            if (period != null) {
+                effectiveStart = period.startDate
+                effectiveEnd = period.endDate
+                effectiveMonth = null
+            }
+        }
+
+        fun isWithinDateFilter(dateStr: String): Boolean {
+            if (!effectiveStart.isNullOrBlank() && dateStr < effectiveStart!!) return false
+            if (!effectiveEnd.isNullOrBlank() && dateStr > effectiveEnd!!) return false
+            if (!effectiveMonth.isNullOrBlank() && effectiveMonth != "ALL") {
+                if (!dateStr.startsWith(effectiveMonth!!)) return false
+            }
+            return true
+        }
+
         fun isExcludedDate(dateStr: String): Boolean {
+            if (!isWithinDateFilter(dateStr)) return true
             if (holidaysSet.contains(dateStr)) return true
             return isWeekendDay(dateStr)
         }
 
         val db = dbHelper.readableDatabase
-        val dateWhere = if (!monthPrefix.isNullOrBlank() && monthPrefix != "ALL") {
-            "WHERE RecordDate LIKE '$monthPrefix%'"
+        val whereParts = mutableListOf<String>()
+        val whereArgs = mutableListOf<String>()
+        if (!effectiveStart.isNullOrBlank()) {
+            whereParts.add("RecordDate >= ?")
+            whereArgs.add(effectiveStart!!)
+        }
+        if (!effectiveEnd.isNullOrBlank()) {
+            whereParts.add("RecordDate <= ?")
+            whereArgs.add(effectiveEnd!!)
+        }
+        if (!effectiveMonth.isNullOrBlank() && effectiveMonth != "ALL") {
+            whereParts.add("RecordDate LIKE ?")
+            whereArgs.add("$effectiveMonth%")
+        }
+        val dateWhere = if (whereParts.isNotEmpty()) {
+            "WHERE " + whereParts.joinToString(" AND ")
         } else {
             ""
         }
+        val queryArgs = whereArgs.toTypedArray()
 
         // Load Attendance
         val attByStudent = mutableMapOf<Long, MutableMap<String, AttendanceStatus>>()
-        db.rawQuery("SELECT StudentID, RecordDate, Status FROM Attendance $dateWhere ORDER BY RecordDate ASC", null).use { c ->
+        db.rawQuery("SELECT StudentID, RecordDate, Status FROM Attendance $dateWhere ORDER BY RecordDate ASC", queryArgs).use { c ->
             while (c.moveToNext()) {
                 val stId = c.getLong(0)
                 val d = c.getString(1)
@@ -173,7 +214,7 @@ object GradingService {
         val evalByStudent = mutableMapOf<Long, MutableMap<String, EvalRow>>()
         db.rawQuery(
             "SELECT StudentID, RecordDate, Participation, Notebook, Homework, Behavior FROM Evaluations $dateWhere ORDER BY RecordDate ASC",
-            null
+            queryArgs
         ).use { c ->
             while (c.moveToNext()) {
                 val stId = c.getLong(0)
@@ -190,7 +231,7 @@ object GradingService {
 
         // Load DailyTests
         val testByStudent = mutableMapOf<Long, MutableMap<String, Double>>()
-        db.rawQuery("SELECT StudentID, RecordDate, Score FROM DailyTests $dateWhere ORDER BY RecordDate ASC", null).use { c ->
+        db.rawQuery("SELECT StudentID, RecordDate, Score FROM DailyTests $dateWhere ORDER BY RecordDate ASC", queryArgs).use { c ->
             while (c.moveToNext()) {
                 val stId = c.getLong(0)
                 val d = c.getString(1)
@@ -208,7 +249,7 @@ object GradingService {
 
             if (liveOverrideDate != null && liveOverrideEntries != null && !isExcludedDate(liveOverrideDate)) {
                 val draft = liveOverrideEntries[st.id]
-                if (draft != null && (monthPrefix == null || monthPrefix == "ALL" || liveOverrideDate.startsWith(monthPrefix))) {
+                if (draft != null && isWithinDateFilter(liveOverrideDate)) {
                     attMap[liveOverrideDate] = draft.attendance
                     evalMap[liveOverrideDate] = EvalRow(
                         draft.participation,
@@ -381,5 +422,103 @@ object GradingService {
                 .thenBy { it.attendancePercentage }
                 .thenBy { it.studentName }
         )
+    }
+
+    /**
+     * Calculates comprehensive student grade reports combining:
+     * 1. Base daily grade out of 100 (for the selected filter or overall)
+     * 2. StudyPeriod-specific daily grades out of 100 (calculated strictly within each StudyPeriod's [StartDate, EndDate])
+     * 3. WrittenExamGrade (out of 100) stored in PeriodGrades for each StudyPeriod
+     * 4. PeriodAverage = (DailyGrade + WrittenExamGrade) / 2 when WrittenExamGrade is present (else null / "--")
+     * 5. FinalAverage = sum(completed PeriodAverages) / count(completed PeriodAverages) across all periods that have a PeriodAverage.
+     *
+     * Also keeps PeriodGrades.DailyGrade and PeriodGrades.PeriodAverage synchronized in SQLite whenever a PeriodGrades row exists.
+     */
+    fun calculateComprehensiveStudentReports(
+        dbHelper: AppDatabaseHelper,
+        repository: TrackerRepository,
+        classId: Long? = null,
+        sectionId: Long? = null,
+        baseDateFilter: String? = "ALL"
+    ): List<StudentComprehensiveGradeReport> {
+        val baseGrades = calculateGradesForClass(
+            dbHelper = dbHelper,
+            repository = repository,
+            classId = classId,
+            sectionId = sectionId,
+            monthPrefix = baseDateFilter
+        )
+        val periods = repository.getStudyPeriods()
+        val storedPeriodGrades = repository.getPeriodGrades()
+        val storedMap = storedPeriodGrades.associateBy { it.studentId to it.periodId }
+
+        // Pre-calculate daily grades per period for all requested students
+        val periodDailyGradesByPeriodId: Map<Long, Map<Long, StudentCalculatedGrade>> = periods.associate { period ->
+            val gradesForPeriod = calculateGradesForClass(
+                dbHelper = dbHelper,
+                repository = repository,
+                classId = classId,
+                sectionId = sectionId,
+                startDateInclusive = period.startDate,
+                endDateInclusive = period.endDate
+            ).associateBy { it.studentId }
+            period.id to gradesForPeriod
+        }
+
+        return baseGrades.map { baseGrade ->
+            val stId = baseGrade.studentId
+            val breakdowns = periods.map { period ->
+                val calcDaily = periodDailyGradesByPeriodId[period.id]?.get(stId) ?: baseGrade
+                val dailyScore = round2(calcDaily.totalScore)
+                val stored = storedMap[stId to period.id]
+                val written = stored?.writtenExamGrade?.let { round2(it) }
+                val periodAvg = if (written != null) {
+                    round2((dailyScore + written) / 2.0)
+                } else {
+                    null
+                }
+
+                // Keep SQLite PeriodGrades row in sync if the daily grade changed since last save
+                if (stored != null && (stored.dailyGrade != dailyScore || stored.periodAverage != periodAvg)) {
+                    runCatching {
+                        repository.upsertPeriodGrade(
+                            studentId = stId,
+                            periodId = period.id,
+                            dailyGrade = dailyScore,
+                            writtenExamGrade = written
+                        )
+                    }
+                }
+
+                StudentPeriodGradeBreakdown(
+                    period = period,
+                    calculatedDailyGrade = calcDaily,
+                    dailyGrade = dailyScore,
+                    writtenExamGrade = written,
+                    periodAverage = periodAvg,
+                    updatedDate = stored?.updatedDate
+                )
+            }
+
+            val completedAverages = breakdowns.mapNotNull { it.periodAverage }
+            val finalAvg = if (completedAverages.isNotEmpty()) {
+                round2(completedAverages.sum() / completedAverages.size.toDouble())
+            } else {
+                null
+            }
+
+            StudentComprehensiveGradeReport(
+                studentId = stId,
+                studentName = baseGrade.studentName,
+                classId = baseGrade.classId,
+                className = baseGrade.className,
+                sectionId = baseGrade.sectionId,
+                sectionName = baseGrade.sectionName,
+                baseDailyGrade = baseGrade,
+                periodBreakdowns = breakdowns,
+                completedPeriodsCount = completedAverages.size,
+                finalAverage = finalAvg
+            )
+        }
     }
 }

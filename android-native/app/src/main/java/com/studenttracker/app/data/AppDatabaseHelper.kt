@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 6
+        const val DATABASE_VERSION = 7
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -65,6 +65,31 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 6) {
             createStudyPeriodsTableAndIndexes(db)
         }
+        if (oldVersion < 7) {
+            createPeriodGradesTableAndIndexes(db)
+        }
+    }
+
+    private fun createPeriodGradesTableAndIndexes(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS PeriodGrades (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                StudentID INTEGER NOT NULL,
+                PeriodID INTEGER NOT NULL,
+                DailyGrade REAL NULL CHECK((DailyGrade >= 0 AND DailyGrade <= 100) OR DailyGrade IS NULL),
+                WrittenExamGrade REAL NULL CHECK((WrittenExamGrade >= 0 AND WrittenExamGrade <= 100) OR WrittenExamGrade IS NULL),
+                PeriodAverage REAL NULL CHECK((PeriodAverage >= 0 AND PeriodAverage <= 100) OR PeriodAverage IS NULL),
+                UpdatedDate TEXT NOT NULL,
+                FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+                FOREIGN KEY (PeriodID) REFERENCES StudyPeriods(ID) ON DELETE CASCADE,
+                UNIQUE(StudentID, PeriodID)
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_periodgrades_student ON PeriodGrades(StudentID);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_periodgrades_period ON PeriodGrades(PeriodID);")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_periodgrades_unique_student_period ON PeriodGrades(StudentID, PeriodID);")
     }
 
     private fun createStudyPeriodsTableAndIndexes(db: SQLiteDatabase) {
@@ -323,6 +348,7 @@ class AppDatabaseHelper(private val context: Context) :
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_holidays_date ON Holidays(HolidayDate);")
         createDailyScheduleTableAndIndexes(db)
         createStudyPeriodsTableAndIndexes(db)
+        createPeriodGradesTableAndIndexes(db)
     }
 
     fun seedInitialDemoData(db: SQLiteDatabase) {
@@ -486,6 +512,7 @@ class AppDatabaseHelper(private val context: Context) :
             db.execSQL("DELETE FROM Classes;")
             db.execSQL("DELETE FROM Holidays;")
             runCatching { db.execSQL("DELETE FROM DailySchedule;") }
+            runCatching { db.execSQL("DELETE FROM PeriodGrades;") }
             runCatching { db.execSQL("DELETE FROM StudyPeriods;") }
             if (includeDemo) {
                 seedInitialDemoData(db)

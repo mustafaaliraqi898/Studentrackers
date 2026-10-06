@@ -4,6 +4,8 @@ import {
   ExcelRowError,
   StudentAbsenceSummary,
   StudentCalculatedGrade,
+  StudentComprehensiveGradeReport,
+  StudyPeriodEntity,
 } from '../types';
 import { TrackerRepository } from '../repositories/trackerRepository';
 import { formatScore } from './gradingService';
@@ -377,6 +379,91 @@ export class ExcelService {
     const safeSec = sectionLabel.replace(/\s+/g, '_');
     const safeDate = periodLabel.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
     const fileName = `نتائج_اليومي_${safeClass}_${safeSec}_${safeDate}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+    return fileName;
+  }
+
+  /**
+   * تصدير نتائج ومعدلات الفترات الدراسية والامتحان التحريري والمعدل النهائي إلى Excel (.xlsx)
+   */
+  static exportComprehensiveResultsToExcel(
+    reports: StudentComprehensiveGradeReport[],
+    periods: StudyPeriodEntity[],
+    className: string,
+    sectionLabel: string,
+    periodLabel: string
+  ): string {
+    const header: string[] = ['اسم الطالب', 'الصف', 'الشعبة'];
+    if (periods.length > 0) {
+      for (const p of periods) {
+        header.push(`${p.periodName} اليومي`);
+        header.push(`${p.periodName} التحريري`);
+        header.push(`معدل ${p.periodName}`);
+      }
+      header.push('المعدل النهائي');
+    } else {
+      header.push(
+        'الحضور',
+        'المشاركة',
+        'الدفتر',
+        'الواجب',
+        'السلوك',
+        'الاختبار',
+        'الدرجة اليومية',
+        'المعدل النهائي'
+      );
+    }
+
+    const rowsData: Record<string, string | number>[] = reports.map((rep) => {
+      const rowObj: Record<string, string | number> = {
+        'اسم الطالب': rep.studentName,
+        'الصف': rep.className,
+        'الشعبة': rep.sectionName,
+      };
+      if (periods.length > 0) {
+        for (const p of periods) {
+          const bd = rep.periodBreakdowns.find((b) => b.period.id === p.id);
+          rowObj[`${p.periodName} اليومي`] = bd ? Number(formatScore(bd.dailyGrade)) : '--';
+          rowObj[`${p.periodName} التحريري`] =
+            bd && bd.writtenExamGrade !== null
+              ? Number(formatScore(bd.writtenExamGrade))
+              : '--';
+          rowObj[`معدل ${p.periodName}`] =
+            bd && bd.periodAverage !== null
+              ? Number(formatScore(bd.periodAverage))
+              : '--';
+        }
+        rowObj['المعدل النهائي'] =
+          rep.finalAverage !== null ? Number(formatScore(rep.finalAverage)) : '--';
+      } else {
+        const g = rep.baseDailyGrade;
+        rowObj['الحضور'] = Number(formatScore(g.attendanceScore));
+        rowObj['المشاركة'] = Number(formatScore(g.participationScore));
+        rowObj['الدفتر'] = Number(formatScore(g.notebookScore));
+        rowObj['الواجب'] = Number(formatScore(g.homeworkScore));
+        rowObj['السلوك'] = Number(formatScore(g.behaviorScore));
+        rowObj['الاختبار'] = Number(formatScore(g.quizScore));
+        rowObj['الدرجة اليومية'] = Number(formatScore(g.totalScore));
+        rowObj['المعدل النهائي'] = '--';
+      }
+      return rowObj;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(rowsData, { header });
+    worksheet['!cols'] = header.map((h, i) => ({
+      wch: i === 0 ? 26 : Math.max(14, h.length + 4),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    if (!workbook.Workbook) workbook.Workbook = {};
+    workbook.Workbook.Views = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'التقارير والنتائج');
+
+    const safeClass = className.replace(/\s+/g, '_');
+    const safeSec = sectionLabel.replace(/\s+/g, '_');
+    const safeDate = periodLabel.replace(/[^a-zA-Z0-9\u0600-\u06FF_-]/g, '_');
+    const fileName = `نتائج_ومعدلات_${safeClass}_${safeSec}_${safeDate}.xlsx`;
 
     XLSX.writeFile(workbook, fileName);
     return fileName;

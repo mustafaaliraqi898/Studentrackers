@@ -8,7 +8,7 @@ let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbInstance: Database | null = null;
 let lastMigrationWarning: string | null = null;
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export function getLastMigrationWarning(): string | null {
   return lastMigrationWarning;
@@ -133,6 +133,19 @@ CREATE TABLE IF NOT EXISTS StudyPeriods (
   CreatedDate TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS PeriodGrades (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  StudentID INTEGER NOT NULL,
+  PeriodID INTEGER NOT NULL,
+  DailyGrade REAL NULL CHECK((DailyGrade >= 0 AND DailyGrade <= 100) OR DailyGrade IS NULL),
+  WrittenExamGrade REAL NULL CHECK((WrittenExamGrade >= 0 AND WrittenExamGrade <= 100) OR WrittenExamGrade IS NULL),
+  PeriodAverage REAL NULL CHECK((PeriodAverage >= 0 AND PeriodAverage <= 100) OR PeriodAverage IS NULL),
+  UpdatedDate TEXT NOT NULL,
+  FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+  FOREIGN KEY (PeriodID) REFERENCES StudyPeriods(ID) ON DELETE CASCADE,
+  UNIQUE(StudentID, PeriodID)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sections_class ON Sections(ClassID);
 CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);
 CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);
@@ -147,6 +160,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayO
 CREATE INDEX IF NOT EXISTS idx_studyperiods_status ON StudyPeriods(Status);
 CREATE INDEX IF NOT EXISTS idx_studyperiods_dates ON StudyPeriods(StartDate, EndDate);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(Status) WHERE Status = 'OPEN';
+CREATE INDEX IF NOT EXISTS idx_periodgrades_student ON PeriodGrades(StudentID);
+CREATE INDEX IF NOT EXISTS idx_periodgrades_period ON PeriodGrades(PeriodID);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_periodgrades_unique_student_period ON PeriodGrades(StudentID, PeriodID);
 `;
 
 function openIndexedDB(): Promise<IDBDatabase> {
@@ -383,6 +399,39 @@ function runMigrations(db: Database): void {
       );
     } catch (err) {
       console.warn('Migration v6 warning:', err);
+    }
+  }
+
+  if (currentVer < 7) {
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS PeriodGrades (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          StudentID INTEGER NOT NULL,
+          PeriodID INTEGER NOT NULL,
+          DailyGrade REAL NULL CHECK((DailyGrade >= 0 AND DailyGrade <= 100) OR DailyGrade IS NULL),
+          WrittenExamGrade REAL NULL CHECK((WrittenExamGrade >= 0 AND WrittenExamGrade <= 100) OR WrittenExamGrade IS NULL),
+          PeriodAverage REAL NULL CHECK((PeriodAverage >= 0 AND PeriodAverage <= 100) OR PeriodAverage IS NULL),
+          UpdatedDate TEXT NOT NULL,
+          FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+          FOREIGN KEY (PeriodID) REFERENCES StudyPeriods(ID) ON DELETE CASCADE,
+          UNIQUE(StudentID, PeriodID)
+        );
+      `);
+      db.run('CREATE INDEX IF NOT EXISTS idx_periodgrades_student ON PeriodGrades(StudentID);');
+      db.run('CREATE INDEX IF NOT EXISTS idx_periodgrades_period ON PeriodGrades(PeriodID);');
+      db.run(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_periodgrades_unique_student_period ON PeriodGrades(StudentID, PeriodID);'
+      );
+      db.run(
+        `INSERT INTO SchemaMigrations (Version, AppliedAt, Description) VALUES (7, ?, ?);`,
+        [
+          new Date().toISOString(),
+          'Added PeriodGrades table with UNIQUE(StudentID, PeriodID) for study period daily grade, written exam grade, and period average',
+        ]
+      );
+    } catch (err) {
+      console.warn('Migration v7 warning:', err);
     }
   }
 }

@@ -85,8 +85,8 @@ object ExcelAndBackupService {
                 val rowNum = rIdx + 1
                 sb.append("""<row r="$rowNum">""")
                 rowCells.forEachIndexed { cIdx, cellVal ->
-                    val colLetter = ('A'.code + cIdx).toChar()
-                    val cellRef = "$colLetter$rowNum"
+                    val colRef = excelColumnName(cIdx)
+                    val cellRef = "$colRef$rowNum"
                     val escaped = escapeXml(cellVal)
                     sb.append("""<c r="$cellRef" t="inlineStr"><is><t>$escaped</t></is></c>""")
                 }
@@ -99,6 +99,16 @@ object ExcelAndBackupService {
             zos.closeEntry()
         }
         return baos.toByteArray()
+    }
+
+    private fun excelColumnName(colIndexZeroBased: Int): String {
+        var n = colIndexZeroBased
+        val sb = StringBuilder()
+        while (n >= 0) {
+            sb.insert(0, ('A'.code + (n % 26)).toChar())
+            n = (n / 26) - 1
+        }
+        return sb.toString()
     }
 
     private fun escapeXml(input: String): String {
@@ -157,6 +167,83 @@ object ExcelAndBackupService {
             )
         }
         return buildXlsxBytes("نتائج اليومي", rows)
+    }
+
+    /**
+     * Exports comprehensive student results including dynamic StudyPeriods columns:
+     * اسم الطالب | الصف | الشعبة | الفترة الأولى اليومي | الفترة الأولى التحريري | معدل الفترة الأولى | ... | المعدل النهائي
+     * Plus base daily breakdown columns if no StudyPeriods exist or alongside them.
+     */
+    fun generateComprehensiveResultsXlsx(
+        reports: List<StudentComprehensiveGradeReport>,
+        periods: List<StudyPeriodEntity>
+    ): ByteArray {
+        val rows = mutableListOf<List<String>>()
+        val header = mutableListOf(
+            "اسم الطالب",
+            "الصف",
+            "الشعبة"
+        )
+        if (periods.isNotEmpty()) {
+            for (p in periods) {
+                header.add("${p.periodName} اليومي")
+                header.add("${p.periodName} التحريري")
+                header.add("معدل ${p.periodName}")
+            }
+            header.add("المعدل النهائي")
+        } else {
+            header.addAll(
+                listOf(
+                    "الحضور (19)",
+                    "المشاركة (19)",
+                    "الدفتر (19)",
+                    "الواجب (19)",
+                    "السلوك (19)",
+                    "الاختبار (5)",
+                    "الدرجة اليومية (100)",
+                    "المعدل النهائي"
+                )
+            )
+        }
+        rows.add(header)
+
+        for (rep in reports) {
+            val row = mutableListOf(
+                rep.studentName,
+                rep.className,
+                rep.sectionName
+            )
+            if (periods.isNotEmpty()) {
+                val breakdownByPeriodId = rep.periodBreakdowns.associateBy { it.period.id }
+                for (p in periods) {
+                    val bd = breakdownByPeriodId[p.id]
+                    val dailyStr = if (bd != null) GradingService.formatScore(bd.dailyGrade) else "--"
+                    val writtenStr = if (bd?.writtenExamGrade != null) GradingService.formatScore(bd.writtenExamGrade) else "--"
+                    val avgStr = if (bd?.periodAverage != null) GradingService.formatScore(bd.periodAverage) else "--"
+                    row.add(dailyStr)
+                    row.add(writtenStr)
+                    row.add(avgStr)
+                }
+                row.add(if (rep.finalAverage != null) GradingService.formatScore(rep.finalAverage) else "--")
+            } else {
+                val g = rep.baseDailyGrade
+                row.addAll(
+                    listOf(
+                        GradingService.formatScore(g.attendanceScore),
+                        GradingService.formatScore(g.participationScore),
+                        GradingService.formatScore(g.notebookScore),
+                        GradingService.formatScore(g.homeworkScore),
+                        GradingService.formatScore(g.behaviorScore),
+                        GradingService.formatScore(g.quizScore),
+                        GradingService.formatScore(g.totalScore),
+                        "--"
+                    )
+                )
+            }
+            rows.add(row)
+        }
+
+        return buildXlsxBytes("التقارير والنتائج", rows)
     }
 
     fun generateAbsenceXlsx(summaries: List<StudentAbsenceSummary>): ByteArray {

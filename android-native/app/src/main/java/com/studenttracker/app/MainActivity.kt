@@ -394,7 +394,9 @@ fun StudentTrackerMainApp(
                     dbHelper = dbHelper,
                     repository = repository,
                     refreshTick = refreshTick,
-                    onBack = { currentScreen = AppScreen.STUDENTS }
+                    onBack = { currentScreen = AppScreen.STUDENTS },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.REPORTS -> ReportsScreen(
@@ -415,6 +417,7 @@ fun StudentTrackerMainApp(
                         selectedStudentProfileId = stId
                         currentScreen = AppScreen.STUDENT_PROFILE
                     },
+                    onDataChanged = { refreshTick++ },
                     onShowMessage = ::showToastMessage
                 )
 

@@ -3,6 +3,7 @@ import {
   ClassEntity,
   DailyScheduleEntity,
   HolidayEntity,
+  PeriodGradeEntity,
   RatingValue,
   SavedSessionSummary,
   SectionEntity,
@@ -673,7 +674,9 @@ export class TrackerRepository {
   static async getRawStudentHistory(
     classId?: number,
     sectionId?: number,
-    monthFilter?: string // e.g. '2026-10' or 'ALL'
+    monthFilter?: string, // e.g. '2026-10', 'ALL', or 'PERIOD:<id>'
+    startDateInclusive?: string | null,
+    endDateInclusive?: string | null
   ): Promise<{
     students: {
       id: number;
@@ -728,11 +731,41 @@ export class TrackerRepository {
           }))
         : [];
 
+    let effectiveStart = startDateInclusive || null;
+    let effectiveEnd = endDateInclusive || null;
+    let effectiveMonth = monthFilter;
+
+    if (monthFilter && monthFilter.startsWith('PERIOD:')) {
+      const pid = Number(monthFilter.replace('PERIOD:', ''));
+      const allPeriods = await this.getStudyPeriods();
+      const period = allPeriods.find((p) => p.id === pid);
+      if (period) {
+        effectiveStart = period.startDate;
+        effectiveEnd = period.endDate;
+        effectiveMonth = undefined;
+      }
+    }
+
+    const whereClauses: string[] = [];
+    const whereParams: string[] = [];
+    if (effectiveStart) {
+      whereClauses.push('RecordDate >= ?');
+      whereParams.push(effectiveStart);
+    }
+    if (effectiveEnd) {
+      whereClauses.push('RecordDate <= ?');
+      whereParams.push(effectiveEnd);
+    }
+    if (effectiveMonth && effectiveMonth !== 'ALL') {
+      whereClauses.push('RecordDate LIKE ?');
+      whereParams.push(`${effectiveMonth}%`);
+    }
     const dateFilterSql =
-      monthFilter && monthFilter !== 'ALL' ? `WHERE RecordDate LIKE '${monthFilter}%'` : '';
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const attRes = db.exec(
-      `SELECT StudentID, RecordDate, Status FROM Attendance ${dateFilterSql} ORDER BY RecordDate ASC;`
+      `SELECT StudentID, RecordDate, Status FROM Attendance ${dateFilterSql} ORDER BY RecordDate ASC;`,
+      whereParams
     );
     const attendanceRows =
       attRes.length > 0
@@ -747,7 +780,8 @@ export class TrackerRepository {
       v === 1 || v === 0.5 || v === 0 ? (v as RatingValue) : null;
 
     const evalRes = db.exec(
-      `SELECT StudentID, RecordDate, Participation, Notebook, Homework, Behavior FROM Evaluations ${dateFilterSql} ORDER BY RecordDate ASC;`
+      `SELECT StudentID, RecordDate, Participation, Notebook, Homework, Behavior FROM Evaluations ${dateFilterSql} ORDER BY RecordDate ASC;`,
+      whereParams
     );
     const evaluationRows =
       evalRes.length > 0
@@ -762,7 +796,8 @@ export class TrackerRepository {
         : [];
 
     const testRes = db.exec(
-      `SELECT StudentID, RecordDate, Score FROM DailyTests ${dateFilterSql} ORDER BY RecordDate ASC;`
+      `SELECT StudentID, RecordDate, Score FROM DailyTests ${dateFilterSql} ORDER BY RecordDate ASC;`,
+      whereParams
     );
     const testRows =
       testRes.length > 0
@@ -1193,5 +1228,85 @@ export class TrackerRepository {
     const db = await getDatabase();
     db.run('DELETE FROM StudyPeriods WHERE ID = ?;', [id]);
     await persistDatabaseToStorage();
+  }
+
+  // ---------------- PERIOD GRADES ("درجات الفترات والامتحان التحريري والمعدل") ----------------
+  static async getPeriodGrades(
+    studentId?: number,
+    periodId?: number
+  ): Promise<PeriodGradeEntity[]> {
+    const db = await getDatabase();
+    const whereClauses: string[] = [];
+    const params: number[] = [];
+    if (studentId !== undefined) {
+      whereClauses.push('StudentID = ?');
+      params.push(studentId);
+    }
+    if (periodId !== undefined) {
+      whereClauses.push('PeriodID = ?');
+      params.push(periodId);
+    }
+    const whereSql =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const res = db.exec(
+      `SELECT ID, StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate
+       FROM PeriodGrades
+       ${whereSql}
+       ORDER BY PeriodID ASC, StudentID ASC;`,
+      params
+    );
+    if (res.length === 0) return [];
+    return res[0].values.map((row) => ({
+      id: Number(row[0]),
+      studentId: Number(row[1]),
+      periodId: Number(row[2]),
+      dailyGrade: row[3] !== null && row[3] !== undefined ? Number(row[3]) : null,
+      writtenExamGrade: row[4] !== null && row[4] !== undefined ? Number(row[4]) : null,
+      periodAverage: row[5] !== null && row[5] !== undefined ? Number(row[5]) : null,
+      updatedDate: String(row[6] || ''),
+    }));
+  }
+
+  static async upsertPeriodGrade(
+    studentId: number,
+    periodId: number,
+    dailyGrade: number,
+    writtenExamGrade: number | null
+  ): Promise<{ error: string | null }> {
+    if (writtenExamGrade !== null) {
+      if (
+        Number.isNaN(writtenExamGrade) ||
+        writtenExamGrade < 0 ||
+        writtenExamGrade > 100
+      ) {
+        return { error: 'يجب أن تكون درجة الامتحان التحريري بين 0 و 100' };
+      }
+    }
+    const roundedDaily =
+      Math.round(Math.min(100, Math.max(0, dailyGrade)) * 100) / 100;
+    const roundedWritten =
+      writtenExamGrade !== null
+        ? Math.round(Math.min(100, Math.max(0, writtenExamGrade)) * 100) / 100
+        : null;
+    const periodAvg =
+      roundedWritten !== null
+        ? Math.round(((roundedDaily + roundedWritten) / 2) * 100) / 100
+        : null;
+
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    db.run(
+      `INSERT INTO PeriodGrades (StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(StudentID, PeriodID) DO UPDATE SET
+         DailyGrade = excluded.DailyGrade,
+         WrittenExamGrade = excluded.WrittenExamGrade,
+         PeriodAverage = excluded.PeriodAverage,
+         UpdatedDate = excluded.UpdatedDate;`,
+      [studentId, periodId, roundedDaily, roundedWritten, periodAvg, now]
+    );
+    await persistDatabaseToStorage();
+    return { error: null };
   }
 }

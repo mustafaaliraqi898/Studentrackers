@@ -172,4 +172,40 @@ data class StudyPeriodEntity(
     val createdDate: String
 )
 
+data class PeriodGradeEntity(
+    val id: Long,
+    val studentId: Long,
+    val periodId: Long,
+    val dailyGrade: Double?,
+    val writtenExamGrade: Double?,
+    val periodAverage: Double?,
+    val updatedDate: String
+)
+
+data class StudentPeriodGradeBreakdown(
+    val period: StudyPeriodEntity,
+    val calculatedDailyGrade: StudentCalculatedGrade,
+    val dailyGrade: Double,          // out of 100
+    val writtenExamGrade: Double?,   // out of 100 or null if not entered yet
+    val periodAverage: Double?,      // (dailyGrade + writtenExamGrade) / 2 or null if writtenExamGrade is null
+    val updatedDate: String?
+)
+
+data class StudentComprehensiveGradeReport(
+    val studentId: Long,
+    val studentName: String,
+    val classId: Long,
+    val className: String,
+    val sectionId: Long,
+    val sectionName: String,
+    // Overall / selected filter daily grade breakdown (out of 100)
+    val baseDailyGrade: StudentCalculatedGrade,
+    // Period-by-period breakdowns (e.g., الفترة الأولى, الفترة الثانية, ...)
+    val periodBreakdowns: List<StudentPeriodGradeBreakdown>,
+    // Final average across completed periods (المعدل النهائي = مجموع معدلات الفترات المكتملة ÷ عددها)
+    val completedPeriodsCount: Int,
+    val finalAverage: Double? // null if 0 completed periods
+)
+
+
 
