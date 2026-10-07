@@ -162,7 +162,7 @@ object ExcelAndBackupService {
                     GradingService.formatScore(g.homeworkScore),
                     GradingService.formatScore(g.behaviorScore),
                     GradingService.formatScore(g.quizScore),
-                    GradingService.formatScore(g.totalScore)
+                    GradingService.formatRoundedFinalGrade(g.totalScore)
                 )
             )
         }
@@ -171,7 +171,7 @@ object ExcelAndBackupService {
 
     /**
      * Exports comprehensive student results including dynamic StudyPeriods columns:
-     * اسم الطالب | الصف | الشعبة | الفترة الأولى اليومي | الفترة الأولى التحريري | معدل الفترة الأولى | ... | المعدل النهائي
+     * اسم الطالب | الصف | الشعبة | الفترة الأولى اليومي | الفترة الأولى التحريري | معدل الفترة الأولى | ... | معدل النصف الأول | درجة نصف السنة | معدل النصف الثاني | السعي السنوي
      * Plus base daily breakdown columns if no StudyPeriods exist or alongside them.
      */
     fun generateComprehensiveResultsXlsx(
@@ -194,7 +194,10 @@ object ExcelAndBackupService {
                     header.add("معدل ${p.periodName}")
                 }
             }
-            header.add("المعدل النهائي")
+            header.add("معدل النصف الأول")
+            header.add("درجة نصف السنة")
+            header.add("معدل النصف الثاني")
+            header.add("السعي السنوي")
         } else {
             header.addAll(
                 listOf(
@@ -205,7 +208,7 @@ object ExcelAndBackupService {
                     "السلوك (19)",
                     "الاختبار (5)",
                     "الدرجة اليومية (100)",
-                    "المعدل النهائي"
+                    "السعي السنوي"
                 )
             )
         }
@@ -223,7 +226,7 @@ object ExcelAndBackupService {
                     val bd = breakdownByPeriodId[p.id]
                     if (p.stageType == AcademicStage.MID_YEAR) {
                         val midYearStr = if (bd?.writtenExamGrade != null) {
-                            "${GradingService.formatScore(bd.writtenExamGrade)}/100"
+                            "${GradingService.formatRoundedFinalGrade(bd.writtenExamGrade)}/100"
                         } else {
                             "غير مدخل"
                         }
@@ -231,13 +234,16 @@ object ExcelAndBackupService {
                     } else {
                         val dailyStr = if (bd != null) GradingService.formatScore(bd.dailyGrade) else "--"
                         val writtenStr = if (bd?.writtenExamGrade != null) GradingService.formatScore(bd.writtenExamGrade) else "--"
-                        val avgStr = if (bd?.periodAverage != null) GradingService.formatScore(bd.periodAverage) else "--"
+                        val avgStr = if (bd?.periodAverage != null) GradingService.formatRoundedFinalGrade(bd.periodAverage) else "--"
                         row.add(dailyStr)
                         row.add(writtenStr)
                         row.add(avgStr)
                     }
                 }
-                row.add(if (rep.finalAverage != null) GradingService.formatScore(rep.finalAverage) else "--")
+                row.add(rep.firstHalfAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل")
+                row.add(rep.midYearGrade?.let { "${GradingService.formatRoundedFinalGrade(it)}/100" } ?: "غير مدخل")
+                row.add(rep.secondHalfAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل")
+                row.add(rep.annualEffort?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل")
             } else {
                 val g = rep.baseDailyGrade
                 row.addAll(
@@ -248,8 +254,8 @@ object ExcelAndBackupService {
                         GradingService.formatScore(g.homeworkScore),
                         GradingService.formatScore(g.behaviorScore),
                         GradingService.formatScore(g.quizScore),
-                        GradingService.formatScore(g.totalScore),
-                        "--"
+                        GradingService.formatRoundedFinalGrade(g.totalScore),
+                        rep.annualEffort?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل"
                     )
                 )
             }

@@ -256,7 +256,12 @@ data class StudentComprehensiveGradeReport(
     val periodBreakdowns: List<StudentPeriodGradeBreakdown>,
     // Final average across completed periods (المعدل النهائي = مجموع معدلات الفترات المكتملة ÷ عددها)
     val completedPeriodsCount: Int,
-    val finalAverage: Double? // null if 0 completed periods
+    val finalAverage: Double?, // null if 0 completed periods
+    // Stage averages & Annual Effort (السعي السنوي = (معدل النصف الأول + درجة نصف السنة + معدل النصف الثاني) ÷ 3)
+    val firstHalfAverage: Double? = null,
+    val midYearGrade: Double? = null,
+    val secondHalfAverage: Double? = null,
+    val annualEffort: Double? = null
 )
 
 

@@ -13,6 +13,19 @@ object GradingService {
         return round(value * 100.0) / 100.0
     }
 
+    /**
+     * Rounds a score to the nearest integer using half-up rule (fractional part >= 0.5 rounds up, < 0.5 rounds down)
+     * strictly for final display while keeping internal calculations at full precision.
+     * Examples: 50.5 -> 51, 50.6 -> 51, 50.4 -> 50, 75.5 -> 76, 75.49 -> 75.
+     */
+    fun roundHalfUpInt(value: Double): Int {
+        return kotlin.math.floor(value + 0.5 + 1e-9).toInt()
+    }
+
+    fun formatRoundedFinalGrade(value: Double): String {
+        return roundHalfUpInt(value).toString()
+    }
+
     fun formatScore(value: Double): String {
         val r = round2(value)
         return if (r % 1.0 == 0.0) {
@@ -584,7 +597,36 @@ object GradingService {
 
             val completedAverages = breakdowns.mapNotNull { it.periodAverage }
             val finalAvg = if (completedAverages.isNotEmpty()) {
-                round2(completedAverages.sum() / completedAverages.size.toDouble())
+                completedAverages.sum() / completedAverages.size.toDouble()
+            } else {
+                null
+            }
+
+            // Stage averages (kept at full exact precision internally, rounded only on display):
+            // 1. معدل النصف الأول: requires at least one FIRST_HALF period and all FIRST_HALF periods to have a completed periodAverage
+            val firstHalfBds = breakdowns.filter { it.period.stageType == AcademicStage.FIRST_HALF }
+            val firstHalfAvg: Double? = if (firstHalfBds.isNotEmpty() && firstHalfBds.all { it.periodAverage != null }) {
+                firstHalfBds.sumOf { it.periodAverage!! } / firstHalfBds.size.toDouble()
+            } else {
+                null
+            }
+
+            // 2. درجة نصف السنة: single direct exam grade out of 100 in MID_YEAR
+            val midYearBds = breakdowns.filter { it.period.stageType == AcademicStage.MID_YEAR }
+            val midYearScore: Double? = midYearBds.firstOrNull { it.writtenExamGrade != null }?.writtenExamGrade
+
+            // 3. معدل النصف الثاني: requires at least one SECOND_HALF period and all SECOND_HALF periods to have a completed periodAverage
+            val secondHalfBds = breakdowns.filter { it.period.stageType == AcademicStage.SECOND_HALF }
+            val secondHalfAvg: Double? = if (secondHalfBds.isNotEmpty() && secondHalfBds.all { it.periodAverage != null }) {
+                secondHalfBds.sumOf { it.periodAverage!! } / secondHalfBds.size.toDouble()
+            } else {
+                null
+            }
+
+            // 4. السعي السنوي = (معدل النصف الأول + درجة نصف السنة + معدل النصف الثاني) ÷ 3
+            // Strictly null ("غير مكتمل") if any of the 3 required stage scores is missing; never treats missing values as 0
+            val annualEffortScore: Double? = if (firstHalfAvg != null && midYearScore != null && secondHalfAvg != null) {
+                (firstHalfAvg + midYearScore + secondHalfAvg) / 3.0
             } else {
                 null
             }
@@ -599,7 +641,11 @@ object GradingService {
                 baseDailyGrade = baseGrade,
                 periodBreakdowns = breakdowns,
                 completedPeriodsCount = completedAverages.size,
-                finalAverage = finalAvg
+                finalAverage = finalAvg,
+                firstHalfAverage = firstHalfAvg,
+                midYearGrade = midYearScore,
+                secondHalfAverage = secondHalfAvg,
+                annualEffort = annualEffortScore
             )
         }
     }

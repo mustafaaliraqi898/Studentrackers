@@ -2062,7 +2062,7 @@ fun StudentProfileScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = if (finalAvg != null) "${GradingService.formatScore(finalAvg)} / 100" else "--",
+                                        text = if (finalAvg != null) "${GradingService.formatRoundedFinalGrade(finalAvg)} / 100" else "--",
                                         color = Color.White,
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.ExtraBold
@@ -2289,7 +2289,7 @@ fun StudentProfileScreen(
                                                     fontWeight = FontWeight.ExtraBold
                                                 )
                                                 Text(
-                                                    text = if (bd.writtenExamGrade != null) "${GradingService.formatScore(bd.writtenExamGrade)}/100" else "غير مدخل",
+                                                    text = if (bd.writtenExamGrade != null) "${GradingService.formatRoundedFinalGrade(bd.writtenExamGrade)}/100" else "غير مدخل",
                                                     fontSize = 15.sp,
                                                     fontWeight = FontWeight.ExtraBold,
                                                     color = if (bd.writtenExamGrade != null) Emerald700 else Slate500
@@ -2360,7 +2360,7 @@ fun StudentProfileScreen(
                                                 ) {
                                                     Text("معدل الفترة", fontSize = 11.sp, color = Slate700, fontWeight = FontWeight.Bold)
                                                     Text(
-                                                        text = if (bd.periodAverage != null) "${GradingService.formatScore(bd.periodAverage)} / 100" else "--",
+                                                        text = if (bd.periodAverage != null) "${GradingService.formatRoundedFinalGrade(bd.periodAverage)} / 100" else "--",
                                                         fontSize = 14.sp,
                                                         fontWeight = FontWeight.ExtraBold,
                                                         color = if (bd.periodAverage != null) Emerald700 else Slate500
@@ -2407,7 +2407,7 @@ fun StudentProfileScreen(
                                         )
                                     }
                                     Text(
-                                        text = if (finalAvg != null) "${GradingService.formatScore(finalAvg)} / 100" else "--",
+                                        text = if (finalAvg != null) "${GradingService.formatRoundedFinalGrade(finalAvg)} / 100" else "--",
                                         color = Emerald50,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 18.sp
@@ -2761,7 +2761,7 @@ fun ReportsScreen(
                     return pBd.periodAverage ?: pBd.dailyGrade
                 }
             }
-            return rep.finalAverage ?: rep.baseDailyGrade.totalScore
+            return rep.annualEffort ?: rep.finalAverage ?: rep.baseDailyGrade.totalScore
         }
 
         when (sortMode) {
@@ -2943,7 +2943,7 @@ fun ReportsScreen(
                             modifier = Modifier.clickable { selectedPeriodFilterId = null }
                         ) {
                             Text(
-                                text = "جميع الفترات والمعدل النهائي",
+                                text = "جميع الفترات والسعي السنوي",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
@@ -2954,7 +2954,7 @@ fun ReportsScreen(
                             val filterLabel = if (sp.stageType == AcademicStage.MID_YEAR) {
                                 "نصف السنة"
                             } else {
-                                "${sp.periodName} (${sp.status.arabicLabel})"
+                                "${sp.stageType.arabicLabel} - ${sp.periodName}"
                             }
                             Surface(
                                 color = if (isSel) Emerald700 else Slate100,
@@ -3061,7 +3061,7 @@ fun ReportsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "${GradingService.formatScore(g.totalScore)} / 100",
+                                        text = "${GradingService.formatRoundedFinalGrade(g.totalScore)} / 100",
                                         color = Teal700,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 13.sp
@@ -3071,23 +3071,23 @@ fun ReportsScreen(
                             }
 
                             Surface(
-                                color = if (rep.finalAverage != null) Emerald50 else Slate100,
+                                color = if (rep.annualEffort != null) Emerald50 else Slate100,
                                 shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, if (rep.finalAverage != null) Emerald600 else Slate200)
+                                border = BorderStroke(1.dp, if (rep.annualEffort != null) Emerald600 else Slate200)
                             ) {
                                 Column(
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = if (rep.finalAverage != null) "${GradingService.formatScore(rep.finalAverage)} / 100" else "--",
-                                        color = if (rep.finalAverage != null) Emerald700 else Slate600,
+                                        text = if (rep.annualEffort != null) "${GradingService.formatRoundedFinalGrade(rep.annualEffort)} / 100" else "غير مكتمل",
+                                        color = if (rep.annualEffort != null) Emerald700 else Slate600,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 13.sp
                                     )
                                     Text(
-                                        text = "المعدل النهائي",
-                                        color = if (rep.finalAverage != null) Emerald700 else Slate600,
+                                        text = "السعي السنوي",
+                                        color = if (rep.annualEffort != null) Emerald700 else Slate600,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -3113,7 +3113,7 @@ fun ReportsScreen(
                         ) {
                             visibleBreakdowns.forEach { bd ->
                                 val isMidYear = bd.period.stageType == AcademicStage.MID_YEAR
-                                val rowTitle = if (isMidYear) "نصف السنة" else bd.period.periodName
+                                val rowTitle = if (isMidYear) "نصف السنة" else "${bd.period.stageType.arabicLabel} — ${bd.period.periodName}"
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3129,7 +3129,7 @@ fun ReportsScreen(
                                         if (isMidYear) {
                                             Text(
                                                 text = if (bd.writtenExamGrade != null) {
-                                                    "درجة نصف السنة: ${GradingService.formatScore(bd.writtenExamGrade)}/100"
+                                                    "درجة نصف السنة: ${GradingService.formatRoundedFinalGrade(bd.writtenExamGrade)}/100"
                                                 } else {
                                                     "درجة نصف السنة: غير مدخل"
                                                 },
@@ -3139,7 +3139,7 @@ fun ReportsScreen(
                                             )
                                         } else {
                                             Text(
-                                                text = "يومي: ${GradingService.formatScore(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatScore(it) } ?: "--"}",
+                                                text = "يومي: ${GradingService.formatScore(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "--"}",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Slate700
@@ -3170,6 +3170,95 @@ fun ReportsScreen(
                                             fontWeight = FontWeight.Bold,
                                             color = Teal700
                                         )
+                                    }
+                                }
+                            }
+
+                            // Stage Summary & Annual Effort (السعي السنوي)
+                            if (selectedPeriodFilterId == null) {
+                                Divider(color = Slate200, thickness = 1.dp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("معدل النصف الأول", fontSize = 10.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = rep.firstHalfAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (rep.firstHalfAverage != null) Slate900 else Slate500
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("درجة نصف السنة", fontSize = 10.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = rep.midYearGrade?.let { "${GradingService.formatRoundedFinalGrade(it)}/100" } ?: "غير مدخل",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (rep.midYearGrade != null) Slate900 else Slate500
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("معدل النصف الثاني", fontSize = 10.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                            Text(
+                                                text = rep.secondHalfAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "غير مكتمل",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (rep.secondHalfAverage != null) Slate900 else Slate500
+                                            )
+                                        }
+                                    }
+
+                                    Surface(
+                                        color = if (rep.annualEffort != null) Emerald50 else Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, if (rep.annualEffort != null) Emerald600 else Slate200),
+                                        modifier = Modifier.weight(1.1f)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text("السعي السنوي", fontSize = 10.sp, color = if (rep.annualEffort != null) Emerald700 else Slate700, fontWeight = FontWeight.ExtraBold)
+                                            Text(
+                                                text = rep.annualEffort?.let { "${GradingService.formatRoundedFinalGrade(it)} / 100" } ?: "غير مكتمل",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = if (rep.annualEffort != null) Emerald700 else Slate500
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -3259,16 +3348,16 @@ fun ReportsScreen(
                         ) {
                             if (isMidYear) {
                                 Text(
-                                    text = "درجة نصف السنة بعد الحفظ: ${GradingService.formatScore(parsedPreview)}/100",
+                                    text = "درجة نصف السنة بعد الحفظ: ${GradingService.formatRoundedFinalGrade(parsedPreview)}/100",
                                     color = Emerald700,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
                                     modifier = Modifier.padding(8.dp)
                                 )
                             } else {
-                                val previewAvg = GradingService.round2((bd.dailyGrade + parsedPreview) / 2.0)
+                                val previewAvg = (bd.dailyGrade + parsedPreview) / 2.0
                                 Text(
-                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatScore(previewAvg)} / 100",
+                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatRoundedFinalGrade(previewAvg)} / 100",
                                     color = Emerald700,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
