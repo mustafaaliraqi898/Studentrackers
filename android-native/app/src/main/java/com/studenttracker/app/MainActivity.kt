@@ -152,7 +152,6 @@ fun StudentTrackerMainApp(
     }
 
     Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -458,6 +457,15 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
             }
+
+            // Centralized system-wide notifications & alerts positioned at the top of the screen
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+            )
         }
     }
 

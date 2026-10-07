@@ -14,12 +14,13 @@ object GradingService {
     }
 
     /**
-     * Rounds a score to the nearest integer using half-up rule (fractional part >= 0.5 rounds up, < 0.5 rounds down)
-     * strictly for final display while keeping internal calculations at full precision.
-     * Examples: 50.5 -> 51, 50.6 -> 51, 50.4 -> 50, 75.5 -> 76, 75.49 -> 75.
+     * Rounds a score to the nearest integer using half-up rule (fractional part >= 0.5 rounds up, < 0.5 rounds down).
+     * Examples: 60.3 -> 60, 60.4 -> 60, 60.5 -> 61, 60.6 -> 61, 60.9 -> 61.
      */
     fun roundHalfUpInt(value: Double): Int {
-        return kotlin.math.floor(value + 0.5 + 1e-9).toInt()
+        return java.math.BigDecimal.valueOf(value)
+            .setScale(0, java.math.RoundingMode.HALF_UP)
+            .toInt()
     }
 
     fun formatRoundedFinalGrade(value: Double): String {
@@ -628,10 +629,17 @@ object GradingService {
                 null
             }
 
-            // 4. السعي السنوي = (معدل النصف الأول + درجة نصف السنة + معدل النصف الثاني) ÷ 3
+            // 4. السعي السنوي = (معدل النصف الأول المقرب + درجة نصف السنة + معدل النصف الثاني المقرب) ÷ 3
+            // Before calculating السعي السنوي:
+            // - Calculate firstHalfAvg at full precision, then round to integer
+            // - Calculate secondHalfAvg at full precision, then round to integer
+            // - Use the rounded values with midYearScore (rounded to integer) to calculate السعي السنوي
             // Strictly null ("غير مكتمل") if any of the 3 required stage scores is missing; never treats missing values as 0
             val annualEffortScore: Double? = if (firstHalfAvg != null && midYearScore != null && secondHalfAvg != null) {
-                (firstHalfAvg + midYearScore + secondHalfAvg) / 3.0
+                val roundedFirstHalf = roundHalfUpInt(firstHalfAvg)
+                val roundedMidYear = roundHalfUpInt(midYearScore)
+                val roundedSecondHalf = roundHalfUpInt(secondHalfAvg)
+                (roundedFirstHalf + roundedMidYear + roundedSecondHalf) / 3.0
             } else {
                 null
             }

@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
@@ -1996,10 +1997,13 @@ fun StudentProfileScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 1. Student Identity + Annual Effort (السعي السنوي) + Period Filter Header
+        // 1. Student Identity + Stage Averages & Annual Effort + Period Filter Header
         item {
             val behaviorZeroCount = grade.behaviorRatings.count { it.value == 0.0 }
             val hasFrequentBehaviorZero = behaviorZeroCount >= 6
+            val firstHalfAvg = comprehensiveReport?.firstHalfAverage
+            val midYearScore = comprehensiveReport?.midYearGrade
+            val secondHalfAvg = comprehensiveReport?.secondHalfAverage
             val annualEffort = comprehensiveReport?.annualEffort
             Surface(
                 color = Slate900,
@@ -2007,35 +2011,155 @@ fun StudentProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Row 1: اسم الطالب | الصف | الشعبة
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = grade.studentName,
+                            color = if (hasFrequentBehaviorZero) Red600 else Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
                             Text(
-                                text = grade.studentName,
-                                color = if (hasFrequentBehaviorZero) Red600 else Color.White,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                            Text(
-                                text = "${grade.className} — شعبة ${grade.sectionName}",
+                                text = grade.className,
                                 color = Teal100,
-                                fontSize = 13.sp
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
-                        Surface(color = Emerald700, shape = RoundedCornerShape(12.dp)) {
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = "شعبة ${grade.sectionName}",
+                                color = Teal100,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // Row 2: معدل النصف الأول | درجة نصف السنة | معدل النصف الثاني | السعي السنوي
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Column(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Text("السعي السنوي", color = Emerald50, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    text = if (annualEffort != null) "${GradingService.formatRoundedFinalGrade(annualEffort)} / 100" else "غير مكتمل",
+                                    text = "معدل النصف الأول",
+                                    color = Slate200,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = if (firstHalfAvg != null) GradingService.formatRoundedFinalGrade(firstHalfAvg) else "غير مكتمل",
+                                    color = if (firstHalfAvg != null) Color.White else Slate200,
+                                    fontSize = if (firstHalfAvg != null) 15.sp else 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "درجة نصف السنة",
+                                    color = Slate200,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = if (midYearScore != null) GradingService.formatRoundedFinalGrade(midYearScore) else "غير مدخل",
+                                    color = if (midYearScore != null) Color.White else Slate200,
+                                    fontSize = if (midYearScore != null) 15.sp else 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "معدل النصف الثاني",
+                                    color = Slate200,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = if (secondHalfAvg != null) GradingService.formatRoundedFinalGrade(secondHalfAvg) else "غير مكتمل",
+                                    color = if (secondHalfAvg != null) Color.White else Slate200,
+                                    fontSize = if (secondHalfAvg != null) 15.sp else 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Surface(
+                            color = if (annualEffort != null) Emerald700 else Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "السعي السنوي",
+                                    color = if (annualEffort != null) Emerald50 else Slate200,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = if (annualEffort != null) GradingService.formatRoundedFinalGrade(annualEffort) else "غير مكتمل",
                                     color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.ExtraBold
+                                    fontSize = if (annualEffort != null) 15.sp else 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -2094,7 +2218,7 @@ fun StudentProfileScreen(
             }
         }
 
-        // 2. Study Periods Grades & Written Exam & Annual Effort Summary Card
+        // 2. Study Periods Grades & Written Exam Card
         item {
             Surface(
                 color = Color.White,
@@ -2336,118 +2460,6 @@ fun StudentProfileScreen(
                                                 }
                                             }
                                         }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Stage Averages & Annual Effort Summary Bar (معدل النصف الأول + درجة نصف السنة + معدل النصف الثاني + السعي السنوي)
-                        val firstHalfAvg = comprehensiveReport?.firstHalfAverage
-                        val midYearScore = comprehensiveReport?.midYearGrade
-                        val secondHalfAvg = comprehensiveReport?.secondHalfAverage
-                        val annualEffort = comprehensiveReport?.annualEffort
-                        Surface(
-                            color = Slate900,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Surface(
-                                        color = Slate800,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(8.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text("معدل النصف الأول", color = Slate200, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                text = if (firstHalfAvg != null) "${GradingService.formatRoundedFinalGrade(firstHalfAvg)} / 100" else "غير مكتمل",
-                                                color = if (firstHalfAvg != null) Emerald50 else Slate200,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 13.sp
-                                            )
-                                        }
-                                    }
-                                    Surface(
-                                        color = Slate800,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(8.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text("درجة نصف السنة", color = Slate200, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                text = if (midYearScore != null) "${GradingService.formatRoundedFinalGrade(midYearScore)} / 100" else "غير مدخل",
-                                                color = if (midYearScore != null) Emerald50 else Slate200,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 13.sp
-                                            )
-                                        }
-                                    }
-                                    Surface(
-                                        color = Slate800,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(8.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text("معدل النصف الثاني", color = Slate200, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                            Text(
-                                                text = if (secondHalfAvg != null) "${GradingService.formatRoundedFinalGrade(secondHalfAvg)} / 100" else "غير مكتمل",
-                                                color = if (secondHalfAvg != null) Emerald50 else Slate200,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 13.sp
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Surface(
-                                    color = if (annualEffort != null) Emerald700 else Slate800,
-                                    shape = RoundedCornerShape(10.dp),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "السعي السنوي",
-                                                color = Color.White,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 14.sp
-                                            )
-                                            Text(
-                                                text = "(معدل النصف الأول + درجة نصف السنة + معدل النصف الثاني) ÷ 3",
-                                                color = if (annualEffort != null) Emerald50 else Slate200,
-                                                fontSize = 10.sp
-                                            )
-                                        }
-                                        Text(
-                                            text = if (annualEffort != null) "${GradingService.formatRoundedFinalGrade(annualEffort)} / 100" else "غير مكتمل",
-                                            color = Color.White,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 16.sp
-                                        )
                                     }
                                 }
                             }
