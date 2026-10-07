@@ -155,22 +155,12 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "البحث السريع",
-                        subtitle = "بحث فوري عن أي طالب",
-                        icon = Icons.Default.Search,
-                        tint = Teal700,
-                        onClick = { onNavigate(AppScreen.QUICK_SEARCH) }
+                        title = "الفترات الدراسية",
+                        subtitle = "تحديد بداية ونهاية كل فترة",
+                        icon = Icons.Default.DateRange,
+                        tint = Emerald700,
+                        onClick = { onNavigate(AppScreen.STUDY_PERIODS) }
                     )
-                    NavActionTile(
-                        modifier = Modifier.weight(1f),
-                        title = "إدارة الطلاب",
-                        subtitle = "إضافة، تعديل، نقل، حذف",
-                        icon = Icons.Default.Groups,
-                        tint = Slate800,
-                        onClick = { onNavigate(AppScreen.STUDENTS) }
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "الصفوف والشعب",
@@ -179,13 +169,23 @@ fun DashboardScreen(
                         tint = Slate800,
                         onClick = { onNavigate(AppScreen.CLASSES_SECTIONS) }
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "السجلات المحفوظة",
-                        subtitle = "استعراض وتعديل الأيام",
-                        icon = Icons.Default.History,
-                        tint = Amber700,
-                        onClick = { onNavigate(AppScreen.SAVED_RECORDS) }
+                        title = "إدارة الطلاب",
+                        subtitle = "إضافة، تعديل، نقل، حذف",
+                        icon = Icons.Default.Groups,
+                        tint = Slate800,
+                        onClick = { onNavigate(AppScreen.STUDENTS) }
+                    )
+                    NavActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "البحث السريع",
+                        subtitle = "بحث فوري عن أي طالب",
+                        icon = Icons.Default.Search,
+                        tint = Teal700,
+                        onClick = { onNavigate(AppScreen.QUICK_SEARCH) }
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -245,11 +245,11 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
-                        title = "الفترات الدراسية",
-                        subtitle = "تحديد بداية ونهاية كل فترة",
-                        icon = Icons.Default.DateRange,
-                        tint = Emerald700,
-                        onClick = { onNavigate(AppScreen.STUDY_PERIODS) }
+                        title = "السجلات المحفوظة",
+                        subtitle = "استعراض وتعديل الأيام",
+                        icon = Icons.Default.History,
+                        tint = Amber700,
+                        onClick = { onNavigate(AppScreen.SAVED_RECORDS) }
                     )
                 }
             }
