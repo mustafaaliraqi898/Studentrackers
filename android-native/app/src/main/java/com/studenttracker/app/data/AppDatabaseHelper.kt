@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -70,6 +70,45 @@ class AppDatabaseHelper(private val context: Context) :
         }
         if (oldVersion < 8) {
             migrateStudyPeriodsToAcademicYearHierarchy(db)
+        }
+        if (oldVersion < 9) {
+            migrateDailyRecordsPeriodColumns(db)
+        }
+    }
+
+    private fun migrateDailyRecordsPeriodColumns(db: SQLiteDatabase) {
+        runCatching {
+            db.execSQL("ALTER TABLE DailyRecords ADD COLUMN AcademicYearID INTEGER NULL;")
+        }
+        runCatching {
+            db.execSQL("ALTER TABLE DailyRecords ADD COLUMN PeriodID INTEGER NULL;")
+        }
+        runCatching {
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailyrecords_period ON DailyRecords(AcademicYearID, PeriodID, RecordDate);")
+        }
+        // Safely link any existing DailyRecords to a matching StudyPeriod where RecordDate falls within [StartDate, EndDate]
+        runCatching {
+            db.execSQL(
+                """
+                UPDATE DailyRecords
+                SET PeriodID = (
+                    SELECT sp.ID FROM StudyPeriods sp
+                    WHERE DailyRecords.RecordDate >= sp.StartDate
+                      AND (sp.EndDate IS NULL OR sp.EndDate = '' OR DailyRecords.RecordDate <= sp.EndDate)
+                    ORDER BY sp.ID ASC LIMIT 1
+                ),
+                AcademicYearID = COALESCE(
+                    (
+                        SELECT sp.AcademicYearID FROM StudyPeriods sp
+                        WHERE DailyRecords.RecordDate >= sp.StartDate
+                          AND (sp.EndDate IS NULL OR sp.EndDate = '' OR DailyRecords.RecordDate <= sp.EndDate)
+                        ORDER BY sp.ID ASC LIMIT 1
+                    ),
+                    (SELECT ID FROM AcademicYears ORDER BY IsActive DESC, ID ASC LIMIT 1)
+                )
+                WHERE PeriodID IS NULL;
+                """.trimIndent()
+            )
         }
     }
 
@@ -391,6 +430,8 @@ class AppDatabaseHelper(private val context: Context) :
                 ClassID INTEGER NOT NULL,
                 SectionID INTEGER NOT NULL,
                 RecordDate TEXT NOT NULL,
+                AcademicYearID INTEGER NULL,
+                PeriodID INTEGER NULL,
                 IsSaved INTEGER NOT NULL DEFAULT 1,
                 CreatedDate TEXT NOT NULL DEFAULT '',
                 ModifiedDate TEXT NOT NULL DEFAULT '',

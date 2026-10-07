@@ -63,8 +63,22 @@ data class SavedSessionSummary(
     val absentCount: Int,
     val evaluationsCount: Int,
     val testsCount: Int,
-    val updatedAt: String
+    val updatedAt: String,
+    val academicYearId: Long? = null,
+    val academicYearName: String? = null,
+    val periodId: Long? = null,
+    val periodName: String? = null,
+    val stageType: AcademicStage? = null
 )
+
+data class PeriodWeekWindow(
+    val weekNumber: Int,
+    val labelAr: String,
+    val startDate: String, // YYYY-MM-DD
+    val endDate: String,   // YYYY-MM-DD
+    val dates: List<String> // All YYYY-MM-DD dates in this week inside the period
+)
+
 
 data class RatedDateItem(
     val date: String,

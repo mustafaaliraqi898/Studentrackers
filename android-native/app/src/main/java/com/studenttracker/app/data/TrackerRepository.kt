@@ -531,7 +531,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         sectionId: Long,
         recordDate: String,
         targetStatus: AttendanceStatus,
-        currentDraftEntries: Map<Long, StudentDailyEntry>? = null
+        currentDraftEntries: Map<Long, StudentDailyEntry>? = null,
+        academicYearId: Long? = null,
+        periodId: Long? = null
     ): Map<Long, StudentDailyEntry> {
         val existingSaved = getSessionEntries(classId, sectionId, recordDate)
         val sectionStudents = getStudents(classId, sectionId, includeInactive = false)
@@ -551,17 +553,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val currentDraftStudent = updatedDraftEntries[studentId] ?: StudentDailyEntry(studentId = studentId)
 
         if (targetStatus == AttendanceStatus.ABSENT) {
-            val absentEntry = StudentDailyEntry(
-                studentId = studentId,
-                attendance = AttendanceStatus.ABSENT,
-                participation = null,
-                notebook = null,
-                homework = null,
-                behavior = null,
-                dailyTestScore = null
-            )
-            dbEntriesToSave[studentId] = absentEntry
-            updatedDraftEntries[studentId] = absentEntry
+            // Absent rule: Attendance becomes ABSENT (0/19), while other elements remain at their current/default values and can be edited manually if needed
+            dbEntriesToSave[studentId] = currentSavedStudent.copy(attendance = AttendanceStatus.ABSENT)
+            updatedDraftEntries[studentId] = currentDraftStudent.copy(attendance = AttendanceStatus.ABSENT)
         } else {
             dbEntriesToSave[studentId] = currentSavedStudent.copy(attendance = AttendanceStatus.PRESENT)
             updatedDraftEntries[studentId] = currentDraftStudent.copy(attendance = AttendanceStatus.PRESENT)
@@ -571,7 +565,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             classId = classId,
             sectionId = sectionId,
             recordDate = recordDate,
-            entries = dbEntriesToSave
+            entries = dbEntriesToSave,
+            academicYearId = academicYearId,
+            periodId = periodId
         )
         return updatedDraftEntries
     }
@@ -581,7 +577,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         classId: Long,
         sectionId: Long,
         recordDate: String,
-        currentDraftEntries: Map<Long, StudentDailyEntry>? = null
+        currentDraftEntries: Map<Long, StudentDailyEntry>? = null,
+        academicYearId: Long? = null,
+        periodId: Long? = null
     ): Map<Long, StudentDailyEntry> {
         return setStudentAttendanceImmediately(
             studentId = studentId,
@@ -589,34 +587,84 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             sectionId = sectionId,
             recordDate = recordDate,
             targetStatus = AttendanceStatus.ABSENT,
-            currentDraftEntries = currentDraftEntries
+            currentDraftEntries = currentDraftEntries,
+            academicYearId = academicYearId,
+            periodId = periodId
         )
+    }
+
+    fun resolveMatchingPeriodForDate(
+        recordDate: String,
+        preferredAcademicYearId: Long? = null,
+        preferredPeriodId: Long? = null
+    ): Pair<Long?, Long?> {
+        val allPeriods = getStudyPeriods()
+        if (preferredPeriodId != null) {
+            val p = allPeriods.firstOrNull { it.id == preferredPeriodId }
+            if (p != null) {
+                return p.academicYearId to p.id
+            }
+        }
+        val matchingPeriod = allPeriods.firstOrNull { sp ->
+            val inYear = preferredAcademicYearId == null || sp.academicYearId == preferredAcademicYearId
+            val afterStart = recordDate >= sp.startDate
+            val beforeEnd = sp.endDate.isNullOrBlank() || recordDate <= sp.endDate
+            inYear && afterStart && beforeEnd
+        } ?: allPeriods.firstOrNull { sp ->
+            val afterStart = recordDate >= sp.startDate
+            val beforeEnd = sp.endDate.isNullOrBlank() || recordDate <= sp.endDate
+            afterStart && beforeEnd
+        }
+        if (matchingPeriod != null) {
+            return matchingPeriod.academicYearId to matchingPeriod.id
+        }
+        val fallbackYearId = preferredAcademicYearId ?: runCatching { getActiveAcademicYear().id }.getOrNull()
+        return fallbackYearId to null
     }
 
     fun saveDailySession(
         classId: Long,
         sectionId: Long,
         recordDate: String,
-        entries: Map<Long, StudentDailyEntry>
+        entries: Map<Long, StudentDailyEntry>,
+        academicYearId: Long? = null,
+        periodId: Long? = null
     ) {
+        val (resolvedYearId, resolvedPeriodId) = resolveMatchingPeriodForDate(
+            recordDate = recordDate,
+            preferredAcademicYearId = academicYearId,
+            preferredPeriodId = periodId
+        )
         val db = dbHelper.writableDatabase
         val now = Instant.now().toString()
         db.beginTransaction()
         try {
             for ((studentId, entry) in entries) {
-                // 1. Upsert DailyRecords
+                // 1. Upsert DailyRecords with AcademicYearID and PeriodID
                 db.execSQL(
                     """
-                    INSERT INTO DailyRecords (StudentID, ClassID, SectionID, RecordDate, IsSaved, CreatedDate, ModifiedDate, UpdatedAt)
-                    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                    INSERT INTO DailyRecords (StudentID, ClassID, SectionID, RecordDate, AcademicYearID, PeriodID, IsSaved, CreatedDate, ModifiedDate, UpdatedAt)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                     ON CONFLICT(StudentID, RecordDate) DO UPDATE SET
                         ClassID = excluded.ClassID,
                         SectionID = excluded.SectionID,
+                        AcademicYearID = COALESCE(excluded.AcademicYearID, DailyRecords.AcademicYearID),
+                        PeriodID = COALESCE(excluded.PeriodID, DailyRecords.PeriodID),
                         IsSaved = 1,
                         ModifiedDate = excluded.ModifiedDate,
                         UpdatedAt = excluded.UpdatedAt;
                     """.trimIndent(),
-                    arrayOf<Any>(studentId, classId, sectionId, recordDate, now, now, now)
+                    arrayOf<Any?>(
+                        studentId,
+                        classId,
+                        sectionId,
+                        recordDate,
+                        resolvedYearId,
+                        resolvedPeriodId,
+                        now,
+                        now,
+                        now
+                    )
                 )
 
                 // 2. Upsert Attendance
@@ -680,9 +728,44 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         }
     }
 
+    /**
+     * Deletes a saved daily tracking session for a specific (classId, sectionId, recordDate)
+     * and removes the corresponding Attendance, Evaluations, and DailyTests rows for those students on that date.
+     */
+    fun deleteSavedSession(classId: Long, sectionId: Long, recordDate: String) {
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            val studentIds = mutableListOf<Long>()
+            db.rawQuery(
+                "SELECT StudentID FROM DailyRecords WHERE ClassID = ? AND SectionID = ? AND RecordDate = ?",
+                arrayOf(classId.toString(), sectionId.toString(), recordDate)
+            ).use { c ->
+                while (c.moveToNext()) {
+                    studentIds.add(c.getLong(0))
+                }
+            }
+            for (stId in studentIds) {
+                db.delete("Attendance", "StudentID = ? AND RecordDate = ?", arrayOf(stId.toString(), recordDate))
+                db.delete("Evaluations", "StudentID = ? AND RecordDate = ?", arrayOf(stId.toString(), recordDate))
+                db.delete("DailyTests", "StudentID = ? AND RecordDate = ?", arrayOf(stId.toString(), recordDate))
+            }
+            db.delete(
+                "DailyRecords",
+                "ClassID = ? AND SectionID = ? AND RecordDate = ?",
+                arrayOf(classId.toString(), sectionId.toString(), recordDate)
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     fun getSavedSessionsSummary(
         classId: Long? = null,
-        sectionId: Long? = null
+        sectionId: Long? = null,
+        academicYearId: Long? = null,
+        periodId: Long? = null
     ): List<SavedSessionSummary> {
         val db = dbHelper.readableDatabase
         val args = mutableListOf<String>()
@@ -695,6 +778,10 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             whereSb.append(" AND dr.SectionID = ?")
             args.add(sectionId.toString())
         }
+
+        val yearsMap = getAcademicYears().associateBy { it.id }
+        val periodsList = getStudyPeriods()
+        val periodsMap = periodsList.associateBy { it.id }
 
         val cursor = db.rawQuery(
             """
@@ -714,7 +801,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                     (CASE WHEN e.Behavior IS NOT NULL THEN 1 ELSE 0 END)
                 ) as EvalCount,
                 COUNT(dt.Score) as TestsCount,
-                MAX(dr.UpdatedAt) as LastUpdated
+                MAX(dr.UpdatedAt) as LastUpdated,
+                MAX(dr.AcademicYearID) as AcademicYearID,
+                MAX(dr.PeriodID) as PeriodID
             FROM DailyRecords dr
             JOIN Classes c ON c.ID = dr.ClassID
             JOIN Sections s ON s.ID = dr.SectionID
@@ -730,9 +819,25 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val list = mutableListOf<SavedSessionSummary>()
         cursor.use {
             while (it.moveToNext()) {
+                val recDate = it.getString(0) ?: ""
+                val explicitYearId = if (it.isNull(11)) null else it.getLong(11).takeIf { v -> v > 0L }
+                val explicitPeriodId = if (it.isNull(12)) null else it.getLong(12).takeIf { v -> v > 0L }
+
+                val matchedPeriod = if (explicitPeriodId != null && periodsMap.containsKey(explicitPeriodId)) {
+                    periodsMap[explicitPeriodId]
+                } else {
+                    periodsList.firstOrNull { sp ->
+                        recDate >= sp.startDate && (sp.endDate.isNullOrBlank() || recDate <= sp.endDate)
+                    }
+                }
+                val effectiveYearId = matchedPeriod?.academicYearId
+                    ?: explicitYearId
+                    ?: yearsMap.values.firstOrNull { y -> y.isActive }?.id
+                val effectiveYearName = effectiveYearId?.let { yId -> yearsMap[yId]?.yearName }
+
                 list.add(
                     SavedSessionSummary(
-                        recordDate = it.getString(0),
+                        recordDate = recDate,
                         classId = it.getLong(1),
                         className = it.getString(2),
                         sectionId = it.getLong(3),
@@ -742,12 +847,21 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                         absentCount = it.getInt(7),
                         evaluationsCount = it.getInt(8),
                         testsCount = it.getInt(9),
-                        updatedAt = it.getString(10) ?: ""
+                        updatedAt = it.getString(10) ?: "",
+                        academicYearId = effectiveYearId,
+                        academicYearName = effectiveYearName,
+                        periodId = matchedPeriod?.id,
+                        periodName = matchedPeriod?.periodName,
+                        stageType = matchedPeriod?.stageType
                     )
                 )
             }
         }
-        return list
+        return list.filter { item ->
+            val matchYear = academicYearId == null || item.academicYearId == academicYearId
+            val matchPeriod = periodId == null || item.periodId == periodId
+            matchYear && matchPeriod
+        }
     }
 
     fun getDatabaseStats(): Map<String, Int> {

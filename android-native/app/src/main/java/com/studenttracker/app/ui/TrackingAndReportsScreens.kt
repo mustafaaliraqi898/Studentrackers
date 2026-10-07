@@ -48,21 +48,99 @@ fun DailyTrackingScreen(
     onDataChanged: () -> Unit,
     onShowMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
+
+    // Sub-mode inside Daily section: 0 = "إضافة متابعة", 1 = "السجلات اليومية المحفوظة"
+    var activeSubTab by remember { mutableIntStateOf(0) }
+
+    // 1. Academic Years & Periods hierarchy
+    val academicYears = remember(refreshTick) { repository.getAcademicYears() }
+    var selectedYearId by remember(academicYears) {
+        val active = academicYears.firstOrNull { it.isActive } ?: academicYears.firstOrNull()
+        mutableLongStateOf(active?.id ?: 1L)
+    }
+    LaunchedEffect(academicYears) {
+        if (academicYears.isNotEmpty() && academicYears.none { it.id == selectedYearId }) {
+            val active = academicYears.firstOrNull { it.isActive } ?: academicYears.first()
+            selectedYearId = active.id
+        }
+    }
+    val selectedYear = remember(academicYears, selectedYearId) {
+        academicYears.firstOrNull { it.id == selectedYearId }
+    }
+
+    val periodsInYear = remember(refreshTick, selectedYearId) {
+        repository.getStudyPeriods(academicYearId = selectedYearId)
+    }
+
+    // Try to match period containing selectedDate, or fall back to first period in the selected year
+    var selectedPeriodId by remember(selectedYearId, periodsInYear) {
+        val matching = periodsInYear.firstOrNull { sp ->
+            selectedDate >= sp.startDate && (sp.endDate.isNullOrBlank() || selectedDate <= sp.endDate)
+        } ?: periodsInYear.firstOrNull()
+        mutableStateOf<Long?>(matching?.id)
+    }
+    LaunchedEffect(periodsInYear, selectedYearId) {
+        if (periodsInYear.isEmpty()) {
+            selectedPeriodId = null
+        } else if (selectedPeriodId == null || periodsInYear.none { it.id == selectedPeriodId }) {
+            val matching = periodsInYear.firstOrNull { sp ->
+                selectedDate >= sp.startDate && (sp.endDate.isNullOrBlank() || selectedDate <= sp.endDate)
+            } ?: periodsInYear.first()
+            selectedPeriodId = matching.id
+        }
+    }
+
+    val selectedPeriod = remember(periodsInYear, selectedPeriodId) {
+        periodsInYear.firstOrNull { it.id == selectedPeriodId }
+    }
+
+    // Weeks inside the selected Period
+    val periodWeeks = remember(selectedPeriod) {
+        GradingService.buildWeeksForPeriod(selectedPeriod)
+    }
+
+    var selectedWeekNumber by remember(selectedPeriod, periodWeeks) {
+        val matchingWeek = periodWeeks.firstOrNull { w -> selectedDate in w.dates }
+            ?: periodWeeks.firstOrNull()
+        mutableIntStateOf(matchingWeek?.weekNumber ?: 1)
+    }
+
+    // Ensure when a Period is chosen, if selectedDate is outside [period.startDate, period.endDate], clamp/move to first date of that period
+    LaunchedEffect(selectedPeriod) {
+        if (selectedPeriod != null) {
+            val pStart = selectedPeriod.startDate
+            val pEnd = selectedPeriod.endDate ?: pStart
+            if (selectedDate < pStart || selectedDate > pEnd) {
+                onSelectDate(pStart)
+            }
+            val matchingWeek = periodWeeks.firstOrNull { w -> selectedDate in w.dates }
+                ?: periodWeeks.firstOrNull()
+            if (matchingWeek != null) {
+                selectedWeekNumber = matchingWeek.weekNumber
+            }
+        }
+    }
+
+    val selectedWeek = remember(periodWeeks, selectedWeekNumber) {
+        periodWeeks.firstOrNull { it.weekNumber == selectedWeekNumber } ?: periodWeeks.firstOrNull()
+    }
+
     val students = remember(refreshTick, selectedClassId, selectedSectionId, classes, sections) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
     }
-    var hasSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
+    var hasSaved by remember(selectedClassId, selectedSectionId, selectedDate, refreshTick) {
         mutableStateOf(repository.hasSavedSession(selectedClassId, selectedSectionId, selectedDate))
     }
     var isEditingSaved by remember(selectedClassId, selectedSectionId, selectedDate) {
         mutableStateOf(!hasSaved)
     }
 
-    var savedEntriesSnapshot by remember(selectedClassId, selectedSectionId, selectedDate, students) {
+    var savedEntriesSnapshot by remember(selectedClassId, selectedSectionId, selectedDate, students, refreshTick) {
         mutableStateOf(repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate))
     }
 
-    var entriesMap by remember(selectedClassId, selectedSectionId, selectedDate, students) {
+    var entriesMap by remember(selectedClassId, selectedSectionId, selectedDate, students, refreshTick) {
         val saved = savedEntriesSnapshot
         val initial = mutableMapOf<Long, StudentDailyEntry>()
         students.forEach { st ->
@@ -124,7 +202,9 @@ fun DailyTrackingScreen(
             sectionId = selectedSectionId,
             recordDate = selectedDate,
             targetStatus = targetStatus,
-            currentDraftEntries = entriesMap
+            currentDraftEntries = entriesMap,
+            academicYearId = selectedYearId,
+            periodId = selectedPeriod?.id
         )
         entriesMap = updatedEntries
         savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
@@ -132,7 +212,7 @@ fun DailyTrackingScreen(
         if (targetStatus == AttendanceStatus.ABSENT) {
             explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
             showTopNotification(
-                msg = "تم تسجيل الغياب للطالب (${student.studentName}) وحفظه في قاعدة البيانات",
+                msg = "تم تسجيل الغياب للطالب (${student.studentName}) وحفظه في قاعدة البيانات (الحضور = 0/19 مع بقاء العناصر الأخرى قابلة للتعديل)",
                 isWarning = true
             )
         } else {
@@ -163,12 +243,18 @@ fun DailyTrackingScreen(
         GradingService.checkDateStatus(selectedDate, holidays)
     }
 
-    val liveGradesMap = remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, entriesMap, holidays) {
+    // Calculate grades scoped to the selected Period if one is selected, otherwise all
+    val periodFilterPrefix = remember(selectedPeriod) {
+        if (selectedPeriod != null) "PERIOD:${selectedPeriod.id}" else null
+    }
+
+    val liveGradesMap = remember(refreshTick, selectedClassId, selectedSectionId, selectedDate, entriesMap, holidays, periodFilterPrefix) {
         GradingService.calculateGradesForClass(
             dbHelper = dbHelper,
             repository = repository,
             classId = selectedClassId,
             sectionId = selectedSectionId,
+            monthPrefix = periodFilterPrefix,
             liveOverrideDate = if (dayStatus.isNonWorkingDay) null else selectedDate,
             liveOverrideEntries = if (dayStatus.isNonWorkingDay) null else entriesMap
         ).associateBy { it.studentId }
@@ -177,9 +263,159 @@ fun DailyTrackingScreen(
     var showDateDialog by remember { mutableStateOf(false) }
     var tempDateInput by remember(selectedDate) { mutableStateOf(selectedDate) }
 
-    val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved
+    fun openBoundedDatePicker() {
+        val parts = selectedDate.split("-")
+        val initY = parts.getOrNull(0)?.toIntOrNull() ?: 2026
+        val initM = (parts.getOrNull(1)?.toIntOrNull() ?: 10) - 1
+        val initD = parts.getOrNull(2)?.toIntOrNull() ?: 4
+
+        val dialog = android.app.DatePickerDialog(
+            context,
+            { _, y, m, d ->
+                val pickedIso = String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d)
+                if (selectedPeriod != null) {
+                    val pStart = selectedPeriod.startDate
+                    val pEnd = selectedPeriod.endDate ?: pStart
+                    if (pickedIso < pStart || pickedIso > pEnd) {
+                        showTopNotification(
+                            "التاريخ المختار خارج نطاق «${selectedPeriod.periodName}» (${GradingService.formatDisplayDate(pStart)} → ${GradingService.formatDisplayDate(pEnd)})",
+                            isWarning = true
+                        )
+                        return@DatePickerDialog
+                    }
+                }
+                onSelectDate(pickedIso)
+                val matchingW = periodWeeks.firstOrNull { w -> pickedIso in w.dates }
+                if (matchingW != null) {
+                    selectedWeekNumber = matchingW.weekNumber
+                }
+            },
+            initY,
+            initM,
+            initD
+        )
+        if (selectedPeriod != null) {
+            runCatching {
+                val minEpoch = java.time.LocalDate.parse(selectedPeriod.startDate)
+                    .atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+                dialog.datePicker.minDate = minEpoch
+                val endStr = selectedPeriod.endDate
+                if (!endStr.isNullOrBlank()) {
+                    val maxEpoch = java.time.LocalDate.parse(endStr)
+                        .atTime(23, 59, 59)
+                        .atZone(java.time.ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                    dialog.datePicker.maxDate = maxEpoch
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved && (periodsInYear.isNotEmpty())
+
+    // Calculate live daily score (out of 100) for a single day's entry according to the 100-point daily formula:
+    // Attendance (19) + Participation (19) + Notebook (19) + Homework (19) + Behavior (19) + DailyQuiz (5) = 100
+    fun calculateSingleDayScoreOutOf100(entry: StudentDailyEntry): Double {
+        val att = if (entry.attendance == AttendanceStatus.PRESENT) 19.0 else 0.0
+        val part = (entry.participation ?: 1.0) * 19.0
+        val note = (entry.notebook ?: 1.0) * 19.0
+        val hw = (entry.homework ?: 1.0) * 19.0
+        val beh = (entry.behavior ?: 1.0) * 19.0
+        val quiz = (entry.dailyTestScore ?: 5.0).coerceIn(0.0, 5.0)
+        return GradingService.round2(att + part + note + hw + beh + quiz)
+    }
+
+    val allSavedSessions = remember(refreshTick) {
+        repository.getSavedSessionsSummary()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // Top Sub-Mode Switcher: [ إضافة متابعة ] | [ السجلات اليومية المحفوظة ]
+        Surface(
+            color = Color.White,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    color = if (activeSubTab == 0) Slate900 else Slate100,
+                    contentColor = if (activeSubTab == 0) Color.White else Slate800,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { activeSubTab = 0 }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.FactCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("إضافة متابعة", fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                Surface(
+                    color = if (activeSubTab == 1) Teal700 else Slate100,
+                    contentColor = if (activeSubTab == 1) Color.White else Slate800,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { activeSubTab = 1 }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "السجلات اليومية المحفوظة (${allSavedSessions.size})",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
+        if (activeSubTab == 1) {
+            SavedRecordsScreen(
+                classes = classes,
+                sections = sections,
+                savedSessions = allSavedSessions,
+                repository = repository,
+                refreshTick = refreshTick,
+                onOpenSavedSession = { clsId, secId, date ->
+                    onSelectClass(clsId)
+                    onSelectSection(secId)
+                    onSelectDate(date)
+                    val matchedPeriod = repository.getStudyPeriods().firstOrNull { sp ->
+                        date >= sp.startDate && (sp.endDate.isNullOrBlank() || date <= sp.endDate)
+                    }
+                    if (matchedPeriod != null) {
+                        selectedYearId = matchedPeriod.academicYearId
+                        selectedPeriodId = matchedPeriod.id
+                    }
+                    activeSubTab = 0
+                },
+                onDataChanged = onDataChanged,
+                onShowMessage = onShowMessage
+            )
+            return@Column
+        }
+
         // Top Notification Banner (appears at the top below screen title, never covers bottom save button)
         if (topNotificationMessage != null) {
             Surface(
@@ -237,6 +473,185 @@ fun DailyTrackingScreen(
                 .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // STEP 1 & 2: Academic Year -> Study Period Selection Card
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // 1. Academic Year selector
+                        Text(
+                            text = "1. العام الدراسي:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            academicYears.forEach { yr ->
+                                val isSel = yr.id == selectedYearId
+                                Surface(
+                                    color = if (isSel) Slate900 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.clickable {
+                                        selectedYearId = yr.id
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.School,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = yr.yearName,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Period selector grouped by Stage inside the selected Academic Year
+                        Text(
+                            text = "2. الفترة الدراسية (${selectedYear?.yearName ?: ""}):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700
+                        )
+
+                        if (periodsInYear.isEmpty()) {
+                            Surface(
+                                color = Amber50,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Amber600),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Warning, contentDescription = null, tint = Amber700)
+                                    Text(
+                                        text = "يرجى إضافة فترة دراسية أولاً في قسم الفترات لهذا العام الدراسي (${selectedYear?.yearName ?: ""}) لبدء تسجيل المتابعة اليومية.",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Amber700
+                                    )
+                                }
+                            }
+                        } else {
+                            AcademicStage.values().forEach { stage ->
+                                val stagePeriods = periodsInYear.filter { it.stageType == stage }
+                                if (stagePeriods.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = stage.arabicLabel,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Teal700
+                                        )
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            stagePeriods.forEach { sp ->
+                                                val isSel = sp.id == selectedPeriod?.id
+                                                val rangeText = "${GradingService.formatDisplayDate(sp.startDate)} → ${
+                                                    sp.endDate?.let { GradingService.formatDisplayDate(it) } ?: "مفتوحة"
+                                                }"
+                                                Surface(
+                                                    color = if (isSel) Teal700 else Slate100,
+                                                    contentColor = if (isSel) Color.White else Slate800,
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    border = BorderStroke(1.dp, if (isSel) Teal700 else Slate200),
+                                                    modifier = Modifier.clickable {
+                                                        selectedPeriodId = sp.id
+                                                        val pStart = sp.startDate
+                                                        val pEnd = sp.endDate ?: pStart
+                                                        if (selectedDate < pStart || selectedDate > pEnd) {
+                                                            onSelectDate(pStart)
+                                                        }
+                                                    }
+                                                ) {
+                                                    Column(
+                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "${stage.arabicLabel} — ${sp.periodName}",
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.ExtraBold
+                                                        )
+                                                        Text(
+                                                            text = rangeText,
+                                                            fontSize = 10.sp,
+                                                            color = if (isSel) Teal100 else Slate600
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if (selectedPeriod != null) {
+                            Surface(
+                                color = Teal50,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Teal600),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(
+                                            text = "${selectedYear?.yearName ?: ""} • ${selectedPeriod.stageType.arabicLabel} • ${selectedPeriod.periodName}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Teal700
+                                        )
+                                        Text(
+                                            text = "نطاق الفترة: من ${GradingService.formatDisplayDate(selectedPeriod.startDate)} إلى ${
+                                                selectedPeriod.endDate?.let { GradingService.formatDisplayDate(it) } ?: "مفتوحة"
+                                            }",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Slate700
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // STEP 3 & 4: Class & Section Selection
             item {
                 ClassSectionFilterBar(
                     classes = classes,
@@ -248,6 +663,7 @@ fun DailyTrackingScreen(
                 )
             }
 
+            // STEP 5 & 6: Week Selection inside Period + Date Selection inside Period
             item {
                 Surface(
                     color = Color.White,
@@ -255,7 +671,58 @@ fun DailyTrackingScreen(
                     border = BorderStroke(1.dp, Slate200),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (periodWeeks.isNotEmpty()) {
+                            Text(
+                                text = "5. أسبوع المتابعة داخل «${selectedPeriod?.periodName ?: ""}»:",
+                                fontSize = 12.sp,
+                                color = Slate700,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                periodWeeks.forEach { w ->
+                                    val isSel = w.weekNumber == selectedWeek?.weekNumber
+                                    Surface(
+                                        color = if (isSel) Slate900 else Slate100,
+                                        contentColor = if (isSel) Color.White else Slate800,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.clickable {
+                                            selectedWeekNumber = w.weekNumber
+                                            if (selectedDate !in w.dates) {
+                                                val firstWorking = w.dates.firstOrNull { d ->
+                                                    !GradingService.checkDateStatus(d, holidays).isNonWorkingDay
+                                                } ?: w.dates.firstOrNull()
+                                                if (firstWorking != null) {
+                                                    onSelectDate(firstWorking)
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = w.labelAr,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                            Text(
+                                                text = "${GradingService.formatDisplayDate(w.startDate)} → ${GradingService.formatDisplayDate(w.endDate)}",
+                                                fontSize = 10.sp,
+                                                color = if (isSel) Teal100 else Slate600
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -263,7 +730,7 @@ fun DailyTrackingScreen(
                         ) {
                             Column {
                                 Text(
-                                    text = "تاريخ المتابعة اليومية",
+                                    text = "6. تاريخ المتابعة اليومية (${selectedWeek?.labelAr ?: "ضمن الفترة"})",
                                     fontSize = 12.sp,
                                     color = Slate600,
                                     fontWeight = FontWeight.Bold
@@ -275,37 +742,71 @@ fun DailyTrackingScreen(
                                     color = Slate900
                                 )
                             }
-                            OutlinedButton(onClick = {
-                                tempDateInput = selectedDate
-                                showDateDialog = true
-                            }) {
-                                Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("تغيير التاريخ", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { openBoundedDatePicker() }) {
+                                    Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("التقويم", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val quickDates = listOf("2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-08")
-                            quickDates.forEach { d ->
-                                val isSel = d == selectedDate
-                                Surface(
-                                    color = if (isSel) Slate900 else Slate100,
-                                    contentColor = if (isSel) Color.White else Slate800,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable { onSelectDate(d) }
-                                ) {
-                                    Text(
-                                        text = "${GradingService.getArabicDayName(d)} ${d.substring(8)}",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    )
+                        // Days of the selected Week inside the selected Period
+                        val weekDatesToShow = selectedWeek?.dates ?: emptyList()
+                        if (weekDatesToShow.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                weekDatesToShow.forEach { d ->
+                                    val isSel = d == selectedDate
+                                    val status = GradingService.checkDateStatus(d, holidays)
+                                    val hasSavedForDay = remember(refreshTick, selectedClassId, selectedSectionId, d) {
+                                        repository.hasSavedSession(selectedClassId, selectedSectionId, d)
+                                    }
+                                    Surface(
+                                        color = when {
+                                            isSel -> Teal700
+                                            status.isNonWorkingDay -> Amber50
+                                            hasSavedForDay -> Emerald50
+                                            else -> Slate100
+                                        },
+                                        contentColor = when {
+                                            isSel -> Color.White
+                                            status.isNonWorkingDay -> Amber700
+                                            hasSavedForDay -> Emerald700
+                                            else -> Slate800
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            when {
+                                                isSel -> Teal700
+                                                status.isNonWorkingDay -> Amber600
+                                                hasSavedForDay -> Emerald600
+                                                else -> Slate200
+                                            }
+                                        ),
+                                        modifier = Modifier.clickable { onSelectDate(d) }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = GradingService.getArabicDayName(d),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                            Text(
+                                                text = GradingService.formatDisplayDate(d),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -385,7 +886,8 @@ fun DailyTrackingScreen(
                 }
             }
 
-            if (!dayStatus.isNonWorkingDay) {
+            // STEP 7: Student Search & Fast Exception Entry Banner
+            if (!dayStatus.isNonWorkingDay && periodsInYear.isNotEmpty()) {
                 item {
                     Surface(
                         color = Color.White,
@@ -397,10 +899,23 @@ fun DailyTrackingScreen(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "7. قائمة طلاب الصف والشعبة (${students.size} طالب) — الافتراضي 100/100 (إدخال الاستثناءات فقط)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Teal700
+                                )
+                            }
+
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                placeholder = { Text("ابحث عن طالب بالاسم لتسجيله غائباً مباشرة...") },
+                                placeholder = { Text("ابحث عن طالب بالاسم داخل الشعبة لتسجيل الغياب أو التقييم...") },
                                 leadingIcon = {
                                     Icon(Icons.Default.Search, contentDescription = "بحث", tint = Teal700)
                                 },
@@ -464,7 +979,7 @@ fun DailyTrackingScreen(
                                                             text = when {
                                                                 isAlreadyAbsent -> "الحالة الحالية: غائب (درجة الحضور لليوم = 0 / 19)"
                                                                 wasSavedInDb -> "الحالة الحالية: حاضر (درجة الحضور لليوم = 19 / 19)"
-                                                                else -> "الحالة الحالية: غير مسجل / حاضر افتراضياً (19 / 19)"
+                                                                else -> "الحالة الحالية: حاضر افتراضياً (19 / 19)"
                                                             },
                                                             fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
@@ -510,125 +1025,172 @@ fun DailyTrackingScreen(
                 }
             }
 
-            items(filteredStudents, key = { it.id }) { st ->
-                val entry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
-                val grade = liveGradesMap[st.id]
-                val isPresent = entry.attendance == AttendanceStatus.PRESENT
+            if (periodsInYear.isNotEmpty()) {
+                items(filteredStudents, key = { it.id }) { st ->
+                    val entry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
+                    val grade = liveGradesMap[st.id]
+                    val isPresent = entry.attendance == AttendanceStatus.PRESENT
+                    val todaySingleScore = calculateSingleDayScoreOutOf100(entry)
 
-                Surface(
-                    color = Color.White,
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, if (isPresent) Slate200 else Red100),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        // Student Header
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onOpenStudentProfile(st.id) }
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, if (isPresent) Slate200 else Red600),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Student Header
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = st.studentName,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 16.sp,
-                                    color = Slate900
-                                )
-                                if (grade != null) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onOpenStudentProfile(st.id) }
+                                ) {
                                     Text(
-                                        text = "حضور ${GradingService.formatScore(grade.attendanceScore)} | مشاركة ${GradingService.formatScore(grade.participationScore)} | دفتر ${GradingService.formatScore(grade.notebookScore)} | واجب ${GradingService.formatScore(grade.homeworkScore)} | سلوك ${GradingService.formatScore(grade.behaviorScore)} | اختبار ${GradingService.formatScore(grade.quizScore)}",
+                                        text = st.studentName,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 16.sp,
+                                        color = Slate900
+                                    )
+                                    val attDayScore = if (isPresent) "19" else "0"
+                                    val partDayScore = GradingService.formatScore((entry.participation ?: 1.0) * 19.0)
+                                    val noteDayScore = GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)
+                                    val hwDayScore = GradingService.formatScore((entry.homework ?: 1.0) * 19.0)
+                                    val behDayScore = GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)
+                                    val quizDayScore = GradingService.formatScore((entry.dailyTestScore ?: 5.0).coerceIn(0.0, 5.0))
+                                    Text(
+                                        text = "درجة اليوم: حضور $attDayScore | مشاركة $partDayScore | دفتر $noteDayScore | واجب $hwDayScore | سلوك $behDayScore | اختبار $quizDayScore",
                                         fontSize = 11.sp,
                                         color = Slate600
                                     )
                                 }
-                            }
-                            if (grade != null) {
-                                Surface(
-                                    color = Teal50,
-                                    shape = RoundedCornerShape(10.dp),
-                                    border = BorderStroke(1.dp, Teal600),
-                                    modifier = Modifier.clickable { onOpenStudentProfile(st.id) }
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Surface(
+                                        color = if (isPresent) Emerald50 else Red50,
+                                        shape = RoundedCornerShape(10.dp),
+                                        border = BorderStroke(1.dp, if (isPresent) Emerald600 else Red600)
                                     ) {
-                                        Text(
-                                            text = "${GradingService.formatScore(grade.totalScore)} / 100",
-                                            fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 14.sp,
-                                            color = Teal700
-                                        )
-                                        Text(
-                                            text = "الدرجة اليومية",
-                                            fontSize = 10.sp,
-                                            color = Teal700
-                                        )
+                                        Column(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Text(
+                                                text = "${GradingService.formatScore(todaySingleScore)} / 100",
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 13.sp,
+                                                color = if (isPresent) Emerald700 else Red700
+                                            )
+                                            Text(
+                                                text = "درجة هذا اليوم",
+                                                fontSize = 9.sp,
+                                                color = if (isPresent) Emerald700 else Red700
+                                            )
+                                        }
+                                    }
+                                    if (grade != null) {
+                                        Surface(
+                                            color = Teal50,
+                                            shape = RoundedCornerShape(10.dp),
+                                            border = BorderStroke(1.dp, Teal600),
+                                            modifier = Modifier.clickable { onOpenStudentProfile(st.id) }
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                                horizontalAlignment = Alignment.CenterHorizontally
+                                            ) {
+                                                Text(
+                                                    text = "${GradingService.formatScore(grade.totalScore)} / 100",
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontSize = 13.sp,
+                                                    color = Teal700
+                                                )
+                                                Text(
+                                                    text = "معدل الفترة",
+                                                    fontSize = 9.sp,
+                                                    color = Teal700
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        // Attendance Present / Absent Toggle (Always enabled on working days & saves immediately to SQLite)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                color = if (isPresent) Emerald600 else Emerald50,
-                                contentColor = if (isPresent) Color.White else Emerald700,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable(enabled = !dayStatus.isNonWorkingDay) {
-                                        executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
-                                    }
+                            // Attendance Present / Absent Toggle (Always enabled on working days & saves immediately to SQLite)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
+                                Surface(
+                                    color = if (isPresent) Emerald600 else Emerald50,
+                                    contentColor = if (isPresent) Color.White else Emerald700,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = !dayStatus.isNonWorkingDay) {
+                                            executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
+                                        }
                                 ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("حاضر (19/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                            }
-
-                            Surface(
-                                color = if (!isPresent) Red600 else Red50,
-                                contentColor = if (!isPresent) Color.White else Red700,
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable(enabled = !dayStatus.isNonWorkingDay) {
-                                        executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                    Row(
+                                        modifier = Modifier.padding(vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("حاضر (19/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
+                                }
+
+                                Surface(
+                                    color = if (!isPresent) Red600 else Red50,
+                                    contentColor = if (!isPresent) Color.White else Red700,
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(enabled = !dayStatus.isNonWorkingDay) {
+                                            executeImmediateAttendanceStatus(st, AttendanceStatus.ABSENT)
+                                        }
                                 ) {
-                                    Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("غائب (0/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Row(
+                                        modifier = Modifier.padding(vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("غائب (0/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    }
                                 }
                             }
-                        }
 
-                        if (isPresent) {
-                            val evalEnabled = canEdit && isPresent
+                            if (!isPresent) {
+                                Surface(
+                                    color = Red50,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, Red100),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "الطالب غائب اليوم (الحضور = 0/19) — تبقى باقي العناصر على قيمها الافتراضية ويمكنك تعديل أي عنصر يدوياً لهذا اليوم:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Red700,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+
+                            // Evaluations & Daily Quiz remain visible and editable even when the student is ABSENT
+                            val evalEnabled = canEdit
                             ThreeStateRatingRow(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${grade?.let { GradingService.formatScore(it.participationScore) } ?: "19"} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(participation = v))
@@ -640,7 +1202,7 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${grade?.let { GradingService.formatScore(it.notebookScore) } ?: "19"} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(notebook = v))
@@ -652,7 +1214,7 @@ fun DailyTrackingScreen(
                                 label = "الواجب",
                                 currentValue = entry.homework,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${grade?.let { GradingService.formatScore(it.homeworkScore) } ?: "19"} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(homework = v))
@@ -664,7 +1226,7 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${grade?.let { GradingService.formatScore(it.behaviorScore) } ?: "19"} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(behavior = v))
@@ -695,7 +1257,7 @@ fun DailyTrackingScreen(
                                         text = if (entry.dailyTestScore != null) {
                                             "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 5"
                                         } else {
-                                            "لا يوجد اختبار مسجل اليوم"
+                                            "الافتراضي: 5 / 5 (لم يسجل استثناء)"
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
@@ -741,7 +1303,7 @@ fun DailyTrackingScreen(
         }
 
         // Bottom Save Bar
-        if (!dayStatus.isNonWorkingDay) {
+        if (!dayStatus.isNonWorkingDay && periodsInYear.isNotEmpty()) {
             Surface(
                 color = Color.White,
                 shadowElevation = 8.dp,
@@ -754,11 +1316,24 @@ fun DailyTrackingScreen(
                 ) {
                     Button(
                         onClick = {
+                            if (selectedPeriod != null) {
+                                val pStart = selectedPeriod.startDate
+                                val pEnd = selectedPeriod.endDate ?: pStart
+                                if (selectedDate < pStart || selectedDate > pEnd) {
+                                    showTopNotification(
+                                        "لا يمكن حفظ المتابعة خارج نطاق الفترة المختارة (${GradingService.formatDisplayDate(pStart)} → ${GradingService.formatDisplayDate(pEnd)})",
+                                        isWarning = true
+                                    )
+                                    return@Button
+                                }
+                            }
                             repository.saveDailySession(
                                 classId = selectedClassId,
                                 sectionId = selectedSectionId,
                                 recordDate = selectedDate,
-                                entries = entriesMap
+                                entries = entriesMap,
+                                academicYearId = selectedYearId,
+                                periodId = selectedPeriod?.id
                             )
                             savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
                             hasSaved = true
@@ -839,6 +1414,14 @@ fun DailyTrackingScreen(
             confirmButton = {
                 Button(onClick = {
                     if (tempDateInput.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) {
+                        if (selectedPeriod != null) {
+                            val pStart = selectedPeriod.startDate
+                            val pEnd = selectedPeriod.endDate ?: pStart
+                            if (tempDateInput < pStart || tempDateInput > pEnd) {
+                                showTopNotification("التاريخ خارج نطاق الفترة المختارة", isWarning = true)
+                                return@Button
+                            }
+                        }
                         showDateDialog = false
                         onSelectDate(tempDateInput)
                     } else {
@@ -858,18 +1441,43 @@ fun DailyTrackingScreen(
 }
 
 // ============================================================================
-// SAVED RECORDS SCREEN
+// SAVED RECORDS SCREEN ("السجلات اليومية المحفوظة")
 // ============================================================================
 @Composable
 fun SavedRecordsScreen(
     classes: List<ClassEntity>,
     sections: List<SectionEntity>,
     savedSessions: List<SavedSessionSummary>,
-    onOpenSavedSession: (Long, Long, String) -> Unit
+    repository: TrackerRepository? = null,
+    refreshTick: Int = 0,
+    onOpenSavedSession: (Long, Long, String) -> Unit,
+    onDataChanged: () -> Unit = {},
+    onShowMessage: (String) -> Unit = {}
 ) {
+    val academicYears = remember(refreshTick) {
+        repository?.getAcademicYears() ?: emptyList()
+    }
+    var filterYearId by remember { mutableStateOf<Long?>(null) }
+    val periodsForFilter = remember(refreshTick, filterYearId) {
+        repository?.getStudyPeriods(academicYearId = filterYearId) ?: emptyList()
+    }
+    var filterPeriodId by remember { mutableStateOf<Long?>(null) }
     var filterClassId by remember { mutableStateOf<Long?>(null) }
-    val filtered = remember(savedSessions, filterClassId) {
-        if (filterClassId == null) savedSessions else savedSessions.filter { it.classId == filterClassId }
+    var filterSectionId by remember { mutableStateOf<Long?>(null) }
+    var pendingDeleteSession by remember { mutableStateOf<SavedSessionSummary?>(null) }
+
+    val availableSections = remember(sections, filterClassId) {
+        if (filterClassId == null) emptyList() else sections.filter { it.classId == filterClassId }
+    }
+
+    val filtered = remember(savedSessions, filterYearId, filterPeriodId, filterClassId, filterSectionId) {
+        savedSessions.filter { s ->
+            val matchYear = filterYearId == null || s.academicYearId == filterYearId
+            val matchPeriod = filterPeriodId == null || s.periodId == filterPeriodId
+            val matchClass = filterClassId == null || s.classId == filterClassId
+            val matchSection = filterSectionId == null || s.sectionId == filterSectionId
+            matchYear && matchPeriod && matchClass && matchSection
+        }
     }
 
     LazyColumn(
@@ -878,46 +1486,213 @@ fun SavedRecordsScreen(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        // Filters Card: Academic Year -> Period -> Class -> Section
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Surface(
-                    color = if (filterClassId == null) Slate900 else Slate100,
-                    contentColor = if (filterClassId == null) Color.White else Slate800,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.clickable { filterClassId = null }
-                ) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "جميع الصفوف (${savedSessions.size})",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        text = "تصفية السجلات اليومية المحفوظة (${filtered.size}):",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate900
                     )
-                }
-                classes.forEach { c ->
-                    val isSel = filterClassId == c.id
-                    Surface(
-                        color = if (isSel) Slate900 else Slate100,
-                        contentColor = if (isSel) Color.White else Slate800,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.clickable { filterClassId = c.id }
+
+                    if (academicYears.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (filterYearId == null) Slate900 else Slate100,
+                                contentColor = if (filterYearId == null) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterYearId = null
+                                    filterPeriodId = null
+                                }
+                            ) {
+                                Text(
+                                    text = "كل الأعوام",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                            academicYears.forEach { yr ->
+                                val isSel = filterYearId == yr.id
+                                Surface(
+                                    color = if (isSel) Slate900 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable {
+                                        filterYearId = yr.id
+                                        filterPeriodId = null
+                                    }
+                                ) {
+                                    Text(
+                                        text = yr.yearName,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (periodsForFilter.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (filterPeriodId == null) Teal700 else Slate100,
+                                contentColor = if (filterPeriodId == null) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { filterPeriodId = null }
+                            ) {
+                                Text(
+                                    text = "كل الفترات",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                            periodsForFilter.forEach { sp ->
+                                val isSel = filterPeriodId == sp.id
+                                Surface(
+                                    color = if (isSel) Teal700 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { filterPeriodId = sp.id }
+                                ) {
+                                    Text(
+                                        text = "${sp.stageType.arabicLabel} - ${sp.periodName}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Class filter
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = c.className,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
+                        Surface(
+                            color = if (filterClassId == null) Slate900 else Slate100,
+                            contentColor = if (filterClassId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                filterClassId = null
+                                filterSectionId = null
+                            }
+                        ) {
+                            Text(
+                                text = "جميع الصفوف",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                        classes.forEach { c ->
+                            val isSel = filterClassId == c.id
+                            Surface(
+                                color = if (isSel) Slate900 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterClassId = c.id
+                                    filterSectionId = null
+                                }
+                            ) {
+                                Text(
+                                    text = c.className,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Section filter when a class is chosen
+                    if (availableSections.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (filterSectionId == null) Teal700 else Slate100,
+                                contentColor = if (filterSectionId == null) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { filterSectionId = null }
+                            ) {
+                                Text(
+                                    text = "كل الشعب",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                            availableSections.forEach { sec ->
+                                val isSel = filterSectionId == sec.id
+                                Surface(
+                                    color = if (isSel) Teal700 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { filterSectionId = sec.id }
+                                ) {
+                                    Text(
+                                        text = "شعبة ${sec.sectionName}",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        items(filtered) { s ->
+        if (filtered.isEmpty()) {
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "لا توجد سجلات متابعة يومية محفوظة تطابق عوامل التصفية المختارة.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate600,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        }
+
+        items(filtered, key = { "${it.recordDate}_${it.classId}_${it.sectionId}" }) { s ->
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(14.dp),
@@ -932,7 +1707,7 @@ fun SavedRecordsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "${GradingService.getArabicDayName(s.recordDate)} — ${GradingService.formatDisplayDate(s.recordDate)}",
                                 fontWeight = FontWeight.ExtraBold,
@@ -942,18 +1717,56 @@ fun SavedRecordsScreen(
                             Text(
                                 text = "${s.className} • شعبة ${s.sectionName}",
                                 fontSize = 12.sp,
-                                color = Slate600
+                                fontWeight = FontWeight.Bold,
+                                color = Slate700
                             )
+                            val yearPeriodMeta = buildString {
+                                if (!s.academicYearName.isNullOrBlank()) {
+                                    append("العام الدراسي: ${s.academicYearName}")
+                                }
+                                if (s.stageType != null) {
+                                    if (isNotEmpty()) append(" • ")
+                                    append(s.stageType.arabicLabel)
+                                }
+                                if (!s.periodName.isNullOrBlank()) {
+                                    if (isNotEmpty()) append(" — ")
+                                    append(s.periodName)
+                                }
+                            }
+                            if (yearPeriodMeta.isNotBlank()) {
+                                Text(
+                                    text = yearPeriodMeta,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Teal700
+                                )
+                            }
                         }
-                        Button(
-                            onClick = { onOpenSavedSession(s.classId, s.sectionId, s.recordDate) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Teal700)
-                        ) {
-                            Text("فتح / تعديل", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(
+                                onClick = { onOpenSavedSession(s.classId, s.sectionId, s.recordDate) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Teal700),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("فتح / تعديل", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                            if (repository != null) {
+                                OutlinedButton(
+                                    onClick = { pendingDeleteSession = s },
+                                    border = BorderStroke(1.dp, Red600),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "حذف السجل", tint = Red600, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Red700)
+                                }
+                            }
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text("الطلاب: ${s.studentCount}", fontSize = 12.sp, color = Slate700, fontWeight = FontWeight.Bold)
                         Text("حضور: ${s.presentCount}", fontSize = 12.sp, color = Emerald700, fontWeight = FontWeight.Bold)
                         Text("غياب: ${s.absentCount}", fontSize = 12.sp, color = Red700, fontWeight = FontWeight.Bold)
@@ -962,6 +1775,41 @@ fun SavedRecordsScreen(
                 }
             }
         }
+    }
+
+    if (pendingDeleteSession != null && repository != null) {
+        val target = pendingDeleteSession!!
+        AlertDialog(
+            onDismissRequest = { pendingDeleteSession = null },
+            title = {
+                Text("تأكيد حذف سجل المتابعة اليومي", fontWeight = FontWeight.ExtraBold, color = Red700)
+            },
+            text = {
+                Text(
+                    text = "هل أنت متأكد من حذف سجل المتابعة اليومي لتاريخ ${GradingService.formatDisplayDate(target.recordDate)} (${target.className} — شعبة ${target.sectionName})؟\nسيتم حذف بيانات الحضور والتقييمات المسجلة لهذا اليوم فقط.",
+                    fontSize = 13.sp,
+                    color = Slate800
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        repository.deleteSavedSession(target.classId, target.sectionId, target.recordDate)
+                        pendingDeleteSession = null
+                        onDataChanged()
+                        onShowMessage("تم حذف سجل المتابعة اليومي (${GradingService.formatDisplayDate(target.recordDate)}) بنجاح")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد الحذف", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteSession = null }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
     }
 }
 

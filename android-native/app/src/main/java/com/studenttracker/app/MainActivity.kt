@@ -381,12 +381,16 @@ fun StudentTrackerMainApp(
                     classes = classes,
                     sections = sections,
                     savedSessions = savedSessions,
+                    repository = repository,
+                    refreshTick = refreshTick,
                     onOpenSavedSession = { clsId, secId, date ->
                         selectedClassId = clsId
                         selectedSectionId = secId
                         selectedDate = date
                         currentScreen = AppScreen.DAILY_TRACKING
-                    }
+                    },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.STUDENT_PROFILE -> StudentProfileScreen(

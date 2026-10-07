@@ -131,6 +131,68 @@ object GradingService {
         )
     }
 
+    fun getArabicOrdinalWeekLabel(weekNumber: Int): String {
+        return when (weekNumber) {
+            1 -> "الأسبوع الأول"
+            2 -> "الأسبوع الثاني"
+            3 -> "الأسبوع الثالث"
+            4 -> "الأسبوع الرابع"
+            5 -> "الأسبوع الخامس"
+            6 -> "الأسبوع السادس"
+            7 -> "الأسبوع السابع"
+            8 -> "الأسبوع الثامن"
+            9 -> "الأسبوع التاسع"
+            10 -> "الأسبوع العاشر"
+            11 -> "الأسبوع الحادي عشر"
+            12 -> "الأسبوع الثاني عشر"
+            else -> "الأسبوع $weekNumber"
+        }
+    }
+
+    /**
+     * Divides a StudyPeriod [startDate, endDate] into sequential 7-day weeks
+     * (الأسبوع الأول, الأسبوع الثاني, ...) and returns each week with its dates list.
+     */
+    fun buildWeeksForPeriod(period: StudyPeriodEntity?): List<PeriodWeekWindow> {
+        if (period == null) return emptyList()
+        return try {
+            val startLd = LocalDate.parse(period.startDate.trim())
+            val endLd = if (!period.endDate.isNullOrBlank()) {
+                LocalDate.parse(period.endDate.trim())
+            } else {
+                startLd.plusDays(27)
+            }
+            val safeEnd = if (endLd.isBefore(startLd)) startLd else endLd
+            val weeks = mutableListOf<PeriodWeekWindow>()
+            var currentStart = startLd
+            var weekNum = 1
+            while (!currentStart.isAfter(safeEnd) && weekNum <= 60) {
+                val candidateEnd = currentStart.plusDays(6)
+                val actualEnd = if (candidateEnd.isAfter(safeEnd)) safeEnd else candidateEnd
+                val datesInWeek = mutableListOf<String>()
+                var d = currentStart
+                while (!d.isAfter(actualEnd)) {
+                    datesInWeek.add(d.toString())
+                    d = d.plusDays(1)
+                }
+                weeks.add(
+                    PeriodWeekWindow(
+                        weekNumber = weekNum,
+                        labelAr = getArabicOrdinalWeekLabel(weekNum),
+                        startDate = currentStart.toString(),
+                        endDate = actualEnd.toString(),
+                        dates = datesInWeek
+                    )
+                )
+                currentStart = actualEnd.plusDays(1)
+                weekNum++
+            }
+            weeks
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     fun calculateGradesForClass(
         dbHelper: AppDatabaseHelper,
         repository: TrackerRepository,
