@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 7
+        const val DATABASE_VERSION = 8
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -68,6 +68,119 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 7) {
             createPeriodGradesTableAndIndexes(db)
         }
+        if (oldVersion < 8) {
+            migrateStudyPeriodsToAcademicYearHierarchy(db)
+        }
+    }
+
+    private fun createAcademicYearsAndStagesTables(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS AcademicYears (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                YearName TEXT NOT NULL UNIQUE,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedDate TEXT NOT NULL
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_academicyears_name ON AcademicYears(YearName);")
+
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS AcademicStages (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                AcademicYearID INTEGER NOT NULL,
+                StageType TEXT NOT NULL CHECK(StageType IN ('FIRST_HALF', 'MID_YEAR', 'SECOND_HALF')),
+                StageName TEXT NOT NULL,
+                StageOrder INTEGER NOT NULL,
+                CreatedDate TEXT NOT NULL,
+                FOREIGN KEY (AcademicYearID) REFERENCES AcademicYears(ID) ON DELETE CASCADE,
+                UNIQUE(AcademicYearID, StageType)
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_academicstages_unique_year_type ON AcademicStages(AcademicYearID, StageType);")
+    }
+
+    private fun ensureThreeStagesForYear(db: SQLiteDatabase, yearId: Long, now: String) {
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'FIRST_HALF', 'النصف الأول', 1, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'MID_YEAR', 'نصف السنة', 2, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'SECOND_HALF', 'النصف الثاني', 3, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+    }
+
+    private fun migrateStudyPeriodsToAcademicYearHierarchy(db: SQLiteDatabase) {
+        createAcademicYearsAndStagesTables(db)
+        val now = Instant.now().toString()
+
+        // Ensure at least one default AcademicYear ('2026-2027') exists so any existing StudyPeriods are safely attached
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicYears (ID, YearName, IsActive, CreatedDate) VALUES (1, '2026-2027', 1, '$now');"
+        )
+        var defaultYearId = 1L
+        db.rawQuery("SELECT ID FROM AcademicYears ORDER BY IsActive DESC, ID ASC LIMIT 1", null).use { c ->
+            if (c.moveToFirst()) {
+                defaultYearId = c.getLong(0)
+            }
+        }
+        ensureThreeStagesForYear(db, defaultYearId, now)
+
+        // Safely add new hierarchy columns to StudyPeriods if not already present
+        runCatching {
+            db.execSQL("ALTER TABLE StudyPeriods ADD COLUMN AcademicYearID INTEGER NOT NULL DEFAULT $defaultYearId;")
+        }
+        runCatching {
+            db.execSQL("ALTER TABLE StudyPeriods ADD COLUMN StageType TEXT NOT NULL DEFAULT 'FIRST_HALF';")
+        }
+        runCatching {
+            db.execSQL("ALTER TABLE StudyPeriods ADD COLUMN SequenceNumber INTEGER NOT NULL DEFAULT 1;")
+        }
+
+        // Drop old single-open index if present so multiple stages/years can manage periods freely
+        runCatching {
+            db.execSQL("DROP INDEX IF EXISTS idx_studyperiods_single_open;")
+        }
+
+        // Normalize SequenceNumber for any pre-existing rows per (AcademicYearID, StageType)
+        val existingIdsByGroup = mutableMapOf<Pair<Long, String>, MutableList<Long>>()
+        runCatching {
+            db.rawQuery(
+                "SELECT ID, AcademicYearID, StageType FROM StudyPeriods ORDER BY StartDate ASC, ID ASC",
+                null
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val yId = if (c.isNull(1) || c.getLong(1) <= 0L) defaultYearId else c.getLong(1)
+                    val sType = if (c.isNull(2) || c.getString(2).isNullOrBlank()) "FIRST_HALF" else c.getString(2)
+                    existingIdsByGroup.getOrPut(yId to sType) { mutableListOf() }.add(id)
+                }
+            }
+            for ((group, ids) in existingIdsByGroup) {
+                ids.forEachIndexed { index, periodId ->
+                    val cv = ContentValues().apply {
+                        put("AcademicYearID", group.first)
+                        put("StageType", group.second)
+                        put("SequenceNumber", index + 1)
+                    }
+                    db.update("StudyPeriods", cv, "ID = ?", arrayOf(periodId.toString()))
+                }
+            }
+        }
+
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_year_stage_seq ON StudyPeriods(AcademicYearID, StageType, SequenceNumber);")
+        // Enforce at database level that MID_YEAR can have at most 1 period per AcademicYear
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_midyear_single ON StudyPeriods(AcademicYearID, StageType) WHERE StageType = 'MID_YEAR';"
+        )
     }
 
     private fun createPeriodGradesTableAndIndexes(db: SQLiteDatabase) {
@@ -93,21 +206,29 @@ class AppDatabaseHelper(private val context: Context) :
     }
 
     private fun createStudyPeriodsTableAndIndexes(db: SQLiteDatabase) {
+        createAcademicYearsAndStagesTables(db)
         db.execSQL(
             """
             CREATE TABLE IF NOT EXISTS StudyPeriods (
                 ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                AcademicYearID INTEGER NOT NULL DEFAULT 1,
+                StageType TEXT NOT NULL DEFAULT 'FIRST_HALF' CHECK(StageType IN ('FIRST_HALF', 'MID_YEAR', 'SECOND_HALF')),
+                SequenceNumber INTEGER NOT NULL DEFAULT 1,
                 PeriodName TEXT NOT NULL,
                 StartDate TEXT NOT NULL,
                 EndDate TEXT NULL,
                 Status TEXT NOT NULL CHECK(Status IN ('OPEN', 'CLOSED')),
-                CreatedDate TEXT NOT NULL
+                CreatedDate TEXT NOT NULL,
+                FOREIGN KEY (AcademicYearID) REFERENCES AcademicYears(ID) ON DELETE RESTRICT
             );
             """.trimIndent()
         )
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_status ON StudyPeriods(Status);")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_dates ON StudyPeriods(StartDate, EndDate);")
-        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(Status) WHERE Status = 'OPEN';")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_studyperiods_year_stage_seq ON StudyPeriods(AcademicYearID, StageType, SequenceNumber);")
+        db.execSQL(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_midyear_single ON StudyPeriods(AcademicYearID, StageType) WHERE StageType = 'MID_YEAR';"
+        )
     }
 
     private fun createDailyScheduleTableAndIndexes(db: SQLiteDatabase) {
@@ -355,6 +476,9 @@ class AppDatabaseHelper(private val context: Context) :
         val now = Instant.now().toString()
         db.beginTransaction()
         try {
+            db.execSQL("INSERT OR IGNORE INTO AcademicYears (ID, YearName, IsActive, CreatedDate) VALUES (1, '2026-2027', 1, '$now');")
+            ensureThreeStagesForYear(db, 1L, now)
+
             db.execSQL("INSERT OR IGNORE INTO Classes (ID, ClassName, CreatedAt) VALUES (1, 'الثالث المتوسط', '$now');")
             db.execSQL("INSERT OR IGNORE INTO Classes (ID, ClassName, CreatedAt) VALUES (2, 'الرابع العلمي', '$now');")
 

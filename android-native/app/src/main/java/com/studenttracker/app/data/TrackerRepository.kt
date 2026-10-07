@@ -918,21 +918,235 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         db.delete("DailySchedule", "ID = ?", arrayOf(id.toString()))
     }
 
-    // ---------------- STUDY PERIODS ("الفترات الدراسية") ----------------
-    fun getStudyPeriods(): List<StudyPeriodEntity> {
+    // ---------------- ACADEMIC YEARS & STUDY PERIODS ("العام الدراسي والفترات الدراسية") ----------------
+    private fun ensureDefaultAcademicYearAndStagesExist() {
+        val db = dbHelper.writableDatabase
+        val count = db.rawQuery("SELECT COUNT(*) FROM AcademicYears", null).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
+        val now = Instant.now().toString()
+        if (count == 0) {
+            db.execSQL(
+                "INSERT OR IGNORE INTO AcademicYears (ID, YearName, IsActive, CreatedDate) VALUES (1, '2026-2027', 1, '$now');"
+            )
+            ensureThreeStagesForYear(db, 1L, now)
+        }
+    }
+
+    private fun ensureThreeStagesForYear(db: SQLiteDatabase, yearId: Long, now: String = Instant.now().toString()) {
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'FIRST_HALF', 'النصف الأول', 1, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'MID_YEAR', 'نصف السنة', 2, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+        db.execSQL(
+            "INSERT OR IGNORE INTO AcademicStages (AcademicYearID, StageType, StageName, StageOrder, CreatedDate) VALUES (?, 'SECOND_HALF', 'النصف الثاني', 3, ?);",
+            arrayOf<Any>(yearId, now)
+        )
+    }
+
+    fun getAcademicYears(): List<AcademicYearEntity> {
+        ensureDefaultAcademicYearAndStagesExist()
         val db = dbHelper.readableDatabase
+        val list = mutableListOf<AcademicYearEntity>()
+        db.rawQuery(
+            "SELECT ID, YearName, IsActive, CreatedDate FROM AcademicYears ORDER BY IsActive DESC, YearName DESC, ID DESC",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val yId = c.getLong(0)
+                list.add(
+                    AcademicYearEntity(
+                        id = yId,
+                        yearName = c.getString(1) ?: "",
+                        isActive = c.getInt(2) == 1,
+                        createdDate = c.getString(3) ?: ""
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun getActiveAcademicYear(): AcademicYearEntity {
+        val years = getAcademicYears()
+        return years.firstOrNull { it.isActive } ?: years.first()
+    }
+
+    fun setActiveAcademicYear(yearId: Long) {
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            db.execSQL("UPDATE AcademicYears SET IsActive = 0;")
+            db.execSQL("UPDATE AcademicYears SET IsActive = 1 WHERE ID = ?;", arrayOf<Any>(yearId))
+            ensureThreeStagesForYear(db, yearId)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
+    fun addAcademicYear(yearName: String, makeActive: Boolean = true): Pair<Long, String?> {
+        val cleanName = yearName.trim()
+        if (cleanName.isBlank()) {
+            return -1L to "يرجى إدخال اسم العام الدراسي (مثال: 2026-2027)"
+        }
+        val existing = getAcademicYears().any { it.yearName.equals(cleanName, ignoreCase = true) }
+        if (existing) {
+            return -1L to "العام الدراسي «$cleanName» موجود مسبقاً"
+        }
+
+        val db = dbHelper.writableDatabase
+        val now = Instant.now().toString()
+        var newId = -1L
+        db.beginTransaction()
+        try {
+            if (makeActive) {
+                db.execSQL("UPDATE AcademicYears SET IsActive = 0;")
+            }
+            val cv = ContentValues().apply {
+                put("YearName", cleanName)
+                put("IsActive", if (makeActive) 1 else 0)
+                put("CreatedDate", now)
+            }
+            newId = db.insertOrThrow("AcademicYears", null, cv)
+            ensureThreeStagesForYear(db, newId, now)
+            db.setTransactionSuccessful()
+        } catch (_: Exception) {
+            return -1L to "تعذر إضافة العام الدراسي؛ تأكد من عدم تكرار الاسم"
+        } finally {
+            db.endTransaction()
+        }
+        return newId to null
+    }
+
+    fun updateAcademicYear(yearId: Long, newYearName: String): String? {
+        val cleanName = newYearName.trim()
+        if (cleanName.isBlank()) {
+            return "يرجى إدخال اسم العام الدراسي"
+        }
+        val duplicate = getAcademicYears().any { it.id != yearId && it.yearName.equals(cleanName, ignoreCase = true) }
+        if (duplicate) {
+            return "العام الدراسي «$cleanName» موجود مسبقاً"
+        }
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("YearName", cleanName)
+        }
+        db.update("AcademicYears", cv, "ID = ?", arrayOf(yearId.toString()))
+        ensureThreeStagesForYear(db, yearId)
+        return null
+    }
+
+    fun deleteAcademicYear(yearId: Long): String? {
+        val allYears = getAcademicYears()
+        if (allYears.size <= 1) {
+            return "لا يمكن حذف العام الدراسي الوحيد في النظام"
+        }
+        val periodsInYear = getStudyPeriods(academicYearId = yearId)
+        if (periodsInYear.isNotEmpty()) {
+            return "لا يمكن حذف هذا العام الدراسي لوجود (${periodsInYear.size}) فترة مرتبطة به. يرجى حذف الفترات المرتبطة أولاً للحفاظ على سلامة البيانات."
+        }
+        val db = dbHelper.writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete("AcademicStages", "AcademicYearID = ?", arrayOf(yearId.toString()))
+            db.delete("AcademicYears", "ID = ?", arrayOf(yearId.toString()))
+            // Ensure at least one remaining year is marked active
+            val activeCount = db.rawQuery("SELECT COUNT(*) FROM AcademicYears WHERE IsActive = 1", null).use { c ->
+                if (c.moveToFirst()) c.getInt(0) else 0
+            }
+            if (activeCount == 0) {
+                db.execSQL(
+                    "UPDATE AcademicYears SET IsActive = 1 WHERE ID = (SELECT ID FROM AcademicYears ORDER BY YearName DESC, ID DESC LIMIT 1);"
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return null
+    }
+
+    fun getStagesForAcademicYear(academicYearId: Long): List<AcademicStageEntity> {
+        val db = dbHelper.writableDatabase
+        ensureThreeStagesForYear(db, academicYearId)
+        val list = mutableListOf<AcademicStageEntity>()
+        db.rawQuery(
+            """
+            SELECT ID, AcademicYearID, StageType, StageName, StageOrder, CreatedDate
+            FROM AcademicStages
+            WHERE AcademicYearID = ?
+            ORDER BY StageOrder ASC, ID ASC
+            """.trimIndent(),
+            arrayOf(academicYearId.toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                val stageType = AcademicStage.fromDb(c.getString(2))
+                list.add(
+                    AcademicStageEntity(
+                        id = c.getLong(0),
+                        academicYearId = c.getLong(1),
+                        stageType = stageType,
+                        stageName = c.getString(3) ?: stageType.arabicLabel,
+                        stageOrder = c.getInt(4),
+                        createdDate = c.getString(5) ?: ""
+                    )
+                )
+            }
+        }
+        return list
+    }
+
+    fun getStudyPeriods(
+        academicYearId: Long? = null,
+        stageType: AcademicStage? = null
+    ): List<StudyPeriodEntity> {
+        ensureDefaultAcademicYearAndStagesExist()
+        val db = dbHelper.readableDatabase
+        val whereClauses = mutableListOf<String>()
+        val args = mutableListOf<String>()
+        if (academicYearId != null) {
+            whereClauses.add("AcademicYearID = ?")
+            args.add(academicYearId.toString())
+        }
+        if (stageType != null) {
+            whereClauses.add("StageType = ?")
+            args.add(stageType.dbValue)
+        }
+        val whereSql = if (whereClauses.isNotEmpty()) {
+            "WHERE " + whereClauses.joinToString(" AND ")
+        } else {
+            ""
+        }
+        val stageOrderCase = """
+            CASE StageType
+                WHEN 'FIRST_HALF' THEN 1
+                WHEN 'MID_YEAR' THEN 2
+                WHEN 'SECOND_HALF' THEN 3
+                ELSE 4
+            END
+        """.trimIndent()
+
         val cursor = db.rawQuery(
             """
-            SELECT ID, PeriodName, StartDate, EndDate, Status, CreatedDate
+            SELECT ID, PeriodName, StartDate, EndDate, Status, CreatedDate, AcademicYearID, StageType, SequenceNumber
             FROM StudyPeriods
-            ORDER BY StartDate ASC, ID ASC
+            $whereSql
+            ORDER BY AcademicYearID ASC, $stageOrderCase ASC, SequenceNumber ASC, StartDate ASC, ID ASC
             """.trimIndent(),
-            null
+            args.toTypedArray()
         )
         val list = mutableListOf<StudyPeriodEntity>()
         cursor.use {
             while (it.moveToNext()) {
                 val endDateRaw = if (it.isNull(3)) null else it.getString(3)?.takeIf { s -> s.isNotBlank() }
+                val yId = if (it.isNull(6) || it.getLong(6) <= 0L) 1L else it.getLong(6)
+                val sType = AcademicStage.fromDb(if (it.isNull(7)) "FIRST_HALF" else it.getString(7))
+                val seq = if (it.isNull(8) || it.getInt(8) <= 0) 1 else it.getInt(8)
                 list.add(
                     StudyPeriodEntity(
                         id = it.getLong(0),
@@ -940,7 +1154,10 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                         startDate = it.getString(2) ?: "",
                         endDate = endDateRaw,
                         status = StudyPeriodStatus.fromDb(it.getString(4)),
-                        createdDate = it.getString(5) ?: ""
+                        createdDate = it.getString(5) ?: "",
+                        academicYearId = yId,
+                        stageType = sType,
+                        sequenceNumber = seq
                     )
                 )
             }
@@ -952,9 +1169,8 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         return getStudyPeriods().firstOrNull { it.status == StudyPeriodStatus.OPEN }
     }
 
-    fun getSuggestedNextPeriodName(): String {
-        val count = getStudyPeriods().size
-        return when (count + 1) {
+    fun getOrdinalPeriodName(sequence: Int): String {
+        return when (sequence) {
             1 -> "الفترة الأولى"
             2 -> "الفترة الثانية"
             3 -> "الفترة الثالثة"
@@ -965,59 +1181,250 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             8 -> "الفترة الثامنة"
             9 -> "الفترة التاسعة"
             10 -> "الفترة العاشرة"
-            else -> "الفترة ${count + 1}"
+            else -> "الفترة $sequence"
+        }
+    }
+
+    fun getSuggestedNextPeriodName(
+        academicYearId: Long = getActiveAcademicYear().id,
+        stageType: AcademicStage = AcademicStage.FIRST_HALF
+    ): String {
+        if (stageType == AcademicStage.MID_YEAR) {
+            return "الفترة"
+        }
+        val count = getStudyPeriods(academicYearId = academicYearId, stageType = stageType).size
+        return getOrdinalPeriodName(count + 1)
+    }
+
+    /**
+     * Re-indexes SequenceNumber (1, 2, 3, ...) for all periods inside a given (academicYearId, stageType)
+     * ordered by StartDate ASC, ID ASC so period ordering is always consistent and gap-free.
+     */
+    private fun resequenceStagePeriods(db: SQLiteDatabase, academicYearId: Long, stageType: AcademicStage) {
+        val ids = mutableListOf<Long>()
+        db.rawQuery(
+            """
+            SELECT ID FROM StudyPeriods
+            WHERE AcademicYearID = ? AND StageType = ?
+            ORDER BY StartDate ASC, SequenceNumber ASC, ID ASC
+            """.trimIndent(),
+            arrayOf(academicYearId.toString(), stageType.dbValue)
+        ).use { c ->
+            while (c.moveToNext()) {
+                ids.add(c.getLong(0))
+            }
+        }
+        ids.forEachIndexed { idx, pid ->
+            val cv = ContentValues().apply { put("SequenceNumber", idx + 1) }
+            db.update("StudyPeriods", cv, "ID = ?", arrayOf(pid.toString()))
         }
     }
 
     /**
-     * Checks whether a date range [startDate, endDate] overlaps with any other existing period
-     * (excluding [excludeId] if provided), or starts on/before the end of a previous closed period.
-     * Returns an Arabic validation error message if invalid, or null if valid.
+     * Validates a period's start and end dates and checks for date overlap ONLY within
+     * the same (academicYearId, stageType) as required:
+     * - FIRST_HALF periods are checked against other FIRST_HALF periods in the same AcademicYear.
+     * - SECOND_HALF periods are checked against other SECOND_HALF periods in the same AcademicYear.
+     * - MID_YEAR allows only a single period per AcademicYear.
      */
+    fun validateStagePeriodDates(
+        academicYearId: Long,
+        stageType: AcademicStage,
+        startDate: String,
+        endDate: String,
+        excludeId: Long? = null
+    ): String? {
+        val cleanStart = startDate.trim()
+        val cleanEnd = endDate.trim()
+        if (cleanStart.isBlank()) {
+            return "يرجى تحديد تاريخ البداية"
+        }
+        if (cleanEnd.isBlank()) {
+            return "يرجى تحديد تاريخ النهاية"
+        }
+        if (cleanStart > cleanEnd) {
+            return "لا يسمح بحفظ فترة يكون تاريخ نهايتها قبل تاريخ بدايتها"
+        }
+
+        val sameStagePeriods = getStudyPeriods(
+            academicYearId = academicYearId,
+            stageType = stageType
+        ).filter { it.id != excludeId }
+
+        if (stageType == AcademicStage.MID_YEAR && sameStagePeriods.isNotEmpty()) {
+            return "مرحلة نصف السنة تحتوي على فترة واحدة فقط ولا يسمح بإضافة فترة ثانية داخلها"
+        }
+
+        for (other in sameStagePeriods) {
+            val otherStart = other.startDate
+            val otherEnd = other.endDate ?: other.startDate
+            // Overlap check: [cleanStart, cleanEnd] overlaps with [otherStart, otherEnd]
+            val overlaps = cleanStart <= otherEnd && cleanEnd >= otherStart
+            if (overlaps) {
+                return "يوجد تداخل في التواريخ مع «${other.periodName}» (${formatIsoDateToDisplay(otherStart)} → ${formatIsoDateToDisplay(otherEnd)}) داخل ${stageType.arabicLabel}"
+            }
+        }
+        return null
+    }
+
+    /**
+     * Adds a new period inside a specific AcademicYear and AcademicStage.
+     * - Unlimited periods allowed in FIRST_HALF and SECOND_HALF.
+     * - Strictly 1 period allowed in MID_YEAR.
+     * - Requires both startDate and endDate with startDate <= endDate and no overlap within the same stage.
+     */
+    fun addPeriodToStage(
+        academicYearId: Long,
+        stageType: AcademicStage,
+        periodName: String,
+        startDate: String,
+        endDate: String
+    ): Pair<Long, String?> {
+        val existingInStage = getStudyPeriods(academicYearId = academicYearId, stageType = stageType)
+        if (stageType == AcademicStage.MID_YEAR && existingInStage.isNotEmpty()) {
+            return -1L to "مرحلة نصف السنة تحتوي على فترة واحدة فقط ولا يسمح بإضافة فترة ثانية داخلها"
+        }
+
+        val nextSeq = existingInStage.size + 1
+        val cleanName = periodName.trim().ifBlank {
+            if (stageType == AcademicStage.MID_YEAR) "الفترة" else getOrdinalPeriodName(nextSeq)
+        }
+        val cleanStart = startDate.trim()
+        val cleanEnd = endDate.trim()
+
+        val validationError = validateStagePeriodDates(
+            academicYearId = academicYearId,
+            stageType = stageType,
+            startDate = cleanStart,
+            endDate = cleanEnd,
+            excludeId = null
+        )
+        if (validationError != null) {
+            return -1L to validationError
+        }
+
+        val db = dbHelper.writableDatabase
+        ensureThreeStagesForYear(db, academicYearId)
+        val now = Instant.now().toString()
+        val cv = ContentValues().apply {
+            put("AcademicYearID", academicYearId)
+            put("StageType", stageType.dbValue)
+            put("SequenceNumber", nextSeq)
+            put("PeriodName", cleanName)
+            put("StartDate", cleanStart)
+            put("EndDate", cleanEnd)
+            put("Status", StudyPeriodStatus.CLOSED.dbValue)
+            put("CreatedDate", now)
+        }
+
+        val insertedId = runCatching {
+            db.insertOrThrow("StudyPeriods", null, cv)
+        }.getOrElse { -1L }
+
+        if (insertedId == -1L) {
+            return -1L to if (stageType == AcademicStage.MID_YEAR) {
+                "مرحلة نصف السنة تحتوي على فترة واحدة فقط ولا يسمح بإضافة فترة ثانية داخلها"
+            } else {
+                "تعذر حفظ الفترة الدراسية"
+            }
+        }
+
+        resequenceStagePeriods(db, academicYearId, stageType)
+        return insertedId to null
+    }
+
+    /**
+     * Updates an existing period's name, startDate, and endDate while enforcing
+     * startDate <= endDate and non-overlap within the same stage.
+     */
+    fun updateStagePeriod(
+        id: Long,
+        periodName: String,
+        startDate: String,
+        endDate: String
+    ): String? {
+        val target = getStudyPeriods().firstOrNull { it.id == id }
+            ?: return "الفترة الدراسية غير موجودة"
+
+        val cleanName = periodName.trim()
+        if (cleanName.isBlank()) {
+            return "يرجى إدخال اسم الفترة"
+        }
+        val cleanStart = startDate.trim()
+        val cleanEnd = endDate.trim()
+
+        val validationError = validateStagePeriodDates(
+            academicYearId = target.academicYearId,
+            stageType = target.stageType,
+            startDate = cleanStart,
+            endDate = cleanEnd,
+            excludeId = id
+        )
+        if (validationError != null) {
+            return validationError
+        }
+
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("PeriodName", cleanName)
+            put("StartDate", cleanStart)
+            put("EndDate", cleanEnd)
+            put("Status", StudyPeriodStatus.CLOSED.dbValue)
+        }
+        db.update("StudyPeriods", cv, "ID = ?", arrayOf(id.toString()))
+        resequenceStagePeriods(db, target.academicYearId, target.stageType)
+        return null
+    }
+
+    /**
+     * Safely deletes a period if no linked PeriodGrades with written exam scores prevent deletion,
+     * and never deletes any student, attendance, or daily evaluation records.
+     * Returns an Arabic error message if blocked by linked data, or null on success.
+     */
+    fun deleteStagePeriodSafely(id: Long): String? {
+        val target = getStudyPeriods().firstOrNull { it.id == id }
+            ?: return "الفترة غير موجودة"
+
+        val db = dbHelper.writableDatabase
+        val linkedGradesCount = db.rawQuery(
+            "SELECT COUNT(*) FROM PeriodGrades WHERE PeriodID = ? AND WrittenExamGrade IS NOT NULL",
+            arrayOf(id.toString())
+        ).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
+        if (linkedGradesCount > 0) {
+            return "لا يمكن حذف «${target.periodName}» لوجود درجات مرتبطة بها ($linkedGradesCount درجة مسجلة). حفاظاً على البيانات لا يتم الحذف العشوائي."
+        }
+
+        db.beginTransaction()
+        try {
+            db.delete("PeriodGrades", "PeriodID = ?", arrayOf(id.toString()))
+            db.delete("StudyPeriods", "ID = ?", arrayOf(id.toString()))
+            resequenceStagePeriods(db, target.academicYearId, target.stageType)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return null
+    }
+
+    // Legacy compatibility helpers kept intact so other screens compile and work without changes
     fun validateStudyPeriodDates(
         startDate: String,
         endDate: String?,
         excludeId: Long? = null
     ): String? {
-        if (startDate.isBlank()) {
-            return "يرجى تحديد تاريخ بداية الفترة"
-        }
-        if (endDate != null) {
-            if (endDate.isBlank()) {
-                return "يرجى تحديد تاريخ نهاية الفترة"
-            }
-            if (endDate < startDate) {
-                return "لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية"
-            }
-        }
-
-        val others = getStudyPeriods().filter { it.id != excludeId }
-        for (other in others) {
-            val otherStart = other.startDate
-            val otherEnd = other.endDate
-            if (otherEnd != null) {
-                // Other period is CLOSED with [otherStart, otherEnd]
-                if (endDate == null) {
-                    // Creating or editing an OPEN period starting at startDate:
-                    // Must be strictly after all previous closed periods' end dates
-                    if (startDate <= otherEnd) {
-                        return "تاريخ البداية غير منطقي بالنسبة للفترات السابقة؛ يجب أن يكون بعد تاريخ نهاية «${other.periodName}» (${formatIsoDateToDisplay(otherEnd)})"
-                    }
-                } else {
-                    // Both periods have start and end dates: check overlap
-                    val overlaps = startDate <= otherEnd && endDate >= otherStart
-                    if (overlaps) {
-                        return "التواريخ المحددة تتداخل مع «${other.periodName}» (${formatIsoDateToDisplay(otherStart)} → ${formatIsoDateToDisplay(otherEnd)})"
-                    }
-                }
-            } else {
-                // Other period is OPEN starting at otherStart
-                if (endDate != null && endDate >= otherStart) {
-                    return "تاريخ النهاية يتداخل مع بداية الفترة المفتوحة «${other.periodName}» (${formatIsoDateToDisplay(otherStart)})"
-                }
-            }
-        }
-        return null
+        val activeYearId = getActiveAcademicYear().id
+        val target = excludeId?.let { id -> getStudyPeriods().firstOrNull { it.id == id } }
+        val yearId = target?.academicYearId ?: activeYearId
+        val stage = target?.stageType ?: AcademicStage.FIRST_HALF
+        return validateStagePeriodDates(
+            academicYearId = yearId,
+            stageType = stage,
+            startDate = startDate,
+            endDate = endDate ?: startDate,
+            excludeId = excludeId
+        )
     }
 
     private fun formatIsoDateToDisplay(isoDate: String): String {
@@ -1030,34 +1437,14 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         periodName: String,
         startDate: String
     ): Pair<Long, String?> {
-        val openPeriod = getOpenStudyPeriod()
-        if (openPeriod != null) {
-            return -1L to "توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة."
-        }
-        val cleanName = periodName.trim().ifBlank { getSuggestedNextPeriodName() }
-        val cleanStart = startDate.trim()
-        val dateErr = validateStudyPeriodDates(startDate = cleanStart, endDate = null, excludeId = null)
-        if (dateErr != null) {
-            return -1L to dateErr
-        }
-
-        val db = dbHelper.writableDatabase
-        val now = Instant.now().toString()
-        val cv = ContentValues().apply {
-            put("PeriodName", cleanName)
-            put("StartDate", cleanStart)
-            putNull("EndDate")
-            put("Status", StudyPeriodStatus.OPEN.dbValue)
-            put("CreatedDate", now)
-        }
-        val insertedId = runCatching {
-            db.insertOrThrow("StudyPeriods", null, cv)
-        }.getOrElse { -1L }
-
-        if (insertedId == -1L) {
-            return -1L to "توجد فترة دراسية مفتوحة حالياً. يجب إنهاؤها أولاً قبل بدء فترة جديدة."
-        }
-        return insertedId to null
+        val activeYear = getActiveAcademicYear()
+        return addPeriodToStage(
+            academicYearId = activeYear.id,
+            stageType = AcademicStage.FIRST_HALF,
+            periodName = periodName,
+            startDate = startDate,
+            endDate = startDate
+        )
     }
 
     fun closeStudyPeriod(
@@ -1066,28 +1453,12 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     ): String? {
         val target = getStudyPeriods().firstOrNull { it.id == id }
             ?: return "الفترة الدراسية غير موجودة"
-
-        val cleanEnd = endDate.trim()
-        if (cleanEnd.isBlank()) {
-            return "يرجى تحديد تاريخ نهاية الفترة"
-        }
-        if (cleanEnd < target.startDate) {
-            return "لا يسمح بأن يكون تاريخ النهاية قبل تاريخ البداية (${formatIsoDateToDisplay(target.startDate)})"
-        }
-        val dateErr = validateStudyPeriodDates(
+        return updateStagePeriod(
+            id = id,
+            periodName = target.periodName,
             startDate = target.startDate,
-            endDate = cleanEnd,
-            excludeId = id
+            endDate = endDate
         )
-        if (dateErr != null) return dateErr
-
-        val db = dbHelper.writableDatabase
-        val cv = ContentValues().apply {
-            put("EndDate", cleanEnd)
-            put("Status", StudyPeriodStatus.CLOSED.dbValue)
-        }
-        db.update("StudyPeriods", cv, "ID = ?", arrayOf(id.toString()))
-        return null
     }
 
     fun updateStudyPeriod(
@@ -1098,44 +1469,16 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     ): String? {
         val target = getStudyPeriods().firstOrNull { it.id == id }
             ?: return "الفترة الدراسية غير موجودة"
-
-        val cleanName = periodName.trim()
-        if (cleanName.isBlank()) {
-            return "يرجى إدخال اسم الفترة الدراسية"
-        }
-        val cleanStart = startDate.trim()
-        val effectiveStart = if (target.status == StudyPeriodStatus.OPEN) cleanStart else target.startDate
-        val effectiveEnd = if (target.status == StudyPeriodStatus.CLOSED) endDate?.trim() else null
-
-        if (target.status == StudyPeriodStatus.CLOSED && effectiveEnd.isNullOrBlank()) {
-            return "يرجى تحديد تاريخ النهاية للفترة المغلقة"
-        }
-
-        val dateErr = validateStudyPeriodDates(
-            startDate = effectiveStart,
-            endDate = effectiveEnd,
-            excludeId = id
+        return updateStagePeriod(
+            id = id,
+            periodName = periodName,
+            startDate = startDate,
+            endDate = endDate ?: target.endDate ?: startDate
         )
-        if (dateErr != null) return dateErr
-
-        val db = dbHelper.writableDatabase
-        val cv = ContentValues().apply {
-            put("PeriodName", cleanName)
-            if (target.status == StudyPeriodStatus.OPEN) {
-                put("StartDate", effectiveStart)
-            }
-            if (target.status == StudyPeriodStatus.CLOSED && effectiveEnd != null) {
-                put("EndDate", effectiveEnd)
-            }
-        }
-        db.update("StudyPeriods", cv, "ID = ?", arrayOf(id.toString()))
-        return null
     }
 
     fun deleteStudyPeriod(id: Long) {
-        // Deletes only the StudyPeriod time definition; never touches students, attendance, or evaluations.
-        val db = dbHelper.writableDatabase
-        db.delete("StudyPeriods", "ID = ?", arrayOf(id.toString()))
+        deleteStagePeriodSafely(id)
     }
 
     // ---------------- PERIOD GRADES ("درجات الفترات والامتحان التحريري والمعدل") ----------------

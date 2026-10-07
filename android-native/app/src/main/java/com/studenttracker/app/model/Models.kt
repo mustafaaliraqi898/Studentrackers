@@ -163,13 +163,51 @@ enum class StudyPeriodStatus(val dbValue: String, val arabicLabel: String) {
     }
 }
 
+enum class AcademicStage(
+    val dbValue: String,
+    val arabicLabel: String,
+    val stageOrder: Int,
+    val isSinglePeriodOnly: Boolean
+) {
+    FIRST_HALF("FIRST_HALF", "النصف الأول", 1, false),
+    MID_YEAR("MID_YEAR", "نصف السنة", 2, true),
+    SECOND_HALF("SECOND_HALF", "النصف الثاني", 3, false);
+
+    companion object {
+        fun fromDb(v: String?): AcademicStage = when (v) {
+            "MID_YEAR" -> MID_YEAR
+            "SECOND_HALF" -> SECOND_HALF
+            else -> FIRST_HALF
+        }
+    }
+}
+
+data class AcademicYearEntity(
+    val id: Long,
+    val yearName: String,
+    val isActive: Boolean,
+    val createdDate: String
+)
+
+data class AcademicStageEntity(
+    val id: Long,
+    val academicYearId: Long,
+    val stageType: AcademicStage,
+    val stageName: String,
+    val stageOrder: Int,
+    val createdDate: String
+)
+
 data class StudyPeriodEntity(
     val id: Long,
     val periodName: String,
     val startDate: String, // YYYY-MM-DD
     val endDate: String?,  // YYYY-MM-DD or null when OPEN
     val status: StudyPeriodStatus,
-    val createdDate: String
+    val createdDate: String,
+    val academicYearId: Long = 1L,
+    val stageType: AcademicStage = AcademicStage.FIRST_HALF,
+    val sequenceNumber: Int = 1
 )
 
 data class PeriodGradeEntity(
