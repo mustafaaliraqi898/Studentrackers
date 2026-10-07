@@ -186,9 +186,13 @@ object ExcelAndBackupService {
         )
         if (periods.isNotEmpty()) {
             for (p in periods) {
-                header.add("${p.periodName} اليومي")
-                header.add("${p.periodName} التحريري")
-                header.add("معدل ${p.periodName}")
+                if (p.stageType == AcademicStage.MID_YEAR) {
+                    header.add("نصف السنة")
+                } else {
+                    header.add("${p.periodName} اليومي")
+                    header.add("${p.periodName} التحريري")
+                    header.add("معدل ${p.periodName}")
+                }
             }
             header.add("المعدل النهائي")
         } else {
@@ -217,12 +221,21 @@ object ExcelAndBackupService {
                 val breakdownByPeriodId = rep.periodBreakdowns.associateBy { it.period.id }
                 for (p in periods) {
                     val bd = breakdownByPeriodId[p.id]
-                    val dailyStr = if (bd != null) GradingService.formatScore(bd.dailyGrade) else "--"
-                    val writtenStr = if (bd?.writtenExamGrade != null) GradingService.formatScore(bd.writtenExamGrade) else "--"
-                    val avgStr = if (bd?.periodAverage != null) GradingService.formatScore(bd.periodAverage) else "--"
-                    row.add(dailyStr)
-                    row.add(writtenStr)
-                    row.add(avgStr)
+                    if (p.stageType == AcademicStage.MID_YEAR) {
+                        val midYearStr = if (bd?.writtenExamGrade != null) {
+                            "${GradingService.formatScore(bd.writtenExamGrade)}/100"
+                        } else {
+                            "غير مدخل"
+                        }
+                        row.add(midYearStr)
+                    } else {
+                        val dailyStr = if (bd != null) GradingService.formatScore(bd.dailyGrade) else "--"
+                        val writtenStr = if (bd?.writtenExamGrade != null) GradingService.formatScore(bd.writtenExamGrade) else "--"
+                        val avgStr = if (bd?.periodAverage != null) GradingService.formatScore(bd.periodAverage) else "--"
+                        row.add(dailyStr)
+                        row.add(writtenStr)
+                        row.add(avgStr)
+                    }
                 }
                 row.add(if (rep.finalAverage != null) GradingService.formatScore(rep.finalAverage) else "--")
             } else {

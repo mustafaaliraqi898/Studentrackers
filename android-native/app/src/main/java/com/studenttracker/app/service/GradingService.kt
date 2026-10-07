@@ -524,34 +524,44 @@ object GradingService {
         val storedPeriodGrades = repository.getPeriodGrades()
         val storedMap = storedPeriodGrades.associateBy { it.studentId to it.periodId }
 
-        // Pre-calculate daily grades per period for all requested students
+        // Pre-calculate daily grades per period for all requested students (skip daily grade calculation for MID_YEAR)
         val periodDailyGradesByPeriodId: Map<Long, Map<Long, StudentCalculatedGrade>> = periods.associate { period ->
-            val gradesForPeriod = calculateGradesForClass(
-                dbHelper = dbHelper,
-                repository = repository,
-                classId = classId,
-                sectionId = sectionId,
-                startDateInclusive = period.startDate,
-                endDateInclusive = period.endDate
-            ).associateBy { it.studentId }
-            period.id to gradesForPeriod
+            if (period.stageType == AcademicStage.MID_YEAR) {
+                period.id to emptyMap()
+            } else {
+                val gradesForPeriod = calculateGradesForClass(
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    classId = classId,
+                    sectionId = sectionId,
+                    startDateInclusive = period.startDate,
+                    endDateInclusive = period.endDate
+                ).associateBy { it.studentId }
+                period.id to gradesForPeriod
+            }
         }
 
         return baseGrades.map { baseGrade ->
             val stId = baseGrade.studentId
             val breakdowns = periods.map { period ->
+                val isMidYear = period.stageType == AcademicStage.MID_YEAR
                 val calcDaily = periodDailyGradesByPeriodId[period.id]?.get(stId) ?: baseGrade
-                val dailyScore = round2(calcDaily.totalScore)
+                val dailyScore = if (isMidYear) 0.0 else round2(calcDaily.totalScore)
                 val stored = storedMap[stId to period.id]
                 val written = stored?.writtenExamGrade?.let { round2(it) }
                 val periodAvg = if (written != null) {
-                    round2((dailyScore + written) / 2.0)
+                    if (isMidYear) {
+                        written
+                    } else {
+                        round2((dailyScore + written) / 2.0)
+                    }
                 } else {
                     null
                 }
 
-                // Keep SQLite PeriodGrades row in sync if the daily grade changed since last save
-                if (stored != null && (stored.dailyGrade != dailyScore || stored.periodAverage != periodAvg)) {
+                // Keep SQLite PeriodGrades row in sync if the daily grade or periodAverage changed since last save
+                val expectedStoredDaily = if (isMidYear) null else dailyScore
+                if (stored != null && (stored.dailyGrade != expectedStoredDaily || stored.periodAverage != periodAvg)) {
                     runCatching {
                         repository.upsertPeriodGrade(
                             studentId = stId,

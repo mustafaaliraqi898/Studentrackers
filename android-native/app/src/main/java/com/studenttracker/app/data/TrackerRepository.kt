@@ -1654,6 +1654,9 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     /**
      * Saves or updates a student's WrittenExamGrade (0..100 or null to clear) and synchronized
      * DailyGrade + PeriodAverage inside PeriodGrades (UNIQUE(StudentID, PeriodID)).
+     * - For FIRST_HALF and SECOND_HALF periods: PeriodAverage = (DailyGrade + WrittenExamGrade) / 2.
+     * - For MID_YEAR ("نصف السنة"): Mid-Year is a single direct exam out of 100 with no internal daily average,
+     *   so PeriodAverage = WrittenExamGrade directly (and null when not entered).
      * Returns an Arabic validation error if writtenExamGrade is outside [0, 100], or null on success.
      */
     fun upsertPeriodGrade(
@@ -1664,13 +1667,24 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
     ): String? {
         if (writtenExamGrade != null) {
             if (writtenExamGrade.isNaN() || writtenExamGrade < 0.0 || writtenExamGrade > 100.0) {
-                return "يجب أن تكون درجة الامتحان التحريري بين 0 و 100"
+                return "يجب أن تكون الدرجة بين 0 و 100"
             }
         }
-        val roundedDaily = kotlin.math.round(dailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
+        val targetPeriod = getStudyPeriods().firstOrNull { it.id == periodId }
+        val isMidYear = targetPeriod?.stageType == AcademicStage.MID_YEAR
+
+        val roundedDaily: Double? = if (isMidYear) {
+            null
+        } else {
+            kotlin.math.round(dailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
+        }
         val roundedWritten = writtenExamGrade?.let { kotlin.math.round(it.coerceIn(0.0, 100.0) * 100.0) / 100.0 }
         val periodAvg = if (roundedWritten != null) {
-            kotlin.math.round(((roundedDaily + roundedWritten) / 2.0) * 100.0) / 100.0
+            if (isMidYear) {
+                roundedWritten
+            } else {
+                kotlin.math.round((((roundedDaily ?: 0.0) + roundedWritten) / 2.0) * 100.0) / 100.0
+            }
         } else {
             null
         }
