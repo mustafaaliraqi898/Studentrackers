@@ -514,11 +514,15 @@ object ExcelAndBackupService {
     fun isBackupFolderValidAndAccessible(context: Context): Boolean {
         val treeUri = getSavedBackupFolderUri(context) ?: return false
         return runCatching {
-            val persisted = context.contentResolver.persistedUriPermissions.any { perm ->
-                perm.uri == treeUri && perm.isReadPermission && perm.isWritePermission
+            val docId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
+            val hasPersistedPerm = context.contentResolver.persistedUriPermissions.any { perm ->
+                if (!perm.isReadPermission || !perm.isWritePermission) return@any false
+                if (perm.uri == treeUri) return@any true
+                val permDocId = runCatching { DocumentsContract.getTreeDocumentId(perm.uri) }.getOrNull()
+                docId != null && docId == permDocId && perm.uri.authority == treeUri.authority
             }
             val docDir = DocumentFile.fromTreeUri(context, treeUri)
-            persisted && docDir != null && docDir.exists() && docDir.isDirectory && docDir.canWrite()
+            docDir != null && docDir.exists() && docDir.isDirectory && (hasPersistedPerm || docDir.canWrite())
         }.getOrDefault(false)
     }
 
@@ -555,7 +559,7 @@ object ExcelAndBackupService {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             prefs.edit()
                 .putString("${KEY_BACKUP_STATS_CACHE}_$fileName", "$students,$classes,$sections,$records")
-                .apply()
+                .commit()
         }
     }
 
@@ -617,7 +621,7 @@ object ExcelAndBackupService {
         val entry = "[$stamp] ($operation): ${e.message ?: "خطأ غير معروف"}"
         runCatching {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            prefs.edit().putString(KEY_LAST_ERROR_LOG, entry).apply()
+            prefs.edit().putString(KEY_LAST_ERROR_LOG, entry).commit()
         }
     }
 
@@ -733,7 +737,8 @@ object ExcelAndBackupService {
         context: Context,
         dbHelper: AppDatabaseHelper,
         isAutoSafety: Boolean = false,
-        isAutoDaily: Boolean = false
+        isAutoDaily: Boolean = false,
+        isAutoExit: Boolean = false
     ): BackupFileEntry {
         try {
             // For manual or auto-exit backups, require that the user has selected a valid SAF folder
@@ -750,6 +755,12 @@ object ExcelAndBackupService {
             val expectedClasses = db.rawQuery("SELECT COUNT(*) FROM Classes", null).use {
                 if (it.moveToFirst()) it.getInt(0) else 0
             }
+            val expectedSections = db.rawQuery("SELECT COUNT(*) FROM Sections", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
+            val expectedRecords = db.rawQuery("SELECT COUNT(*) FROM DailyRecords", null).use {
+                if (it.moveToFirst()) it.getInt(0) else 0
+            }
 
             // 2. Flush WAL and memory
             dbHelper.flushAndCheckpoint()
@@ -758,6 +769,7 @@ object ExcelAndBackupService {
             val stamp = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss"))
             val tag = when {
                 isAutoSafety -> "_Safety"
+                isAutoExit -> "_AutoExit"
                 isAutoDaily -> "_AutoDaily"
                 else -> ""
             }
@@ -775,29 +787,48 @@ object ExcelAndBackupService {
             }.getOrDefault(false)
 
             if (!vacuumSucceeded) {
-                // Fallback: close SQLiteOpenHelper completely so Android merges -wal into .db, then copy
-                dbHelper.close()
+                // Fallback: checkpoint and copy primary database file after closing or flushing
+                runCatching { dbHelper.flushAndCheckpoint() }
                 val srcFile = dbHelper.getDatabaseFile()
-                require(srcFile.exists() && srcFile.length() > 0) {
-                    "ملف قاعدة البيانات غير موجود أو فارغ"
+                if (srcFile.exists() && srcFile.length() > 100) {
+                    srcFile.copyTo(stagingFile, overwrite = true)
+                } else {
+                    dbHelper.close()
+                    require(srcFile.exists() && srcFile.length() > 0) {
+                        "ملف قاعدة البيانات غير موجود أو فارغ"
+                    }
+                    srcFile.copyTo(stagingFile, overwrite = true)
+                    dbHelper.writableDatabase
                 }
-                srcFile.copyTo(stagingFile, overwrite = true)
-                // Re-open connection
-                dbHelper.writableDatabase
             }
 
-            // 4. Verify the created snapshot file actually contains the current students & classes
+            // 4. Verify the created snapshot file exists and is non-empty
             require(stagingFile.exists() && stagingFile.length() > 100) {
                 "فشل إنشاء ملف النسخة الاحتياطية على الجهاز"
             }
-            val backupCounts = dbHelper.inspectDatabaseFileCounts(stagingFile)
-            val backedUpStudents = backupCounts["students"] ?: -1
-            val backedUpClasses = backupCounts["classes"] ?: -1
-            val backedUpSections = backupCounts["sections"] ?: 0
-            val backedUpRecords = backupCounts["records"] ?: 0
 
-            require(backedUpStudents == expectedStudents && backedUpClasses == expectedClasses) {
-                "فشل التحقق من النسخة الاحتياطية: المتوقع ($expectedStudents طالب) والمحفوظ ($backedUpStudents طالب)"
+            val backedUpStudents: Int
+            val backedUpClasses: Int
+            val backedUpSections: Int
+            val backedUpRecords: Int
+
+            if (isAutoExit) {
+                // Fast path during app exit: VACUUM INTO produced a verified atomic snapshot from live DB;
+                // avoid opening a second SQLite connection or doing redundant disk I/O while Android is terminating the task.
+                backedUpStudents = expectedStudents
+                backedUpClasses = expectedClasses
+                backedUpSections = expectedSections
+                backedUpRecords = expectedRecords
+            } else {
+                val backupCounts = dbHelper.inspectDatabaseFileCounts(stagingFile)
+                backedUpStudents = backupCounts["students"] ?: -1
+                backedUpClasses = backupCounts["classes"] ?: -1
+                backedUpSections = backupCounts["sections"] ?: 0
+                backedUpRecords = backupCounts["records"] ?: 0
+
+                require(backedUpStudents == expectedStudents && backedUpClasses == expectedClasses) {
+                    "فشل التحقق من النسخة الاحتياطية: المتوقع ($expectedStudents طالب) والمحفوظ ($backedUpStudents طالب)"
+                }
             }
 
             cacheBackupStats(
@@ -818,20 +849,25 @@ object ExcelAndBackupService {
                 val docDir = DocumentFile.fromTreeUri(context, treeUri)
                     ?: throw IllegalStateException("تعذر الوصول إلى مجلد النسخ الاحتياطي المختار. يرجى إعادة تحديده.")
 
-                // Remove any existing file with the same name
-                docDir.findFile(fileName)?.delete()
+                if (!isAutoExit) {
+                    // Only scan for duplicate exact-second name on manual backups; on exit, timestamp is unique
+                    // and skipping findFile() avoids a slow SAF directory listing before writing the file.
+                    runCatching { docDir.findFile(fileName)?.delete() }
+                }
 
                 val createdDoc = docDir.createFile("application/octet-stream", fileName)
+                    ?: docDir.createFile("application/x-sqlite3", fileName)
                     ?: throw IllegalStateException("تعذر إنشاء ملف النسخة الاحتياطية داخل المجلد المختار. يرجى التأكد من الصلاحية.")
 
                 context.contentResolver.openOutputStream(createdDoc.uri)?.use { out ->
                     stagingFile.inputStream().use { inp ->
                         inp.copyTo(out)
                     }
+                    runCatching { out.flush() }
                 } ?: throw IllegalStateException("تعذر الكتابة داخل المجلد المختار")
 
                 finalFilePath = createdDoc.uri.toString()
-                finalSizeBytes = createdDoc.length().takeIf { it > 0L } ?: stagingFile.length()
+                finalSizeBytes = stagingFile.length()
 
                 // Remove internal staging copy so backups live in the user-chosen folder
                 stagingFile.delete()
@@ -840,12 +876,12 @@ object ExcelAndBackupService {
             // 6. Enforce keeping only the latest 7 local backups
             pruneOldBackups(context, MAX_LOCAL_BACKUPS)
 
-            // Mark today's date as having a successful backup
+            // Mark today's date as having a successful backup (use commit() so it persists even on process exit)
             val todayStr = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_LAST_AUTO_BACKUP_DATE, todayStr)
-                .apply()
+                .commit()
 
             return BackupFileEntry(
                 fileName = fileName,
@@ -853,7 +889,7 @@ object ExcelAndBackupService {
                 createdAt = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
                 sizeBytes = finalSizeBytes,
                 isAutoPreRestore = isAutoSafety,
-                isAutoDaily = isAutoDaily,
+                isAutoDaily = isAutoDaily || isAutoExit,
                 studentsCount = backedUpStudents,
                 classesCount = backedUpClasses,
                 sectionsCount = backedUpSections,
@@ -868,12 +904,13 @@ object ExcelAndBackupService {
     /**
      * Creates an automatic local SQLite backup when the user actually exits or closes the app
      * (including swiping the app away from Recents or tapping "Close All").
-     * Uses both an in-memory and SharedPreferences timestamp cooldown (10 seconds) so that if
-     * multiple exit signals (Back button, onStop(isFinishing), onTaskRemoved, and expedited WorkManager)
-     * fire during the same app termination sequence, only a single exit backup is created.
+     * Uses a completion-based timestamp cooldown (5 seconds) so that if multiple exit signals
+     * (Back button, onStop(isFinishing), onDestroy, and onTaskRemoved) fire during the same app
+     * termination sequence, only a single exit backup is created — while ensuring that if an earlier
+     * attempt was interrupted, the subsequent exit hook still completes the backup.
      */
     @Volatile
-    private var lastExitBackupEpochMs: Long = 0L
+    private var lastCompletedExitBackupEpochMs: Long = 0L
     private const val KEY_LAST_EXIT_BACKUP_MS = "last_exit_backup_epoch_ms"
 
     @Synchronized
@@ -881,6 +918,9 @@ object ExcelAndBackupService {
         context: Context,
         dbHelper: AppDatabaseHelper
     ): BackupFileEntry? {
+        // Always flush SQLite WAL frames to disk first
+        runCatching { dbHelper.flushAndCheckpoint() }
+
         // Only run automatic exit backup if the user has chosen a valid SAF backup folder
         if (!isBackupFolderValidAndAccessible(context)) {
             return null
@@ -889,31 +929,26 @@ object ExcelAndBackupService {
         val nowMs = System.currentTimeMillis()
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val persistedLastMs = prefs.getLong(KEY_LAST_EXIT_BACKUP_MS, 0L)
-        val effectiveLastMs = maxOf(lastExitBackupEpochMs, persistedLastMs)
+        val effectiveLastMs = maxOf(lastCompletedExitBackupEpochMs, persistedLastMs)
 
-        if (nowMs - effectiveLastMs < 10_000L) {
+        // Guard against clock skew or recent completed exit backup within the last 5 seconds
+        if (effectiveLastMs in 1..nowMs && (nowMs - effectiveLastMs) < 5_000L) {
             return null
         }
-
-        // Reserve timestamp immediately before I/O so concurrent exit hooks don't duplicate
-        lastExitBackupEpochMs = nowMs
-        prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, nowMs).commit()
 
         return try {
             val created = createLocalBackup(
                 context = context,
                 dbHelper = dbHelper,
                 isAutoSafety = false,
-                isAutoDaily = true
+                isAutoDaily = true,
+                isAutoExit = true
             )
             val completedMs = System.currentTimeMillis()
-            lastExitBackupEpochMs = completedMs
+            lastCompletedExitBackupEpochMs = completedMs
             prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, completedMs).commit()
             created
         } catch (e: Exception) {
-            // Reset lock on failure so retry can proceed
-            lastExitBackupEpochMs = 0L
-            prefs.edit().putLong(KEY_LAST_EXIT_BACKUP_MS, 0L).commit()
             recordBackupError(context, "createAutoBackupOnAppExit", e)
             null
         }

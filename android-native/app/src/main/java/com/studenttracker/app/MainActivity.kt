@@ -48,6 +48,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        AppExitBackupService.ensureRunning(applicationContext)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        val dbHelper = AppDatabaseHelper.getInstance(applicationContext)
+        runCatching { dbHelper.flushAndCheckpoint() }
+        if (isFinishing && !isChangingConfigurations) {
+            ExcelAndBackupService.createAutoBackupOnAppExit(applicationContext, dbHelper)
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         // Flush SQLite WAL to main DB file whenever the Activity goes to background so the file on disk is 100% up-to-date.

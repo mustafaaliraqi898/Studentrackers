@@ -23,20 +23,22 @@ class AppExitBackupService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val appContext = applicationContext
-        // 1. Enqueue expedited backup worker as an OS-backed fallback if the process is killed mid-flight
-        runCatching {
-            DailyBackupWorker.enqueueImmediateExitBackup(appContext)
-        }
-
-        // 2. Perform synchronous local SQLite backup immediately before the process terminates
-        runCatching {
+        // Perform synchronous local SQLite backup immediately before the process terminates
+        val created = runCatching {
             val dbHelper = AppDatabaseHelper.getInstance(appContext)
             ExcelAndBackupService.createAutoBackupOnAppExit(appContext, dbHelper)
+        }.getOrNull()
+
+        // Only enqueue expedited OS worker fallback if synchronous exit backup did not already complete
+        if (created == null && ExcelAndBackupService.isBackupFolderValidAndAccessible(appContext)) {
+            runCatching {
+                DailyBackupWorker.enqueueImmediateExitBackup(appContext)
+            }
         }
 
         stopSelf()
