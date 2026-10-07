@@ -3795,12 +3795,28 @@ fun ExcelAndBackupScreen(
     onShowMessage: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     var importResult by remember { mutableStateOf<ExcelImportResult?>(null) }
     var isFolderValid by remember { mutableStateOf(ExcelAndBackupService.isBackupFolderValidAndAccessible(context)) }
     var folderDisplayPath by remember { mutableStateOf(ExcelAndBackupService.getBackupFolderDisplayPath(context)) }
     var backups by remember { mutableStateOf(ExcelAndBackupService.listBackups(context)) }
     var lastError by remember { mutableStateOf(ExcelAndBackupService.getLastBackupError(context)) }
     var createBackupAfterFolderPick by remember { mutableStateOf(false) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isFolderValid = ExcelAndBackupService.isBackupFolderValidAndAccessible(context)
+                folderDisplayPath = ExcelAndBackupService.getBackupFolderDisplayPath(context)
+                backups = ExcelAndBackupService.listBackups(context)
+                lastError = ExcelAndBackupService.getLastBackupError(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Confirmation modals for Backup Restore and Delete
     var pendingRestoreBackup by remember { mutableStateOf<BackupFileEntry?>(null) }

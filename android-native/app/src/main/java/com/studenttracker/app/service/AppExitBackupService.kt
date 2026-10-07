@@ -34,8 +34,8 @@ class AppExitBackupService : Service() {
             ExcelAndBackupService.createAutoBackupOnAppExit(appContext, dbHelper)
         }.getOrNull()
 
-        // Only enqueue expedited OS worker fallback if synchronous exit backup did not already complete
-        if (created == null && ExcelAndBackupService.isBackupFolderValidAndAccessible(appContext)) {
+        // Enqueue expedited OS worker fallback only if synchronous exit backup did not already complete
+        if (created == null) {
             runCatching {
                 DailyBackupWorker.enqueueImmediateExitBackup(appContext)
             }

@@ -527,6 +527,103 @@ object ExcelAndBackupService {
     }
 
     /**
+     * Fast, zero-IPC check used during app exit (onTaskRemoved / onDestroy) to verify that a SAF
+     * backup folder URI is saved and holds persisted write permission, without querying ContentProvider
+     * metadata before creating the backup document.
+     */
+    private fun hasSavedBackupFolderUriWithPermission(context: Context): Boolean {
+        val treeUri = getSavedBackupFolderUri(context) ?: return false
+        return runCatching {
+            val docId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull()
+            val hasPersistedPerm = context.contentResolver.persistedUriPermissions.any { perm ->
+                if (!perm.isWritePermission) return@any false
+                if (perm.uri == treeUri) return@any true
+                val permDocId = runCatching { DocumentsContract.getTreeDocumentId(perm.uri) }.getOrNull()
+                docId != null && docId == permDocId && perm.uri.authority == treeUri.authority
+            }
+            if (hasPersistedPerm) {
+                true
+            } else {
+                val docDir = DocumentFile.fromTreeUri(context, treeUri)
+                docDir != null && docDir.canWrite()
+            }
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Creates a new backup file inside the user's selected SAF Tree URI using direct
+     * DocumentsContract.createDocument() (single IPC call) with DocumentFile fallback,
+     * and flushes + fsyncs the underlying FileDescriptor so bytes are committed to storage immediately.
+     */
+    private fun writeFileToSafBackupFolder(
+        context: Context,
+        treeUri: Uri,
+        fileName: String,
+        sourceFile: File,
+        checkExistingFirst: Boolean
+    ): Uri {
+        val resolver = context.contentResolver
+        if (checkExistingFirst) {
+            runCatching {
+                DocumentFile.fromTreeUri(context, treeUri)?.findFile(fileName)?.delete()
+            }
+        }
+
+        // Fast direct DocumentsContract creation (1 IPC call instead of multiple DocumentFile queries)
+        val parentDocumentUri = runCatching {
+            DocumentsContract.buildDocumentUriUsingTree(
+                treeUri,
+                DocumentsContract.getTreeDocumentId(treeUri)
+            )
+        }.getOrNull()
+
+        var createdUri: Uri? = if (parentDocumentUri != null) {
+            runCatching {
+                DocumentsContract.createDocument(
+                    resolver,
+                    parentDocumentUri,
+                    "application/octet-stream",
+                    fileName
+                )
+            }.getOrNull() ?: runCatching {
+                DocumentsContract.createDocument(
+                    resolver,
+                    parentDocumentUri,
+                    "application/x-sqlite3",
+                    fileName
+                )
+            }.getOrNull()
+        } else {
+            null
+        }
+
+        // Fallback to DocumentFile if provider requires it
+        if (createdUri == null) {
+            val docDir = DocumentFile.fromTreeUri(context, treeUri)
+                ?: throw IllegalStateException("تعذر الوصول إلى مجلد النسخ الاحتياطي المختار. يرجى إعادة تحديده.")
+            val createdDoc = docDir.createFile("application/octet-stream", fileName)
+                ?: docDir.createFile("application/x-sqlite3", fileName)
+                ?: throw IllegalStateException("تعذر إنشاء ملف النسخة الاحتياطية داخل المجلد المختار. يرجى التأكد من الصلاحية.")
+            createdUri = createdDoc.uri
+        }
+
+        val targetUri = createdUri
+            ?: throw IllegalStateException("تعذر إنشاء ملف النسخة الاحتياطية داخل المجلد المختار.")
+
+        resolver.openOutputStream(targetUri, "w")?.use { out ->
+            sourceFile.inputStream().use { inp ->
+                inp.copyTo(out)
+            }
+            out.flush()
+            if (out is FileOutputStream) {
+                runCatching { out.fd.sync() }
+            }
+        } ?: throw IllegalStateException("تعذر الكتابة داخل المجلد المختار")
+
+        return targetUri
+    }
+
+    /**
      * Formats the SAF Tree Uri into a clear, human-readable folder path for display in the UI
      * (e.g. "Download/سجل متابعة الطلاب/النسخ الاحتياطية").
      */
@@ -741,9 +838,13 @@ object ExcelAndBackupService {
         isAutoExit: Boolean = false
     ): BackupFileEntry {
         try {
-            // For manual or auto-exit backups, require that the user has selected a valid SAF folder
-            val hasValidSafFolder = isBackupFolderValidAndAccessible(context)
-            if (!hasValidSafFolder && !isAutoSafety) {
+            val hasValidSafFolder = if (isAutoExit) {
+                hasSavedBackupFolderUriWithPermission(context)
+            } else {
+                isBackupFolderValidAndAccessible(context)
+            }
+
+            if (!hasValidSafFolder && !isAutoSafety && !isAutoExit) {
                 throw IllegalStateException("يرجى تحديد مجلد حفظ النسخ الاحتياطية أولاً")
             }
 
@@ -779,7 +880,7 @@ object ExcelAndBackupService {
                 stagingFile.delete()
             }
 
-            // 3. Create a self-contained, WAL-free snapshot using VACUUM INTO (or fallback to closed-connection copy)
+            // 3. Create a self-contained, WAL-free snapshot using VACUUM INTO (or fallback to checkpointed copy)
             val vacuumSucceeded = runCatching {
                 val escapedPath = stagingFile.absolutePath.replace("'", "''")
                 db.execSQL("VACUUM INTO '$escapedPath';")
@@ -787,7 +888,6 @@ object ExcelAndBackupService {
             }.getOrDefault(false)
 
             if (!vacuumSucceeded) {
-                // Fallback: checkpoint and copy primary database file after closing or flushing
                 runCatching { dbHelper.flushAndCheckpoint() }
                 val srcFile = dbHelper.getDatabaseFile()
                 if (srcFile.exists() && srcFile.length() > 100) {
@@ -813,8 +913,6 @@ object ExcelAndBackupService {
             val backedUpRecords: Int
 
             if (isAutoExit) {
-                // Fast path during app exit: VACUUM INTO produced a verified atomic snapshot from live DB;
-                // avoid opening a second SQLite connection or doing redundant disk I/O while Android is terminating the task.
                 backedUpStudents = expectedStudents
                 backedUpClasses = expectedClasses
                 backedUpSections = expectedSections
@@ -842,39 +940,22 @@ object ExcelAndBackupService {
 
             // 5. Write the verified SQLite snapshot directly into the user's selected SAF folder
             var finalFilePath = stagingFile.absolutePath
-            var finalSizeBytes = stagingFile.length()
+            val finalSizeBytes = stagingFile.length()
 
             if (hasValidSafFolder) {
                 val treeUri = getSavedBackupFolderUri(context)!!
-                val docDir = DocumentFile.fromTreeUri(context, treeUri)
-                    ?: throw IllegalStateException("تعذر الوصول إلى مجلد النسخ الاحتياطي المختار. يرجى إعادة تحديده.")
-
-                if (!isAutoExit) {
-                    // Only scan for duplicate exact-second name on manual backups; on exit, timestamp is unique
-                    // and skipping findFile() avoids a slow SAF directory listing before writing the file.
-                    runCatching { docDir.findFile(fileName)?.delete() }
-                }
-
-                val createdDoc = docDir.createFile("application/octet-stream", fileName)
-                    ?: docDir.createFile("application/x-sqlite3", fileName)
-                    ?: throw IllegalStateException("تعذر إنشاء ملف النسخة الاحتياطية داخل المجلد المختار. يرجى التأكد من الصلاحية.")
-
-                context.contentResolver.openOutputStream(createdDoc.uri)?.use { out ->
-                    stagingFile.inputStream().use { inp ->
-                        inp.copyTo(out)
-                    }
-                    runCatching { out.flush() }
-                } ?: throw IllegalStateException("تعذر الكتابة داخل المجلد المختار")
-
-                finalFilePath = createdDoc.uri.toString()
-                finalSizeBytes = stagingFile.length()
+                val writtenUri = writeFileToSafBackupFolder(
+                    context = context,
+                    treeUri = treeUri,
+                    fileName = fileName,
+                    sourceFile = stagingFile,
+                    checkExistingFirst = !isAutoExit
+                )
+                finalFilePath = writtenUri.toString()
 
                 // Remove internal staging copy so backups live in the user-chosen folder
                 stagingFile.delete()
             }
-
-            // 6. Enforce keeping only the latest 7 local backups
-            pruneOldBackups(context, MAX_LOCAL_BACKUPS)
 
             // Mark today's date as having a successful backup (use commit() so it persists even on process exit)
             val todayStr = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
@@ -882,6 +963,18 @@ object ExcelAndBackupService {
                 .edit()
                 .putString(KEY_LAST_AUTO_BACKUP_DATE, todayStr)
                 .commit()
+
+            // 6. Enforce keeping only the latest 7 local backups.
+            // During app exit, run pruning after the new backup is already committed & saved so slow SAF
+            // directory listing never delays or blocks the creation of the new exit backup!
+            if (isAutoExit) {
+                val appCtx = context.applicationContext
+                Thread {
+                    runCatching { pruneOldBackups(appCtx, MAX_LOCAL_BACKUPS) }
+                }.start()
+            } else {
+                pruneOldBackups(context, MAX_LOCAL_BACKUPS)
+            }
 
             return BackupFileEntry(
                 fileName = fileName,
@@ -922,7 +1015,7 @@ object ExcelAndBackupService {
         runCatching { dbHelper.flushAndCheckpoint() }
 
         // Only run automatic exit backup if the user has chosen a valid SAF backup folder
-        if (!isBackupFolderValidAndAccessible(context)) {
+        if (!hasSavedBackupFolderUriWithPermission(context)) {
             return null
         }
 
