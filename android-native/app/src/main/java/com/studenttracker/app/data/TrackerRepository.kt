@@ -779,82 +779,85 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             args.add(sectionId.toString())
         }
 
-        val yearsMap = getAcademicYears().associateBy { it.id }
-        val periodsList = getStudyPeriods()
+        val yearsMap = runCatching { getAcademicYears().associateBy { it.id } }.getOrDefault(emptyMap())
+        val periodsList = runCatching { getStudyPeriods() }.getOrDefault(emptyList())
         val periodsMap = periodsList.associateBy { it.id }
 
-        val cursor = db.rawQuery(
-            """
-            SELECT
-                dr.RecordDate,
-                dr.ClassID,
-                c.ClassName,
-                dr.SectionID,
-                s.SectionName,
-                COUNT(DISTINCT dr.StudentID) as StudentCount,
-                SUM(CASE WHEN a.Status = 'present' THEN 1 ELSE 0 END) as PresentCount,
-                SUM(CASE WHEN a.Status = 'absent' THEN 1 ELSE 0 END) as AbsentCount,
-                SUM(
-                    (CASE WHEN e.Participation IS NOT NULL THEN 1 ELSE 0 END) +
-                    (CASE WHEN e.Notebook IS NOT NULL THEN 1 ELSE 0 END) +
-                    (CASE WHEN e.Homework IS NOT NULL THEN 1 ELSE 0 END) +
-                    (CASE WHEN e.Behavior IS NOT NULL THEN 1 ELSE 0 END)
-                ) as EvalCount,
-                COUNT(dt.Score) as TestsCount,
-                MAX(dr.UpdatedAt) as LastUpdated,
-                MAX(dr.AcademicYearID) as AcademicYearID,
-                MAX(dr.PeriodID) as PeriodID
-            FROM DailyRecords dr
-            JOIN Classes c ON c.ID = dr.ClassID
-            JOIN Sections s ON s.ID = dr.SectionID
-            LEFT JOIN Attendance a ON a.StudentID = dr.StudentID AND a.RecordDate = dr.RecordDate
-            LEFT JOIN Evaluations e ON e.StudentID = dr.StudentID AND e.RecordDate = dr.RecordDate
-            LEFT JOIN DailyTests dt ON dt.StudentID = dr.StudentID AND dt.RecordDate = dr.RecordDate
-            $whereSb
-            GROUP BY dr.RecordDate, dr.ClassID, dr.SectionID
-            ORDER BY dr.RecordDate DESC, dr.ClassID ASC, dr.SectionID ASC
-            """.trimIndent(),
-            args.toTypedArray()
-        )
         val list = mutableListOf<SavedSessionSummary>()
-        cursor.use {
-            while (it.moveToNext()) {
-                val recDate = it.getString(0) ?: ""
-                val explicitYearId = if (it.isNull(11)) null else it.getLong(11).takeIf { v -> v > 0L }
-                val explicitPeriodId = if (it.isNull(12)) null else it.getLong(12).takeIf { v -> v > 0L }
+        runCatching {
+            val cursor = db.rawQuery(
+                """
+                SELECT
+                    dr.RecordDate,
+                    dr.ClassID,
+                    COALESCE(c.ClassName, 'صف غير معروف') as ClassName,
+                    dr.SectionID,
+                    COALESCE(s.SectionName, '-') as SectionName,
+                    COUNT(DISTINCT dr.StudentID) as StudentCount,
+                    SUM(CASE WHEN a.Status = 'present' THEN 1 ELSE 0 END) as PresentCount,
+                    SUM(CASE WHEN a.Status = 'absent' THEN 1 ELSE 0 END) as AbsentCount,
+                    SUM(
+                        (CASE WHEN e.Participation IS NOT NULL THEN 1 ELSE 0 END) +
+                        (CASE WHEN e.Notebook IS NOT NULL THEN 1 ELSE 0 END) +
+                        (CASE WHEN e.Homework IS NOT NULL THEN 1 ELSE 0 END) +
+                        (CASE WHEN e.Behavior IS NOT NULL THEN 1 ELSE 0 END)
+                    ) as EvalCount,
+                    COUNT(dt.Score) as TestsCount,
+                    MAX(dr.UpdatedAt) as LastUpdated,
+                    MAX(dr.AcademicYearID) as AcademicYearID,
+                    MAX(dr.PeriodID) as PeriodID
+                FROM DailyRecords dr
+                LEFT JOIN Classes c ON c.ID = dr.ClassID
+                LEFT JOIN Sections s ON s.ID = dr.SectionID
+                LEFT JOIN Attendance a ON a.StudentID = dr.StudentID AND a.RecordDate = dr.RecordDate
+                LEFT JOIN Evaluations e ON e.StudentID = dr.StudentID AND e.RecordDate = dr.RecordDate
+                LEFT JOIN DailyTests dt ON dt.StudentID = dr.StudentID AND dt.RecordDate = dr.RecordDate
+                $whereSb
+                GROUP BY dr.RecordDate, dr.ClassID, dr.SectionID
+                ORDER BY dr.RecordDate DESC, dr.ClassID ASC, dr.SectionID ASC
+                """.trimIndent(),
+                args.toTypedArray()
+            )
+            cursor.use {
+                while (it.moveToNext()) {
+                    val recDate = if (it.isNull(0)) "" else (it.getString(0) ?: "")
+                    if (recDate.isBlank()) continue
+                    val explicitYearId = if (it.isNull(11)) null else it.getLong(11).takeIf { v -> v > 0L }
+                    val explicitPeriodId = if (it.isNull(12)) null else it.getLong(12).takeIf { v -> v > 0L }
 
-                val matchedPeriod = if (explicitPeriodId != null && periodsMap.containsKey(explicitPeriodId)) {
-                    periodsMap[explicitPeriodId]
-                } else {
-                    periodsList.firstOrNull { sp ->
-                        recDate >= sp.startDate && (sp.endDate.isNullOrBlank() || recDate <= sp.endDate)
+                    val matchedPeriod = if (explicitPeriodId != null && periodsMap.containsKey(explicitPeriodId)) {
+                        periodsMap[explicitPeriodId]
+                    } else {
+                        periodsList.firstOrNull { sp ->
+                            recDate >= sp.startDate && (sp.endDate.isNullOrBlank() || recDate <= sp.endDate)
+                        }
                     }
-                }
-                val effectiveYearId = matchedPeriod?.academicYearId
-                    ?: explicitYearId
-                    ?: yearsMap.values.firstOrNull { y -> y.isActive }?.id
-                val effectiveYearName = effectiveYearId?.let { yId -> yearsMap[yId]?.yearName }
+                    val effectiveYearId = matchedPeriod?.academicYearId
+                        ?: explicitYearId
+                        ?: yearsMap.values.firstOrNull { y -> y.isActive }?.id
+                    val effectiveYearName = effectiveYearId?.let { yId -> yearsMap[yId]?.yearName }
 
-                list.add(
-                    SavedSessionSummary(
-                        recordDate = recDate,
-                        classId = it.getLong(1),
-                        className = it.getString(2),
-                        sectionId = it.getLong(3),
-                        sectionName = it.getString(4),
-                        studentCount = it.getInt(5),
-                        presentCount = it.getInt(6),
-                        absentCount = it.getInt(7),
-                        evaluationsCount = it.getInt(8),
-                        testsCount = it.getInt(9),
-                        updatedAt = it.getString(10) ?: "",
-                        academicYearId = effectiveYearId,
-                        academicYearName = effectiveYearName,
-                        periodId = matchedPeriod?.id,
-                        periodName = matchedPeriod?.periodName,
-                        stageType = matchedPeriod?.stageType
+                    list.add(
+                        SavedSessionSummary(
+                            recordDate = recDate,
+                            classId = if (it.isNull(1)) 0L else it.getLong(1),
+                            className = if (it.isNull(2)) "صف غير معروف" else (it.getString(2) ?: "صف غير معروف"),
+                            sectionId = if (it.isNull(3)) 0L else it.getLong(3),
+                            sectionName = if (it.isNull(4)) "-" else (it.getString(4) ?: "-"),
+                            studentCount = if (it.isNull(5)) 0 else it.getInt(5),
+                            presentCount = if (it.isNull(6)) 0 else it.getInt(6),
+                            absentCount = if (it.isNull(7)) 0 else it.getInt(7),
+                            evaluationsCount = if (it.isNull(8)) 0 else it.getInt(8),
+                            testsCount = if (it.isNull(9)) 0 else it.getInt(9),
+                            updatedAt = if (it.isNull(10)) "" else (it.getString(10) ?: ""),
+                            academicYearId = effectiveYearId,
+                            academicYearName = effectiveYearName,
+                            periodId = matchedPeriod?.id,
+                            periodName = matchedPeriod?.periodName,
+                            stageType = matchedPeriod?.stageType
+                        )
                     )
-                )
+                }
             }
         }
         return list.filter { item ->

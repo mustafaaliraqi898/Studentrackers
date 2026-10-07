@@ -32,6 +32,16 @@ class AppDatabaseHelper(private val context: Context) :
         db.setForeignKeyConstraintsEnabled(true)
     }
 
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        // Clean up the legacy seeded demo Thursday holiday ('2026-10-08') so Thursday is never treated as a holiday by default
+        runCatching {
+            db.execSQL(
+                "DELETE FROM Holidays WHERE HolidayDate = '2026-10-08' AND HolidayName = 'عطلة رسمية محلية';"
+            )
+        }
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         createAllTables(db)
         seedInitialDemoData(db)
@@ -548,7 +558,6 @@ class AppDatabaseHelper(private val context: Context) :
                 db.execSQL("INSERT OR IGNORE INTO Students (ID, StudentName, ClassID, SectionID, IsActive, CreatedDate) VALUES ($id, '$name', 1, 2, 1, '$now');")
             }
 
-            db.execSQL("INSERT OR IGNORE INTO Holidays (HolidayDate, HolidayName, HolidayType, Notes) VALUES ('2026-10-08', 'عطلة رسمية محلية', 'عطلة رسمية', 'لا تحتسب ضمن أيام الدوام');")
             db.execSQL("INSERT OR IGNORE INTO Holidays (HolidayDate, HolidayName, HolidayType, Notes) VALUES ('2026-10-10', 'مناسبة وطنية / عطلة رسمية', 'مناسبة', 'مثال عطلة 10/10');")
 
             // Seed sample records for 2026-10-01 and 2026-10-04

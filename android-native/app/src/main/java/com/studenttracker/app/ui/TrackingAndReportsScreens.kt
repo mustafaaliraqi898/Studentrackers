@@ -470,34 +470,38 @@ fun DailyTrackingScreen(
         }
 
         if (activeSubTab == 1) {
-            SavedRecordsScreen(
-                classes = classes,
-                sections = sections,
-                savedSessions = allSavedSessions,
-                repository = repository,
-                refreshTick = refreshTick,
-                onOpenSavedSession = { clsId, secId, date ->
-                    keepSavedSessionDateOnce = true
-                    onSelectClass(clsId)
-                    onSelectSection(secId)
-                    onSelectDate(date)
-                    val matchedPeriod = repository.getStudyPeriods().firstOrNull { sp ->
-                        date >= sp.startDate && (sp.endDate.isNullOrBlank() || date <= sp.endDate)
-                    }
-                    if (matchedPeriod != null) {
-                        selectedYearId = matchedPeriod.academicYearId
-                        selectedPeriodId = matchedPeriod.id
-                    }
-                    activeSubTab = 0
-                },
-                onDataChanged = onDataChanged,
-                onShowMessage = onShowMessage
-            )
-            return@Column
-        }
-
-        // Top Notification Banner (appears at the top below screen title, never covers bottom save button)
-        if (topNotificationMessage != null) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                SavedRecordsScreen(
+                    classes = classes,
+                    sections = sections,
+                    savedSessions = allSavedSessions,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onOpenSavedSession = { clsId, secId, date ->
+                        keepSavedSessionDateOnce = true
+                        onSelectClass(clsId)
+                        onSelectSection(secId)
+                        onSelectDate(date)
+                        val matchedPeriod = runCatching { repository.getStudyPeriods() }.getOrDefault(emptyList()).firstOrNull { sp ->
+                            date >= sp.startDate && (sp.endDate.isNullOrBlank() || date <= sp.endDate)
+                        }
+                        if (matchedPeriod != null) {
+                            selectedYearId = matchedPeriod.academicYearId
+                            selectedPeriodId = matchedPeriod.id
+                        }
+                        activeSubTab = 0
+                    },
+                    onDataChanged = onDataChanged,
+                    onShowMessage = onShowMessage
+                )
+            }
+        } else {
+            // Top Notification Banner (appears at the top below screen title, never covers bottom save button)
+            if (topNotificationMessage != null) {
             Surface(
                 color = if (topNotificationIsWarning) Red50 else Emerald50,
                 shape = RoundedCornerShape(10.dp),
@@ -1471,6 +1475,7 @@ fun DailyTrackingScreen(
                 }
             }
         }
+        }
     }
 
     if (pendingConfirmAbsentStudent != null) {
@@ -1566,11 +1571,11 @@ fun SavedRecordsScreen(
     onShowMessage: (String) -> Unit = {}
 ) {
     val academicYears = remember(refreshTick) {
-        repository?.getAcademicYears() ?: emptyList()
+        runCatching { repository?.getAcademicYears() ?: emptyList() }.getOrDefault(emptyList())
     }
     var filterYearId by remember { mutableStateOf<Long?>(null) }
     val periodsForFilter = remember(refreshTick, filterYearId) {
-        repository?.getStudyPeriods(academicYearId = filterYearId) ?: emptyList()
+        runCatching { repository?.getStudyPeriods(academicYearId = filterYearId) ?: emptyList() }.getOrDefault(emptyList())
     }
     var filterPeriodId by remember { mutableStateOf<Long?>(null) }
     var filterClassId by remember { mutableStateOf<Long?>(null) }
@@ -1588,7 +1593,7 @@ fun SavedRecordsScreen(
             val matchClass = filterClassId == null || s.classId == filterClassId
             val matchSection = filterSectionId == null || s.sectionId == filterSectionId
             matchYear && matchPeriod && matchClass && matchSection
-        }
+        }.distinctBy { "${it.recordDate}_${it.classId}_${it.sectionId}" }
     }
 
     LazyColumn(

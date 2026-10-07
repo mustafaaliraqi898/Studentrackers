@@ -478,10 +478,6 @@ export function seedDevelopmentDemoData(db: Database): void {
     });
 
     // 4. Sample Holidays (10/10/2026 as requested in prompt: "10/10 عيد أو عطلة رسمية")
-    // Note: 2026-10-10 is Saturday, let's also add 2026-10-08 (Thursday) and 2026-10-10 so teacher can test both!
-    db.run(
-      `INSERT OR IGNORE INTO Holidays (HolidayDate, HolidayName, HolidayType, Notes) VALUES ('2026-10-08', 'عطلة رسمية محلية', 'رسمية', 'عطلة رسمية لا تحتسب ضمن أيام الدوام');`
-    );
     db.run(
       `INSERT OR IGNORE INTO Holidays (HolidayDate, HolidayName, HolidayType, Notes) VALUES ('2026-10-10', 'مناسبة وطنية / عطلة رسمية', 'مناسبة', 'مثال عطلة 10/10');`
     );

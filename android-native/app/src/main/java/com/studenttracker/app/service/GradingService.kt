@@ -93,7 +93,9 @@ object GradingService {
 
     fun isWeekendDay(isoDate: String): Boolean {
         return try {
-            val ld = LocalDate.parse(isoDate)
+            val ld = LocalDate.parse(isoDate.trim())
+            // Official weekly weekend is strictly Friday and Saturday only.
+            // Sunday, Monday, Tuesday, Wednesday, and Thursday are regular working days.
             ld.dayOfWeek == DayOfWeek.FRIDAY || ld.dayOfWeek == DayOfWeek.SATURDAY
         } catch (_: Exception) {
             false
@@ -107,7 +109,8 @@ object GradingService {
     )
 
     fun checkDateStatus(isoDate: String, holidays: List<HolidayEntity>): DayHolidayStatus {
-        val customHoliday = holidays.find { it.holidayDate == isoDate }
+        val cleanIso = isoDate.trim()
+        val customHoliday = holidays.find { it.holidayDate.trim() == cleanIso }
         if (customHoliday != null) {
             return DayHolidayStatus(
                 isNonWorkingDay = true,
@@ -116,8 +119,8 @@ object GradingService {
                     if (customHoliday.notes.isNotBlank()) " — ${customHoliday.notes}" else ""
             )
         }
-        if (isWeekendDay(isoDate)) {
-            val dayName = getArabicDayName(isoDate)
+        if (isWeekendDay(cleanIso)) {
+            val dayName = getArabicDayName(cleanIso)
             return DayHolidayStatus(
                 isNonWorkingDay = true,
                 title = "عطلة أسبوعية",
@@ -126,7 +129,7 @@ object GradingService {
         }
         return DayHolidayStatus(
             isNonWorkingDay = false,
-            title = "يوم دوام (${getArabicDayName(isoDate)})",
+            title = "يوم دوام (${getArabicDayName(cleanIso)})",
             subtitle = ""
         )
     }
