@@ -566,7 +566,7 @@ object GradingService {
                     if (isMidYear) {
                         written
                     } else {
-                        round2((dailyScore + written) / 2.0)
+                        (dailyScore + written) / 2.0
                     }
                 } else {
                     null
@@ -574,7 +574,8 @@ object GradingService {
 
                 // Keep SQLite PeriodGrades row in sync if the daily grade or periodAverage changed since last save
                 val expectedStoredDaily = if (isMidYear) null else dailyScore
-                if (stored != null && (stored.dailyGrade != expectedStoredDaily || stored.periodAverage != periodAvg)) {
+                val expectedStoredPeriodAvg = periodAvg?.let { round2(it) }
+                if (stored != null && (stored.dailyGrade != expectedStoredDaily || stored.periodAverage != expectedStoredPeriodAvg)) {
                     runCatching {
                         repository.upsertPeriodGrade(
                             studentId = stId,
@@ -603,10 +604,12 @@ object GradingService {
             }
 
             // Stage averages (kept at full exact precision internally, rounded only on display):
-            // 1. معدل النصف الأول: requires at least one FIRST_HALF period and all FIRST_HALF periods to have a completed periodAverage
-            val firstHalfBds = breakdowns.filter { it.period.stageType == AcademicStage.FIRST_HALF }
-            val firstHalfAvg: Double? = if (firstHalfBds.isNotEmpty() && firstHalfBds.all { it.periodAverage != null }) {
-                firstHalfBds.sumOf { it.periodAverage!! } / firstHalfBds.size.toDouble()
+            // 1. معدل النصف الأول = مجموع معدلات جميع فترات النصف الأول المكتملة ÷ عدد فترات النصف الأول المكتملة
+            val firstHalfCompleted = breakdowns
+                .filter { it.period.stageType == AcademicStage.FIRST_HALF }
+                .mapNotNull { it.periodAverage }
+            val firstHalfAvg: Double? = if (firstHalfCompleted.isNotEmpty()) {
+                firstHalfCompleted.sum() / firstHalfCompleted.size.toDouble()
             } else {
                 null
             }
@@ -615,10 +618,12 @@ object GradingService {
             val midYearBds = breakdowns.filter { it.period.stageType == AcademicStage.MID_YEAR }
             val midYearScore: Double? = midYearBds.firstOrNull { it.writtenExamGrade != null }?.writtenExamGrade
 
-            // 3. معدل النصف الثاني: requires at least one SECOND_HALF period and all SECOND_HALF periods to have a completed periodAverage
-            val secondHalfBds = breakdowns.filter { it.period.stageType == AcademicStage.SECOND_HALF }
-            val secondHalfAvg: Double? = if (secondHalfBds.isNotEmpty() && secondHalfBds.all { it.periodAverage != null }) {
-                secondHalfBds.sumOf { it.periodAverage!! } / secondHalfBds.size.toDouble()
+            // 3. معدل النصف الثاني = مجموع معدلات جميع فترات النصف الثاني المكتملة ÷ عدد فترات النصف الثاني المكتملة
+            val secondHalfCompleted = breakdowns
+                .filter { it.period.stageType == AcademicStage.SECOND_HALF }
+                .mapNotNull { it.periodAverage }
+            val secondHalfAvg: Double? = if (secondHalfCompleted.isNotEmpty()) {
+                secondHalfCompleted.sum() / secondHalfCompleted.size.toDouble()
             } else {
                 null
             }
