@@ -4560,3 +4560,618 @@ fun ExcelAndBackupScreen(
         )
     }
 }
+
+// ============================================================================
+// AVERAGES TABLE SCREEN ("المعدل") + A4 LANDSCAPE PRINTING
+// ============================================================================
+@Composable
+fun AveragesTableScreen(
+    classes: List<ClassEntity>,
+    sections: List<SectionEntity>,
+    selectedClassId: Long,
+    selectedSectionId: Long,
+    dbHelper: AppDatabaseHelper,
+    repository: TrackerRepository,
+    refreshTick: Int,
+    onSelectClass: (Long) -> Unit,
+    onSelectSection: (Long) -> Unit,
+    onOpenStudentProfile: (Long) -> Unit,
+    onShowMessage: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val currentClass = classes.find { it.id == selectedClassId }
+    val classSections = remember(sections, selectedClassId) {
+        sections.filter { it.classId == selectedClassId }
+    }
+    LaunchedEffect(classSections, selectedSectionId) {
+        if (classSections.isNotEmpty() && classSections.none { it.id == selectedSectionId }) {
+            onSelectSection(classSections.first().id)
+        }
+    }
+    val currentSection = classSections.find { it.id == selectedSectionId }
+    val activeAcademicYear = remember(refreshTick) {
+        repository.getActiveAcademicYear()
+    }
+
+    // Use the exact same calculation service & data source as StudentProfileScreen
+    val reports = remember(refreshTick, selectedClassId, selectedSectionId) {
+        if (currentClass == null || currentSection == null) {
+            emptyList()
+        } else {
+            GradingService.calculateComprehensiveStudentReports(
+                dbHelper = dbHelper,
+                repository = repository,
+                classId = selectedClassId,
+                sectionId = selectedSectionId,
+                baseDateFilter = "ALL"
+            )
+        }
+    }
+
+    val horizontalScrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // 1. Filters (الصف + الشعبة) + Print Action Header
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "المعدل",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate900
+                        )
+                        Text(
+                            text = "${currentClass?.className ?: "—"} / شعبة ${currentSection?.sectionName ?: "—"} • عدد الطلاب: ${reports.size}",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate600
+                        )
+                    }
+
+                    Button(
+                        enabled = reports.isNotEmpty() && currentClass != null && currentSection != null,
+                        onClick = {
+                            if (currentClass != null && currentSection != null) {
+                                printAveragesReportA4Landscape(
+                                    context = context,
+                                    className = currentClass.className,
+                                    sectionName = currentSection.sectionName,
+                                    academicYearName = activeAcademicYear.yearName,
+                                    reports = reports,
+                                    onError = onShowMessage
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald700),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Print, contentDescription = "طباعة", modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("طباعة", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                    }
+                }
+
+                // Class filter row
+                Text(
+                    text = "الصف:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Slate600
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    classes.forEach { cls ->
+                        val isSelected = cls.id == selectedClassId
+                        Surface(
+                            color = if (isSelected) Slate900 else Slate100,
+                            contentColor = if (isSelected) Color.White else Slate800,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.clickable { onSelectClass(cls.id) }
+                        ) {
+                            Text(
+                                text = cls.className,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Section filter row (filtered strictly by selectedClassId)
+                Text(
+                    text = "الشعبة:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Slate600
+                )
+                if (classSections.isEmpty()) {
+                    Text(
+                        text = "لا توجد شعب مضافة لهذا الصف.",
+                        fontSize = 12.sp,
+                        color = Red700,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        classSections.forEach { sec ->
+                            val isSelected = sec.id == selectedSectionId
+                            Surface(
+                                color = if (isSelected) Teal700 else Slate100,
+                                contentColor = if (isSelected) Color.White else Slate800,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.clickable { onSelectSection(sec.id) }
+                            ) {
+                                Text(
+                                    text = "شعبة ${sec.sectionName}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Actual RTL Table (with horizontal scroll support so student name is never cramped)
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            if (reports.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "لا يوجد طلاب في هذا الصف والشعبة حالياً.",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate600
+                    )
+                }
+            } else {
+                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                    val minTableWidth = maxOf(maxWidth, 640.dp)
+                    val nameColWidth = maxOf(minTableWidth - 400.dp, 220.dp)
+                    val scoreColWidth = 100.dp
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .horizontalScroll(horizontalScrollState)
+                    ) {
+                        // Table Header Row: اسم الطالب | معدل النصف الأول | درجة نصف السنة | معدل النصف الثاني | السعي السنوي
+                        Row(
+                            modifier = Modifier
+                                .width(nameColWidth + scoreColWidth * 4)
+                                .background(Slate900)
+                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "اسم الطالب",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .width(nameColWidth)
+                                    .padding(horizontal = 6.dp)
+                            )
+                            AveragesTableHeaderCell("معدل النصف الأول", scoreColWidth)
+                            AveragesTableHeaderCell("درجة نصف السنة", scoreColWidth)
+                            AveragesTableHeaderCell("معدل النصف الثاني", scoreColWidth)
+                            AveragesTableHeaderCell("السعي السنوي", scoreColWidth)
+                        }
+
+                        // Table Data Rows
+                        LazyColumn(
+                            modifier = Modifier
+                                .width(nameColWidth + scoreColWidth * 4)
+                                .weight(1f)
+                        ) {
+                            items(reports, key = { it.studentId }) { rep ->
+                                val firstHalfText = if (rep.firstHalfAverage != null) {
+                                    GradingService.formatRoundedFinalGrade(rep.firstHalfAverage)
+                                } else {
+                                    "غير مكتمل"
+                                }
+                                val midYearText = if (rep.midYearGrade != null) {
+                                    GradingService.formatRoundedFinalGrade(rep.midYearGrade)
+                                } else {
+                                    "غير مدخل"
+                                }
+                                val secondHalfText = if (rep.secondHalfAverage != null) {
+                                    GradingService.formatRoundedFinalGrade(rep.secondHalfAverage)
+                                } else {
+                                    "غير مكتمل"
+                                }
+                                val annualEffortText = if (rep.annualEffort != null) {
+                                    GradingService.formatRoundedFinalGrade(rep.annualEffort)
+                                } else {
+                                    "غير مكتمل"
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onOpenStudentProfile(rep.studentId) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 10.dp, horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = rep.studentName,
+                                            color = Slate900,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .width(nameColWidth)
+                                                .padding(horizontal = 6.dp)
+                                        )
+                                        AveragesTableValueCell(
+                                            text = firstHalfText,
+                                            isComplete = rep.firstHalfAverage != null,
+                                            isHighlight = false,
+                                            width = scoreColWidth
+                                        )
+                                        AveragesTableValueCell(
+                                            text = midYearText,
+                                            isComplete = rep.midYearGrade != null,
+                                            isHighlight = false,
+                                            width = scoreColWidth
+                                        )
+                                        AveragesTableValueCell(
+                                            text = secondHalfText,
+                                            isComplete = rep.secondHalfAverage != null,
+                                            isHighlight = false,
+                                            width = scoreColWidth
+                                        )
+                                        AveragesTableValueCell(
+                                            text = annualEffortText,
+                                            isComplete = rep.annualEffort != null,
+                                            isHighlight = true,
+                                            width = scoreColWidth
+                                        )
+                                    }
+                                    HorizontalDivider(color = Slate200, thickness = 1.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AveragesTableHeaderCell(
+    title: String,
+    width: androidx.compose.ui.unit.Dp
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = title,
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun AveragesTableValueCell(
+    text: String,
+    isComplete: Boolean,
+    isHighlight: Boolean,
+    width: androidx.compose.ui.unit.Dp
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isHighlight && isComplete) {
+            Surface(
+                color = Emerald50,
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, Emerald600)
+            ) {
+                Text(
+                    text = text,
+                    color = Emerald700,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        } else {
+            Text(
+                text = text,
+                color = when {
+                    isComplete -> Slate900
+                    else -> Slate500
+                },
+                fontSize = if (isComplete) 13.sp else 11.sp,
+                fontWeight = if (isComplete) FontWeight.ExtraBold else FontWeight.Bold,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+private fun escapeHtmlText(input: String): String {
+    return input
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&#39;")
+}
+
+/**
+ * Prints the currently filtered class/section student averages table in A4 Landscape RTL format,
+ * using the exact same calculated values and rounding rules shown in the "المعدل" screen and StudentProfileScreen.
+ * Repeats the table header (`<thead>`) on every printed page and avoids splitting rows across page breaks.
+ */
+private fun printAveragesReportA4Landscape(
+    context: android.content.Context,
+    className: String,
+    sectionName: String,
+    academicYearName: String,
+    reports: List<StudentComprehensiveGradeReport>,
+    onError: (String) -> Unit
+) {
+    runCatching {
+        val todayStr = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+        val displayDate = GradingService.formatDisplayDate(todayStr)
+
+        val rowsHtml = StringBuilder()
+        reports.forEach { rep ->
+            val firstHalfText = if (rep.firstHalfAverage != null) {
+                GradingService.formatRoundedFinalGrade(rep.firstHalfAverage)
+            } else {
+                "غير مكتمل"
+            }
+            val midYearText = if (rep.midYearGrade != null) {
+                GradingService.formatRoundedFinalGrade(rep.midYearGrade)
+            } else {
+                "غير مدخل"
+            }
+            val secondHalfText = if (rep.secondHalfAverage != null) {
+                GradingService.formatRoundedFinalGrade(rep.secondHalfAverage)
+            } else {
+                "غير مكتمل"
+            }
+            val annualEffortText = if (rep.annualEffort != null) {
+                GradingService.formatRoundedFinalGrade(rep.annualEffort)
+            } else {
+                "غير مكتمل"
+            }
+
+            rowsHtml.append(
+                """
+                <tr>
+                    <td class="student-name">${escapeHtmlText(rep.studentName)}</td>
+                    <td class="score-cell ${if (rep.firstHalfAverage == null) "incomplete" else ""}">${escapeHtmlText(firstHalfText)}</td>
+                    <td class="score-cell ${if (rep.midYearGrade == null) "incomplete" else ""}">${escapeHtmlText(midYearText)}</td>
+                    <td class="score-cell ${if (rep.secondHalfAverage == null) "incomplete" else ""}">${escapeHtmlText(secondHalfText)}</td>
+                    <td class="score-cell annual-cell ${if (rep.annualEffort == null) "incomplete" else ""}">${escapeHtmlText(annualEffortText)}</td>
+                </tr>
+                """.trimIndent()
+            )
+        }
+
+        val htmlDocument = """
+            <!DOCTYPE html>
+            <html lang="ar" dir="rtl">
+            <head>
+                <meta charset="UTF-8" />
+                <title>المعدل - ${escapeHtmlText(className)} - شعبة ${escapeHtmlText(sectionName)}</title>
+                <style>
+                    @page {
+                        size: A4 landscape;
+                        margin: 12mm;
+                    }
+                    * {
+                        box-sizing: border-box;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+                    body {
+                        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                        direction: rtl;
+                        text-align: right;
+                        color: #0F172A;
+                        margin: 0;
+                        padding: 0;
+                    }
+                    .report-header {
+                        border: 2px solid #0F172A;
+                        border-radius: 8px;
+                        padding: 10px 16px;
+                        margin-bottom: 12px;
+                        background-color: #F8FAFC;
+                    }
+                    .report-title {
+                        font-size: 20px;
+                        font-weight: 800;
+                        text-align: center;
+                        margin: 0 0 8px 0;
+                        color: #0F172A;
+                    }
+                    .meta-row {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: #1E293B;
+                        flex-wrap: wrap;
+                        gap: 12px;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        table-layout: fixed;
+                        direction: rtl;
+                    }
+                    thead {
+                        display: table-header-group;
+                    }
+                    tfoot {
+                        display: table-footer-group;
+                    }
+                    tr {
+                        page-break-inside: avoid;
+                        break-inside: avoid;
+                    }
+                    th, td {
+                        border: 1px solid #334155;
+                        padding: 8px 10px;
+                        font-size: 13px;
+                    }
+                    th {
+                        background-color: #0F172A;
+                        color: #FFFFFF;
+                        font-weight: 800;
+                        text-align: center;
+                    }
+                    th.name-header {
+                        width: 36%;
+                        text-align: right;
+                    }
+                    th.score-header {
+                        width: 16%;
+                        text-align: center;
+                    }
+                    td.student-name {
+                        font-weight: 800;
+                        text-align: right;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    td.score-cell {
+                        text-align: center;
+                        font-weight: 800;
+                    }
+                    td.annual-cell {
+                        background-color: #F0FDF4;
+                        color: #15803D;
+                    }
+                    td.incomplete {
+                        color: #64748B;
+                        font-weight: 600;
+                        background-color: #FFFFFF;
+                    }
+                    tbody tr:nth-child(even) td:not(.annual-cell) {
+                        background-color: #F8FAFC;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="report-header">
+                    <div class="report-title">المعدل</div>
+                    <div class="meta-row">
+                        <span>الصف: ${escapeHtmlText(className)}</span>
+                        <span>الشعبة: ${escapeHtmlText(sectionName)}</span>
+                        <span>العام الدراسي: ${escapeHtmlText(academicYearName)}</span>
+                        <span>التاريخ: ${escapeHtmlText(displayDate)}</span>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="name-header">اسم الطالب</th>
+                            <th class="score-header">معدل النصف الأول</th>
+                            <th class="score-header">درجة نصف السنة</th>
+                            <th class="score-header">معدل النصف الثاني</th>
+                            <th class="score-header">السعي السنوي</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        $rowsHtml
+                    </tbody>
+                </table>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val webView = android.webkit.WebView(context)
+        webView.settings.javaScriptEnabled = false
+        webView.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as? android.print.PrintManager
+                if (printManager == null) {
+                    onError("خدمة الطباعة غير متوفرة على هذا الجهاز")
+                    return
+                }
+                val jobName = "المعدل_${className}_شعبة_${sectionName}"
+                val printAdapter = webView.createPrintDocumentAdapter(jobName)
+                val printAttributes = android.print.PrintAttributes.Builder()
+                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asLandscape())
+                    .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
+                    .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
+                    .build()
+                printManager.print(jobName, printAdapter, printAttributes)
+            }
+        }
+        webView.loadDataWithBaseURL(null, htmlDocument, "text/html", "UTF-8", null)
+    }.onFailure { e ->
+        onError("تعذر بدء الطباعة: ${e.message ?: "خطأ غير معروف"}")
+    }
+}
+

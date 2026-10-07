@@ -207,7 +207,7 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.DASHBOARD, "الرئيسية", Icons.Default.Home),
                     Triple(AppScreen.DAILY_TRACKING, "اليومي", Icons.Default.FactCheck),
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
-                    Triple(AppScreen.SAVED_RECORDS, "السجلات", Icons.Default.History),
+                    Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
                     Triple(AppScreen.REPORTS, "النتائج", Icons.Default.Assessment)
                 )
                 navItems.forEach { (screen, label, icon) ->
@@ -418,6 +418,27 @@ fun StudentTrackerMainApp(
                     refreshTick = refreshTick,
                     onBack = { currentScreen = AppScreen.STUDENTS },
                     onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
+                AppScreen.AVERAGES_TABLE -> AveragesTableScreen(
+                    classes = classes,
+                    sections = sections,
+                    selectedClassId = selectedClassId,
+                    selectedSectionId = selectedSectionId,
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onSelectClass = { clsId ->
+                        selectedClassId = clsId
+                        val firstSec = sections.firstOrNull { it.classId == clsId }
+                        if (firstSec != null) selectedSectionId = firstSec.id
+                    },
+                    onSelectSection = { secId -> selectedSectionId = secId },
+                    onOpenStudentProfile = { stId ->
+                        selectedStudentProfileId = stId
+                        currentScreen = AppScreen.STUDENT_PROFILE
+                    },
                     onShowMessage = ::showToastMessage
                 )
 

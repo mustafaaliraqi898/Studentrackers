@@ -191,12 +191,22 @@ fun DashboardScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
+                        title = "المعدل",
+                        subtitle = "جدول المعدلات والسعي السنوي والطباعة",
+                        icon = Icons.Default.TableChart,
+                        tint = Emerald700,
+                        onClick = { onNavigate(AppScreen.AVERAGES_TABLE) }
+                    )
+                    NavActionTile(
+                        modifier = Modifier.weight(1f),
                         title = "التقارير والنتائج",
                         subtitle = "الدرجة من 100 والتصدير",
                         icon = Icons.Default.Assessment,
                         tint = Emerald700,
                         onClick = { onNavigate(AppScreen.REPORTS) }
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "العطل والمناسبات",
@@ -205,8 +215,6 @@ fun DashboardScreen(
                         tint = Red700,
                         onClick = { onNavigate(AppScreen.HOLIDAYS) }
                     )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "عدد أيام الغياب",
@@ -215,6 +223,8 @@ fun DashboardScreen(
                         tint = Red700,
                         onClick = { onNavigate(AppScreen.ABSENCE_TRACKING) }
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "Excel والنسخ الاحتياطي",
@@ -223,8 +233,6 @@ fun DashboardScreen(
                         tint = Teal700,
                         onClick = { onNavigate(AppScreen.EXCEL_BACKUP) }
                     )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "الجدول اليومي",
@@ -233,6 +241,8 @@ fun DashboardScreen(
                         tint = Teal700,
                         onClick = { onNavigate(AppScreen.DAILY_SCHEDULE) }
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
                         title = "الفترات الدراسية",
