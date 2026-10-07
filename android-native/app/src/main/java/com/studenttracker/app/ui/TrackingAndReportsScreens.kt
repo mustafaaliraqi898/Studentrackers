@@ -46,9 +46,19 @@ fun DailyTrackingScreen(
     onSelectDate: (String) -> Unit,
     onOpenStudentProfile: (Long) -> Unit,
     onDataChanged: () -> Unit,
-    onShowMessage: (String) -> Unit
+    onShowMessage: (String) -> Unit,
+    preserveInitialDateFromSavedSession: Boolean = false,
+    onConsumeSavedSessionJump: () -> Unit = {}
 ) {
     val context = LocalContext.current
+
+    // Read real device LocalDate (never UTC conversion, never hardcoded)
+    fun currentDeviceIsoDate(): String {
+        return java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+    }
+
+    // Track if the user explicitly opened a saved session so we don't overwrite that specific saved date on first mount
+    var keepSavedSessionDateOnce by remember { mutableStateOf(preserveInitialDateFromSavedSession) }
 
     // Sub-mode inside Daily section: 0 = "إضافة متابعة", 1 = "السجلات اليومية المحفوظة"
     var activeSubTab by remember { mutableIntStateOf(0) }
@@ -56,8 +66,24 @@ fun DailyTrackingScreen(
     // 1. Academic Years & Periods hierarchy
     val academicYears = remember(refreshTick) { repository.getAcademicYears() }
     var selectedYearId by remember(academicYears) {
-        val active = academicYears.firstOrNull { it.isActive } ?: academicYears.firstOrNull()
-        mutableLongStateOf(active?.id ?: 1L)
+        val todayIso = currentDeviceIsoDate()
+        val allPeriods = repository.getStudyPeriods()
+        val periodContainingToday = allPeriods.firstOrNull { sp ->
+            todayIso >= sp.startDate && (sp.endDate.isNullOrBlank() || todayIso <= sp.endDate)
+        }
+        val defaultYr = if (preserveInitialDateFromSavedSession) {
+            val periodForSaved = allPeriods.firstOrNull { sp ->
+                selectedDate >= sp.startDate && (sp.endDate.isNullOrBlank() || selectedDate <= sp.endDate)
+            }
+            academicYears.firstOrNull { it.id == periodForSaved?.academicYearId }
+                ?: academicYears.firstOrNull { it.isActive }
+                ?: academicYears.firstOrNull()
+        } else {
+            academicYears.firstOrNull { it.id == periodContainingToday?.academicYearId }
+                ?: academicYears.firstOrNull { it.isActive }
+                ?: academicYears.firstOrNull()
+        }
+        mutableLongStateOf(defaultYr?.id ?: 1L)
     }
     LaunchedEffect(academicYears) {
         if (academicYears.isNotEmpty() && academicYears.none { it.id == selectedYearId }) {
@@ -73,10 +99,11 @@ fun DailyTrackingScreen(
         repository.getStudyPeriods(academicYearId = selectedYearId)
     }
 
-    // Try to match period containing selectedDate, or fall back to first period in the selected year
+    // Match period containing device's real today date (or saved session date if explicitly opened from saved records), else first period
     var selectedPeriodId by remember(selectedYearId, periodsInYear) {
+        val refDate = if (keepSavedSessionDateOnce) selectedDate else currentDeviceIsoDate()
         val matching = periodsInYear.firstOrNull { sp ->
-            selectedDate >= sp.startDate && (sp.endDate.isNullOrBlank() || selectedDate <= sp.endDate)
+            refDate >= sp.startDate && (sp.endDate.isNullOrBlank() || refDate <= sp.endDate)
         } ?: periodsInYear.firstOrNull()
         mutableStateOf<Long?>(matching?.id)
     }
@@ -84,8 +111,9 @@ fun DailyTrackingScreen(
         if (periodsInYear.isEmpty()) {
             selectedPeriodId = null
         } else if (selectedPeriodId == null || periodsInYear.none { it.id == selectedPeriodId }) {
+            val refDate = if (keepSavedSessionDateOnce) selectedDate else currentDeviceIsoDate()
             val matching = periodsInYear.firstOrNull { sp ->
-                selectedDate >= sp.startDate && (sp.endDate.isNullOrBlank() || selectedDate <= sp.endDate)
+                refDate >= sp.startDate && (sp.endDate.isNullOrBlank() || refDate <= sp.endDate)
             } ?: periodsInYear.first()
             selectedPeriodId = matching.id
         }
@@ -100,24 +128,75 @@ fun DailyTrackingScreen(
         GradingService.buildWeeksForPeriod(selectedPeriod)
     }
 
-    var selectedWeekNumber by remember(selectedPeriod, periodWeeks) {
-        val matchingWeek = periodWeeks.firstOrNull { w -> selectedDate in w.dates }
-            ?: periodWeeks.firstOrNull()
-        mutableIntStateOf(matchingWeek?.weekNumber ?: 1)
+    /**
+     * Resolves the default (weekNumber, isoDate) for a given StudyPeriod and its weeks
+     * based on the device's real current LocalDate:
+     * - If today is inside [period.startDate .. period.endDate]:
+     *   selects the week containing today and selects today itself.
+     * - If today is outside the period:
+     *   picks the closest valid week (first week if today < startDate, last week if today > endDate)
+     *   and selects the first valid study day (non-weekend, non-holiday) in that week.
+     */
+    fun resolveDefaultWeekAndDateForPeriod(
+        period: StudyPeriodEntity?,
+        weeks: List<PeriodWeekWindow>
+    ): Pair<Int, String>? {
+        if (period == null || weeks.isEmpty()) return null
+        val todayIso = currentDeviceIsoDate()
+        val pStart = period.startDate.trim()
+        val pEnd = period.endDate?.trim()?.takeIf { it.isNotEmpty() } ?: weeks.last().endDate
+
+        return if (todayIso >= pStart && todayIso <= pEnd) {
+            val weekWithToday = weeks.firstOrNull { w ->
+                todayIso in w.dates || (todayIso >= w.startDate && todayIso <= w.endDate)
+            } ?: weeks.first()
+            Pair(weekWithToday.weekNumber, todayIso)
+        } else {
+            val targetWeek = if (todayIso < pStart) weeks.first() else weeks.last()
+            val firstStudyDay = targetWeek.dates.firstOrNull { d ->
+                d >= pStart && d <= pEnd && !GradingService.checkDateStatus(d, holidays).isNonWorkingDay
+            } ?: weeks.flatMap { it.dates }.firstOrNull { d ->
+                d >= pStart && d <= pEnd && !GradingService.checkDateStatus(d, holidays).isNonWorkingDay
+            } ?: targetWeek.dates.firstOrNull { d -> d >= pStart && d <= pEnd }
+                ?: pStart
+            val resolvedWeek = weeks.firstOrNull { w -> firstStudyDay in w.dates } ?: targetWeek
+            Pair(resolvedWeek.weekNumber, firstStudyDay)
+        }
     }
 
-    // Ensure when a Period is chosen, if selectedDate is outside [period.startDate, period.endDate], clamp/move to first date of that period
-    LaunchedEffect(selectedPeriod) {
-        if (selectedPeriod != null) {
-            val pStart = selectedPeriod.startDate
-            val pEnd = selectedPeriod.endDate ?: pStart
-            if (selectedDate < pStart || selectedDate > pEnd) {
-                onSelectDate(pStart)
+    var selectedWeekNumber by remember(selectedPeriod?.id, periodWeeks) {
+        val resolved = if (keepSavedSessionDateOnce && selectedPeriod != null) {
+            val w = periodWeeks.firstOrNull { selectedDate in it.dates }
+            if (w != null) Pair(w.weekNumber, selectedDate) else resolveDefaultWeekAndDateForPeriod(selectedPeriod, periodWeeks)
+        } else {
+            resolveDefaultWeekAndDateForPeriod(selectedPeriod, periodWeeks)
+        }
+        mutableIntStateOf(resolved?.first ?: 1)
+    }
+
+    // Whenever Academic Year -> Period -> Class -> Section is opened or changed,
+    // automatically set the week and date according to the real device LocalDate
+    LaunchedEffect(selectedYearId, selectedPeriod?.id, selectedClassId, selectedSectionId) {
+        if (selectedPeriod != null && periodWeeks.isNotEmpty()) {
+            if (keepSavedSessionDateOnce) {
+                val pStart = selectedPeriod.startDate.trim()
+                val pEnd = selectedPeriod.endDate?.trim()?.takeIf { it.isNotEmpty() } ?: periodWeeks.last().endDate
+                if (selectedDate >= pStart && selectedDate <= pEnd) {
+                    val matchingW = periodWeeks.firstOrNull { w -> selectedDate in w.dates } ?: periodWeeks.first()
+                    selectedWeekNumber = matchingW.weekNumber
+                    keepSavedSessionDateOnce = false
+                    onConsumeSavedSessionJump()
+                    return@LaunchedEffect
+                }
+                keepSavedSessionDateOnce = false
+                onConsumeSavedSessionJump()
             }
-            val matchingWeek = periodWeeks.firstOrNull { w -> selectedDate in w.dates }
-                ?: periodWeeks.firstOrNull()
-            if (matchingWeek != null) {
-                selectedWeekNumber = matchingWeek.weekNumber
+            val resolved = resolveDefaultWeekAndDateForPeriod(selectedPeriod, periodWeeks)
+            if (resolved != null) {
+                selectedWeekNumber = resolved.first
+                if (selectedDate != resolved.second) {
+                    onSelectDate(resolved.second)
+                }
             }
         }
     }
@@ -398,6 +477,7 @@ fun DailyTrackingScreen(
                 repository = repository,
                 refreshTick = refreshTick,
                 onOpenSavedSession = { clsId, secId, date ->
+                    keepSavedSessionDateOnce = true
                     onSelectClass(clsId)
                     onSelectSection(secId)
                     onSelectDate(date)
@@ -586,10 +666,11 @@ fun DailyTrackingScreen(
                                                     border = BorderStroke(1.dp, if (isSel) Teal700 else Slate200),
                                                     modifier = Modifier.clickable {
                                                         selectedPeriodId = sp.id
-                                                        val pStart = sp.startDate
-                                                        val pEnd = sp.endDate ?: pStart
-                                                        if (selectedDate < pStart || selectedDate > pEnd) {
-                                                            onSelectDate(pStart)
+                                                        val spWeeks = GradingService.buildWeeksForPeriod(sp)
+                                                        val resolved = resolveDefaultWeekAndDateForPeriod(sp, spWeeks)
+                                                        if (resolved != null) {
+                                                            selectedWeekNumber = resolved.first
+                                                            onSelectDate(resolved.second)
                                                         }
                                                     }
                                                 ) {
@@ -693,12 +774,19 @@ fun DailyTrackingScreen(
                                         shape = RoundedCornerShape(10.dp),
                                         modifier = Modifier.clickable {
                                             selectedWeekNumber = w.weekNumber
-                                            if (selectedDate !in w.dates) {
-                                                val firstWorking = w.dates.firstOrNull { d ->
-                                                    !GradingService.checkDateStatus(d, holidays).isNonWorkingDay
-                                                } ?: w.dates.firstOrNull()
-                                                if (firstWorking != null) {
-                                                    onSelectDate(firstWorking)
+                                            val pStart = selectedPeriod?.startDate?.trim() ?: w.startDate
+                                            val pEnd = selectedPeriod?.endDate?.trim()?.takeIf { it.isNotEmpty() } ?: w.endDate
+                                            if (selectedDate !in w.dates || selectedDate < pStart || selectedDate > pEnd) {
+                                                val todayIso = currentDeviceIsoDate()
+                                                val targetDay = if (todayIso in w.dates && todayIso >= pStart && todayIso <= pEnd) {
+                                                    todayIso
+                                                } else {
+                                                    w.dates.firstOrNull { d ->
+                                                        d >= pStart && d <= pEnd && !GradingService.checkDateStatus(d, holidays).isNonWorkingDay
+                                                    } ?: w.dates.firstOrNull { d -> d >= pStart && d <= pEnd }
+                                                }
+                                                if (targetDay != null) {
+                                                    onSelectDate(targetDay)
                                                 }
                                             }
                                         }
@@ -751,9 +839,11 @@ fun DailyTrackingScreen(
                             }
                         }
 
-                        // Days of the selected Week inside the selected Period
+                        // Days of the selected Week inside the selected Period (including surrounding Sun..Sat days)
                         val weekDatesToShow = selectedWeek?.dates ?: emptyList()
                         if (weekDatesToShow.isNotEmpty()) {
+                            val pStart = selectedPeriod?.startDate?.trim() ?: ""
+                            val pEnd = selectedPeriod?.endDate?.trim()?.takeIf { it.isNotEmpty() } ?: "9999-12-31"
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -761,19 +851,22 @@ fun DailyTrackingScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 weekDatesToShow.forEach { d ->
-                                    val isSel = d == selectedDate
+                                    val isOutOfPeriod = (pStart.isNotEmpty() && d < pStart) || d > pEnd
+                                    val isSel = !isOutOfPeriod && d == selectedDate
                                     val status = GradingService.checkDateStatus(d, holidays)
                                     val hasSavedForDay = remember(refreshTick, selectedClassId, selectedSectionId, d) {
-                                        repository.hasSavedSession(selectedClassId, selectedSectionId, d)
+                                        if (isOutOfPeriod) false else repository.hasSavedSession(selectedClassId, selectedSectionId, d)
                                     }
                                     Surface(
                                         color = when {
+                                            isOutOfPeriod -> Slate50
                                             isSel -> Teal700
                                             status.isNonWorkingDay -> Amber50
                                             hasSavedForDay -> Emerald50
                                             else -> Slate100
                                         },
                                         contentColor = when {
+                                            isOutOfPeriod -> Slate500
                                             isSel -> Color.White
                                             status.isNonWorkingDay -> Amber700
                                             hasSavedForDay -> Emerald700
@@ -783,13 +876,23 @@ fun DailyTrackingScreen(
                                         border = BorderStroke(
                                             1.dp,
                                             when {
+                                                isOutOfPeriod -> Slate200
                                                 isSel -> Teal700
                                                 status.isNonWorkingDay -> Amber600
                                                 hasSavedForDay -> Emerald600
                                                 else -> Slate200
                                             }
                                         ),
-                                        modifier = Modifier.clickable { onSelectDate(d) }
+                                        modifier = if (isOutOfPeriod) {
+                                            Modifier.clickable {
+                                                showTopNotification(
+                                                    "هذا اليوم (${GradingService.formatDisplayDate(d)}) يقع خارج حدود الفترة المختارة ولا يمكن تحديده أو التسجيل فيه",
+                                                    isWarning = true
+                                                )
+                                            }
+                                        } else {
+                                            Modifier.clickable { onSelectDate(d) }
+                                        }
                                     ) {
                                         Column(
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -805,6 +908,14 @@ fun DailyTrackingScreen(
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
+                                            if (isOutOfPeriod) {
+                                                Text(
+                                                    text = "خارج الفترة",
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Slate500
+                                                )
+                                            }
                                         }
                                     }
                                 }

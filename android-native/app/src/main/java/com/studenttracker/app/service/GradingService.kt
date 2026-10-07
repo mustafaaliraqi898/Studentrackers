@@ -150,8 +150,9 @@ object GradingService {
     }
 
     /**
-     * Divides a StudyPeriod [startDate, endDate] into sequential 7-day weeks
-     * (الأسبوع الأول, الأسبوع الثاني, ...) and returns each week with its dates list.
+     * Divides a StudyPeriod [startDate, endDate] into sequential Sunday..Saturday calendar weeks
+     * (الأسبوع الأول, الأسبوع الثاني, ...) and returns each week with its 7 calendar dates (Sun..Sat)
+     * while keeping startDate/endDate clamped to the period boundaries for display.
      */
     fun buildWeeksForPeriod(period: StudyPeriodEntity?): List<PeriodWeekWindow> {
         if (period == null) return emptyList()
@@ -163,15 +164,21 @@ object GradingService {
                 startLd.plusDays(27)
             }
             val safeEnd = if (endLd.isBefore(startLd)) startLd else endLd
+
+            // Find the Sunday of the calendar week containing startLd (Sunday = 0 days back, Monday = 1 day back, ..., Saturday = 6 days back)
+            val daysSinceSunday = startLd.dayOfWeek.value % 7
+            var weekSunday = startLd.minusDays(daysSinceSunday.toLong())
+
             val weeks = mutableListOf<PeriodWeekWindow>()
-            var currentStart = startLd
             var weekNum = 1
-            while (!currentStart.isAfter(safeEnd) && weekNum <= 60) {
-                val candidateEnd = currentStart.plusDays(6)
-                val actualEnd = if (candidateEnd.isAfter(safeEnd)) safeEnd else candidateEnd
+            while (!weekSunday.isAfter(safeEnd) && weekNum <= 60) {
+                val weekSaturday = weekSunday.plusDays(6)
+                val clampedStart = if (weekSunday.isBefore(startLd)) startLd else weekSunday
+                val clampedEnd = if (weekSaturday.isAfter(safeEnd)) safeEnd else weekSaturday
+
                 val datesInWeek = mutableListOf<String>()
-                var d = currentStart
-                while (!d.isAfter(actualEnd)) {
+                var d = weekSunday
+                while (!d.isAfter(weekSaturday)) {
                     datesInWeek.add(d.toString())
                     d = d.plusDays(1)
                 }
@@ -179,12 +186,12 @@ object GradingService {
                     PeriodWeekWindow(
                         weekNumber = weekNum,
                         labelAr = getArabicOrdinalWeekLabel(weekNum),
-                        startDate = currentStart.toString(),
-                        endDate = actualEnd.toString(),
+                        startDate = clampedStart.toString(),
+                        endDate = clampedEnd.toString(),
                         dates = datesInWeek
                     )
                 )
-                currentStart = actualEnd.plusDays(1)
+                weekSunday = weekSunday.plusDays(7)
                 weekNum++
             }
             weeks

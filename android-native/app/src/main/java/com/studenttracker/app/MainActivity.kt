@@ -109,7 +109,10 @@ fun StudentTrackerMainApp(
             selectedSectionId = currentClassSections.first().id
         }
     }
-    var selectedDate by remember { mutableStateOf("2026-10-04") }
+    var selectedDate by remember {
+        mutableStateOf(java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString())
+    }
+    var explicitSavedSessionJump by remember { mutableStateOf(false) }
     var selectedStudentProfileId by remember { mutableLongStateOf(1L) }
 
     var currentScreen by remember { mutableStateOf(AppScreen.DASHBOARD) }
@@ -212,7 +215,13 @@ fun StudentTrackerMainApp(
                     NavigationBarItem(
                         selected = currentScreen == screen,
                         onClick = {
-                            guardedAction { currentScreen = screen }
+                            guardedAction {
+                                if (screen == AppScreen.DAILY_TRACKING && currentScreen != AppScreen.DAILY_TRACKING) {
+                                    selectedDate = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+                                    explicitSavedSessionJump = false
+                                }
+                                currentScreen = screen
+                            }
                         },
                         icon = { Icon(icon, contentDescription = label) },
                         label = {
@@ -246,11 +255,18 @@ fun StudentTrackerMainApp(
                         if (firstSec != null) selectedSectionId = firstSec.id
                     },
                     onSelectSection = { secId -> selectedSectionId = secId },
-                    onNavigate = { target -> currentScreen = target },
+                    onNavigate = { target ->
+                        if (target == AppScreen.DAILY_TRACKING) {
+                            selectedDate = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+                            explicitSavedSessionJump = false
+                        }
+                        currentScreen = target
+                    },
                     onOpenSavedSession = { clsId, secId, date ->
                         selectedClassId = clsId
                         selectedSectionId = secId
                         selectedDate = date
+                        explicitSavedSessionJump = true
                         currentScreen = AppScreen.DAILY_TRACKING
                     }
                 )
@@ -287,7 +303,9 @@ fun StudentTrackerMainApp(
                         }
                     },
                     onDataChanged = { refreshTick++ },
-                    onShowMessage = ::showToastMessage
+                    onShowMessage = ::showToastMessage,
+                    preserveInitialDateFromSavedSession = explicitSavedSessionJump,
+                    onConsumeSavedSessionJump = { explicitSavedSessionJump = false }
                 )
 
                 AppScreen.ABSENCE_TRACKING -> AbsenceTrackingScreen(
@@ -387,6 +405,7 @@ fun StudentTrackerMainApp(
                         selectedClassId = clsId
                         selectedSectionId = secId
                         selectedDate = date
+                        explicitSavedSessionJump = true
                         currentScreen = AppScreen.DAILY_TRACKING
                     },
                     onDataChanged = { refreshTick++ },
