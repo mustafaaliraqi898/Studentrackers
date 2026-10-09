@@ -64,6 +64,7 @@ enum class AppScreen(val titleAr: String) {
     SAVED_RECORDS("السجلات المحفوظة"),
     STUDENT_PROFILE("ملف الطالب"),
     AVERAGES_TABLE("المعدل"),
+    PERIOD_COMPARISON("مقارنة نتائج الفترات"),
     REPORTS("التقارير والنتائج"),
     HOLIDAYS("العطل والمناسبات"),
     EXCEL_BACKUP("Excel والنسخ الاحتياطي")

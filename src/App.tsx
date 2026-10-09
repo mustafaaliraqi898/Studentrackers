@@ -36,6 +36,7 @@ import { HolidaysView } from './components/HolidaysView';
 import { SavedRecordsView } from './components/SavedRecordsView';
 import { StudentProfileView } from './components/StudentProfileView';
 import { ReportsView } from './components/ReportsView';
+import { PeriodComparisonView } from './components/PeriodComparisonView';
 import { ExcelCenterView } from './components/ExcelCenterView';
 import { BackupRestoreView } from './components/BackupRestoreView';
 import { SchemaAndSettingsView } from './components/SchemaAndSettingsView';
@@ -597,6 +598,17 @@ export default function App() {
             onSelectSection={handleSelectSection}
             onNavigate={handleNavigate}
             onDataChanged={refreshAllFromSQLite}
+          />
+        )}
+
+        {currentScreen === 'period-comparison' && (
+          <PeriodComparisonView
+            classes={classes}
+            sections={sections}
+            selectedClassId={selectedClassId}
+            selectedSectionId={selectedSectionId}
+            onSelectClass={handleSelectClass}
+            onSelectSection={handleSelectSection}
           />
         )}
 

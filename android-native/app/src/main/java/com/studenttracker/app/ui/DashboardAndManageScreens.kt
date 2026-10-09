@@ -251,6 +251,14 @@ fun DashboardScreen(
                         tint = Amber700,
                         onClick = { onNavigate(AppScreen.SAVED_RECORDS) }
                     )
+                    NavActionTile(
+                        modifier = Modifier.weight(1f),
+                        title = "مقارنة نتائج الفترات",
+                        subtitle = "مقارنة التقدم أو التراجع بين فترتين",
+                        icon = Icons.Default.CompareArrows,
+                        tint = Teal700,
+                        onClick = { onNavigate(AppScreen.PERIOD_COMPARISON) }
+                    )
                 }
             }
         }

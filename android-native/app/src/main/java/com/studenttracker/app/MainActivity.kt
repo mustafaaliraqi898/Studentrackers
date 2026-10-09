@@ -456,6 +456,22 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.PERIOD_COMPARISON -> PeriodComparisonScreen(
+                    classes = classes,
+                    sections = sections,
+                    selectedClassId = selectedClassId,
+                    selectedSectionId = selectedSectionId,
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onSelectClass = { clsId ->
+                        selectedClassId = clsId
+                        val firstSec = sections.firstOrNull { it.classId == clsId }
+                        if (firstSec != null) selectedSectionId = firstSec.id
+                    },
+                    onSelectSection = { secId -> selectedSectionId = secId }
+                )
+
                 AppScreen.REPORTS -> ReportsScreen(
                     classes = classes,
                     sections = sections,

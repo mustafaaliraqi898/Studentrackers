@@ -229,6 +229,7 @@ export type AppScreen =
   | 'saved-records'
   | 'student-profile'
   | 'reports'
+  | 'period-comparison'
   | 'excel-center'
   | 'backup-restore'
   | 'schema-architecture'

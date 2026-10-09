@@ -5139,3 +5139,758 @@ private fun printAveragesReportA4Landscape(
     }
 }
 
+// ============================================================================
+// PERIOD COMPARISON SCREEN ("مقارنة نتائج الفترات")
+// ============================================================================
+private data class StudentPeriodComparisonItem(
+    val sequence: Int,
+    val studentId: Long,
+    val studentName: String,
+    val firstScore: Double?,
+    val secondScore: Double?,
+    val difference: Double?,
+    val status: String // "improved", "declined", "unchanged", "incomplete"
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PeriodComparisonScreen(
+    classes: List<ClassEntity>,
+    sections: List<SectionEntity>,
+    selectedClassId: Long,
+    selectedSectionId: Long,
+    dbHelper: AppDatabaseHelper,
+    repository: TrackerRepository,
+    refreshTick: Int,
+    onSelectClass: (Long) -> Unit,
+    onSelectSection: (Long) -> Unit
+) {
+    val currentClass = classes.find { it.id == selectedClassId } ?: classes.firstOrNull()
+    val classSections = remember(sections, currentClass?.id) {
+        sections.filter { it.classId == currentClass?.id }
+    }
+    LaunchedEffect(classSections, selectedSectionId) {
+        if (classSections.isNotEmpty() && classSections.none { it.id == selectedSectionId }) {
+            onSelectSection(classSections.first().id)
+        }
+    }
+    val currentSection = classSections.find { it.id == selectedSectionId } ?: classSections.firstOrNull()
+
+    val studyPeriods = remember(refreshTick) {
+        repository.getStudyPeriods()
+    }
+
+    var firstPeriodId by remember(studyPeriods) {
+        mutableLongStateOf(studyPeriods.getOrNull(0)?.id ?: 0L)
+    }
+    var secondPeriodId by remember(studyPeriods) {
+        mutableLongStateOf(
+            studyPeriods.getOrNull(1)?.id
+                ?: studyPeriods.getOrNull(0)?.id
+                ?: 0L
+        )
+    }
+
+    var classDropdownExpanded by remember { mutableStateOf(false) }
+    var firstPeriodExpanded by remember { mutableStateOf(false) }
+    var secondPeriodExpanded by remember { mutableStateOf(false) }
+
+    val firstPeriod = studyPeriods.find { it.id == firstPeriodId } ?: studyPeriods.firstOrNull()
+    val secondPeriod = studyPeriods.find { it.id == secondPeriodId }
+        ?: studyPeriods.getOrNull(1)
+        ?: studyPeriods.firstOrNull()
+
+    val isSamePeriodSelected = firstPeriod != null && secondPeriod != null && firstPeriod.id == secondPeriod.id
+
+    val reports = remember(refreshTick, currentClass?.id, currentSection?.id) {
+        if (currentClass == null || currentSection == null) {
+            emptyList()
+        } else {
+            GradingService.calculateComprehensiveStudentReports(
+                dbHelper = dbHelper,
+                repository = repository,
+                classId = currentClass.id,
+                sectionId = currentSection.id,
+                baseDateFilter = "ALL"
+            )
+        }
+    }
+
+    val comparisonRows = remember(reports, firstPeriod?.id, secondPeriod?.id, isSamePeriodSelected) {
+        if (firstPeriod == null || secondPeriod == null || isSamePeriodSelected) {
+            emptyList()
+        } else {
+            reports.mapIndexed { idx, rep ->
+                val b1 = rep.periodBreakdowns.find { it.period.id == firstPeriod.id }
+                val b2 = rep.periodBreakdowns.find { it.period.id == secondPeriod.id }
+
+                val s1 = b1?.periodAverage
+                val s2 = b2?.periodAverage
+
+                val diff = if (s1 != null && s2 != null) {
+                    Math.round((s2 - s1) * 100.0) / 100.0
+                } else {
+                    null
+                }
+
+                val status = when {
+                    diff == null -> "incomplete"
+                    diff > 0.0001 -> "improved"
+                    diff < -0.0001 -> "declined"
+                    else -> "unchanged"
+                }
+
+                StudentPeriodComparisonItem(
+                    sequence = idx + 1,
+                    studentId = rep.studentId,
+                    studentName = rep.studentName,
+                    firstScore = s1,
+                    secondScore = s2,
+                    difference = diff,
+                    status = status
+                )
+            }
+        }
+    }
+
+    val improvedCount = remember(comparisonRows) { comparisonRows.count { it.status == "improved" } }
+    val declinedCount = remember(comparisonRows) { comparisonRows.count { it.status == "declined" } }
+    val unchangedCount = remember(comparisonRows) { comparisonRows.count { it.status == "unchanged" } }
+
+    fun formatDiff(diff: Double?): String {
+        if (diff == null) return "—"
+        val absFormatted = GradingService.formatScore(kotlin.math.abs(diff))
+        return when {
+            diff > 0.0001 -> "+$absFormatted"
+            diff < -0.0001 -> "-$absFormatted"
+            else -> "0"
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // 1. Filters Card (الصف، الشعبة، الفترة الأولى، الفترة الثانية)
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "مقارنة نتائج الفترات",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate900
+                        )
+                        Text(
+                            text = "${currentClass?.className ?: "—"} / شعبة ${currentSection?.sectionName ?: "—"} • عدد الطلاب: ${reports.size}",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Slate600
+                        )
+                    }
+                }
+
+                // Filter 1: الصف
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "الصف:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700,
+                        modifier = Modifier.width(80.dp)
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = classDropdownExpanded,
+                        onExpandedChange = { classDropdownExpanded = !classDropdownExpanded },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        OutlinedTextField(
+                            value = currentClass?.className ?: "اختر الصف",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = classDropdownExpanded)
+                            },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = classDropdownExpanded,
+                            onDismissRequest = { classDropdownExpanded = false }
+                        ) {
+                            classes.forEach { cls ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = cls.className,
+                                            fontWeight = if (cls.id == currentClass?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        onSelectClass(cls.id)
+                                        classDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Filter 2: الشعبة
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "الشعبة:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700,
+                        modifier = Modifier.width(80.dp)
+                    )
+                    if (classSections.isEmpty()) {
+                        Text(
+                            text = "لا توجد شعب مضافة لهذا الصف",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Red700
+                        )
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            classSections.forEach { sec ->
+                                val isSelected = sec.id == currentSection?.id
+                                Surface(
+                                    color = if (isSelected) Slate900 else Slate100,
+                                    contentColor = if (isSelected) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { onSelectSection(sec.id) }
+                                ) {
+                                    Text(
+                                        text = "شعبة ${sec.sectionName}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter 3: الفترة الأولى
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "الفترة الأولى:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700,
+                        modifier = Modifier.width(80.dp)
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = firstPeriodExpanded,
+                        onExpandedChange = {
+                            if (studyPeriods.isNotEmpty()) firstPeriodExpanded = !firstPeriodExpanded
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        OutlinedTextField(
+                            value = firstPeriod?.periodName ?: "لا توجد فترات دراسية",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = firstPeriodExpanded)
+                            },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = firstPeriodExpanded,
+                            onDismissRequest = { firstPeriodExpanded = false }
+                        ) {
+                            studyPeriods.forEach { p ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = p.periodName,
+                                            fontWeight = if (p.id == firstPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        firstPeriodId = p.id
+                                        firstPeriodExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Filter 4: الفترة الثانية
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "الفترة الثانية:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700,
+                        modifier = Modifier.width(80.dp)
+                    )
+                    ExposedDropdownMenuBox(
+                        expanded = secondPeriodExpanded,
+                        onExpandedChange = {
+                            if (studyPeriods.isNotEmpty()) secondPeriodExpanded = !secondPeriodExpanded
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        OutlinedTextField(
+                            value = secondPeriod?.periodName ?: "لا توجد فترات دراسية",
+                            onValueChange = {},
+                            readOnly = true,
+                            singleLine = true,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = secondPeriodExpanded)
+                            },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            textStyle = LocalTextStyle.current.copy(
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = secondPeriodExpanded,
+                            onDismissRequest = { secondPeriodExpanded = false }
+                        ) {
+                            studyPeriods.forEach { p ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = p.periodName,
+                                            fontWeight = if (p.id == secondPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                        )
+                                    },
+                                    onClick = {
+                                        secondPeriodId = p.id
+                                        secondPeriodExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle special states
+        if (studyPeriods.isEmpty()) {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "لا توجد فترات دراسية مضافة حالياً للمقارنة",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate500,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+            return@Column
+        }
+
+        if (isSamePeriodSelected) {
+            Surface(
+                color = Amber50,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Amber600),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "يرجى اختيار فترتين مختلفتين للمقارنة",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Amber700,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+            return@Column
+        }
+
+        // 2. Summary Strip (3 cards on a single row: Improved, Declined, Unchanged)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Improved
+            Surface(
+                color = Emerald50,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Emerald600),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = improvedCount.toString(),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Emerald700
+                    )
+                    Text(
+                        text = "تحسن (↑)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Emerald700
+                    )
+                }
+            }
+
+            // Declined
+            Surface(
+                color = Red50,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Red600),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = declinedCount.toString(),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Red700
+                    )
+                    Text(
+                        text = "تراجع (↓)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Red700
+                    )
+                }
+            }
+
+            // Unchanged
+            Surface(
+                color = Slate100,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = unchangedCount.toString(),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700
+                    )
+                    Text(
+                        text = "ثابت (=)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate700
+                    )
+                }
+            }
+        }
+
+        // 3. Students Comparison Table
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            if (comparisonRows.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "لا يوجد طلاب مسجلين في هذا الصف والشعبة",
+                        color = Slate500,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    // Table Header
+                    item {
+                        Surface(
+                            color = Slate900,
+                            contentColor = Color.White,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "ت",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.width(26.dp)
+                                )
+                                Text(
+                                    text = "اسم الطالب",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier
+                                        .weight(1.9f)
+                                        .padding(end = 4.dp)
+                                )
+                                Text(
+                                    text = firstPeriod?.periodName ?: "الفترة 1",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(0.95f)
+                                )
+                                Text(
+                                    text = secondPeriod?.periodName ?: "الفترة 2",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(0.95f)
+                                )
+                                Text(
+                                    text = "الفرق",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(0.85f)
+                                )
+                                Text(
+                                    text = "الحالة",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1.05f)
+                                )
+                            }
+                        }
+                    }
+
+                    // Table Rows
+                    items(comparisonRows, key = { it.studentId }) { item ->
+                        val rowBg = if (item.sequence % 2 == 1) Color.White else Slate50
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(rowBg)
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 1. Sequence
+                            Text(
+                                text = item.sequence.toString(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate500,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.width(26.dp)
+                            )
+
+                            // 2. Student Name
+                            Text(
+                                text = item.studentName,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate900,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1.9f)
+                                    .padding(end = 4.dp)
+                            )
+
+                            // 3. First Period Score
+                            Text(
+                                text = if (item.firstScore != null) GradingService.formatScore(item.firstScore) else "—",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.firstScore != null) Slate800 else Slate500,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(0.95f)
+                            )
+
+                            // 4. Second Period Score
+                            Text(
+                                text = if (item.secondScore != null) GradingService.formatScore(item.secondScore) else "—",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (item.secondScore != null) Slate800 else Slate500,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(0.95f)
+                            )
+
+                            // 5. Difference
+                            val diffColor = when (item.status) {
+                                "improved" -> Emerald700
+                                "declined" -> Red700
+                                else -> Slate600
+                            }
+                            Text(
+                                text = formatDiff(item.difference),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = diffColor,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.weight(0.85f)
+                            )
+
+                            // 6. Status Badge
+                            Box(
+                                modifier = Modifier.weight(1.05f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                when (item.status) {
+                                    "improved" -> {
+                                        Surface(
+                                            color = Emerald50,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = BorderStroke(1.dp, Emerald600)
+                                        ) {
+                                            Text(
+                                                text = "↑ تحسن",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Emerald700,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    "declined" -> {
+                                        Surface(
+                                            color = Red50,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = BorderStroke(1.dp, Red600)
+                                        ) {
+                                            Text(
+                                                text = "↓ تراجع",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Red700,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    "unchanged" -> {
+                                        Surface(
+                                            color = Slate100,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = BorderStroke(1.dp, Slate200)
+                                        ) {
+                                            Text(
+                                                text = "= ثابت",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Slate700,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    else -> {
+                                        Text(
+                                            text = "—",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Slate500
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(color = Slate100)
+                    }
+                }
+            }
+        }
+    }
+}
+
+

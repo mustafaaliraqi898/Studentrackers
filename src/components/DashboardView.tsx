@@ -478,6 +478,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <ChevronLeft className="w-4 h-4 text-slate-400" />
         </button>
+
+        <button
+          type="button"
+          onClick={() => onNavigate('period-comparison')}
+          className="bg-white hover:bg-slate-50/80 rounded-2xl p-4 border border-slate-200/80 text-right transition-all flex items-center justify-between group"
+        >
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center shrink-0 group-hover:bg-teal-600 group-hover:text-white transition-colors">
+              <FileBarChart2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-900">
+                مقارنة نتائج الفترات
+              </h4>
+              <p className="text-xs text-slate-500 mt-0.5">
+                مقارنة التقدم أو التراجع بين فترتين
+              </p>
+            </div>
+          </div>
+          <ChevronLeft className="w-4 h-4 text-slate-400" />
+        </button>
       </section>
 
       {/* Quick Student Preview List */}
