@@ -5153,7 +5153,6 @@ private data class StudentPeriodComparisonItem(
     val status: String // "improved", "declined", "unchanged", "incomplete"
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PeriodComparisonScreen(
     classes: List<ClassEntity>,
@@ -5178,7 +5177,7 @@ fun PeriodComparisonScreen(
     val currentSection = classSections.find { it.id == selectedSectionId } ?: classSections.firstOrNull()
 
     val studyPeriods = remember(refreshTick) {
-        repository.getStudyPeriods()
+        runCatching { repository.getStudyPeriods() }.getOrElse { emptyList() }
     }
 
     var firstPeriodId by remember(studyPeriods) {
@@ -5201,19 +5200,44 @@ fun PeriodComparisonScreen(
         ?: studyPeriods.getOrNull(1)
         ?: studyPeriods.firstOrNull()
 
+    fun getPeriodDisplayLabel(period: StudyPeriodEntity?): String {
+        if (period == null) return "—"
+        return if (period.stageType == AcademicStage.MID_YEAR) {
+            if (period.periodName.isBlank() || period.periodName == "الفترة" || period.periodName == "نصف السنة") {
+                "نصف السنة"
+            } else {
+                "${period.stageType.arabicLabel} — ${period.periodName}"
+            }
+        } else {
+            "${period.stageType.arabicLabel} — ${period.periodName}"
+        }
+    }
+
     val isSamePeriodSelected = firstPeriod != null && secondPeriod != null && firstPeriod.id == secondPeriod.id
 
     val reports = remember(refreshTick, currentClass?.id, currentSection?.id) {
         if (currentClass == null || currentSection == null) {
             emptyList()
         } else {
-            GradingService.calculateComprehensiveStudentReports(
-                dbHelper = dbHelper,
-                repository = repository,
-                classId = currentClass.id,
-                sectionId = currentSection.id,
-                baseDateFilter = "ALL"
-            )
+            runCatching {
+                GradingService.calculateComprehensiveStudentReports(
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    classId = currentClass.id,
+                    sectionId = currentSection.id,
+                    baseDateFilter = "ALL"
+                )
+            }.getOrElse { emptyList() }
+        }
+    }
+
+    fun resolvePeriodComparedScore(bd: StudentPeriodGradeBreakdown?): Double? {
+        if (bd == null) return null
+        val isMidYear = bd.period.stageType == AcademicStage.MID_YEAR
+        return if (isMidYear) {
+            bd.writtenExamGrade
+        } else {
+            bd.periodAverage ?: bd.dailyGrade
         }
     }
 
@@ -5225,8 +5249,8 @@ fun PeriodComparisonScreen(
                 val b1 = rep.periodBreakdowns.find { it.period.id == firstPeriod.id }
                 val b2 = rep.periodBreakdowns.find { it.period.id == secondPeriod.id }
 
-                val s1 = b1?.periodAverage
-                val s2 = b2?.periodAverage
+                val s1 = resolvePeriodComparedScore(b1)
+                val s2 = resolvePeriodComparedScore(b2)
 
                 val diff = if (s1 != null && s2 != null) {
                     Math.round((s2 - s1) * 100.0) / 100.0
@@ -5319,28 +5343,39 @@ fun PeriodComparisonScreen(
                         color = Slate700,
                         modifier = Modifier.width(80.dp)
                     )
-                    ExposedDropdownMenuBox(
-                        expanded = classDropdownExpanded,
-                        onExpandedChange = { classDropdownExpanded = !classDropdownExpanded },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        OutlinedTextField(
-                            value = currentClass?.className ?: "اختر الصف",
-                            onValueChange = {},
-                            readOnly = true,
-                            singleLine = true,
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = classDropdownExpanded)
-                            },
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
                             modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        )
-                        ExposedDropdownMenu(
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (classes.isNotEmpty()) classDropdownExpanded = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = currentClass?.className ?: "اختر الصف",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = "اختر الصف",
+                                    tint = Slate700
+                                )
+                            }
+                        }
+                        DropdownMenu(
                             expanded = classDropdownExpanded,
                             onDismissRequest = { classDropdownExpanded = false }
                         ) {
@@ -5349,7 +5384,8 @@ fun PeriodComparisonScreen(
                                     text = {
                                         Text(
                                             text = cls.className,
-                                            fontWeight = if (cls.id == currentClass?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                            fontWeight = if (cls.id == currentClass?.id) FontWeight.ExtraBold else FontWeight.Normal,
+                                            color = if (cls.id == currentClass?.id) Teal700 else Slate900
                                         )
                                     },
                                     onClick = {
@@ -5423,30 +5459,39 @@ fun PeriodComparisonScreen(
                         color = Slate700,
                         modifier = Modifier.width(80.dp)
                     )
-                    ExposedDropdownMenuBox(
-                        expanded = firstPeriodExpanded,
-                        onExpandedChange = {
-                            if (studyPeriods.isNotEmpty()) firstPeriodExpanded = !firstPeriodExpanded
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        OutlinedTextField(
-                            value = firstPeriod?.periodName ?: "لا توجد فترات دراسية",
-                            onValueChange = {},
-                            readOnly = true,
-                            singleLine = true,
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = firstPeriodExpanded)
-                            },
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
                             modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        )
-                        ExposedDropdownMenu(
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (studyPeriods.isNotEmpty()) firstPeriodExpanded = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (firstPeriod != null) getPeriodDisplayLabel(firstPeriod) else "لا توجد فترات دراسية",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = "اختر الفترة الأولى",
+                                    tint = Slate700
+                                )
+                            }
+                        }
+                        DropdownMenu(
                             expanded = firstPeriodExpanded,
                             onDismissRequest = { firstPeriodExpanded = false }
                         ) {
@@ -5454,8 +5499,9 @@ fun PeriodComparisonScreen(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            text = p.periodName,
-                                            fontWeight = if (p.id == firstPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                            text = getPeriodDisplayLabel(p),
+                                            fontWeight = if (p.id == firstPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal,
+                                            color = if (p.id == firstPeriod?.id) Teal700 else Slate900
                                         )
                                     },
                                     onClick = {
@@ -5481,30 +5527,39 @@ fun PeriodComparisonScreen(
                         color = Slate700,
                         modifier = Modifier.width(80.dp)
                     )
-                    ExposedDropdownMenuBox(
-                        expanded = secondPeriodExpanded,
-                        onExpandedChange = {
-                            if (studyPeriods.isNotEmpty()) secondPeriodExpanded = !secondPeriodExpanded
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        OutlinedTextField(
-                            value = secondPeriod?.periodName ?: "لا توجد فترات دراسية",
-                            onValueChange = {},
-                            readOnly = true,
-                            singleLine = true,
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = secondPeriodExpanded)
-                            },
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
                             modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth(),
-                            textStyle = LocalTextStyle.current.copy(
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        )
-                        ExposedDropdownMenu(
+                                .fillMaxWidth()
+                                .clickable {
+                                    if (studyPeriods.isNotEmpty()) secondPeriodExpanded = true
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (secondPeriod != null) getPeriodDisplayLabel(secondPeriod) else "لا توجد فترات دراسية",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = "اختر الفترة الثانية",
+                                    tint = Slate700
+                                )
+                            }
+                        }
+                        DropdownMenu(
                             expanded = secondPeriodExpanded,
                             onDismissRequest = { secondPeriodExpanded = false }
                         ) {
@@ -5512,8 +5567,9 @@ fun PeriodComparisonScreen(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            text = p.periodName,
-                                            fontWeight = if (p.id == secondPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal
+                                            text = getPeriodDisplayLabel(p),
+                                            fontWeight = if (p.id == secondPeriod?.id) FontWeight.ExtraBold else FontWeight.Normal,
+                                            color = if (p.id == secondPeriod?.id) Teal700 else Slate900
                                         )
                                     },
                                     onClick = {
@@ -5551,10 +5607,7 @@ fun PeriodComparisonScreen(
                     )
                 }
             }
-            return@Column
-        }
-
-        if (isSamePeriodSelected) {
+        } else if (isSamePeriodSelected) {
             Surface(
                 color = Amber50,
                 shape = RoundedCornerShape(14.dp),
@@ -5568,7 +5621,11 @@ fun PeriodComparisonScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "يرجى اختيار فترتين مختلفتين للمقارنة",
+                        text = if (studyPeriods.size == 1) {
+                            "يوجد فترة دراسية واحدة فقط حالياً. يرجى إضافة فترة ثانية من قسم الفترات الدراسية للمقارنة."
+                        } else {
+                            "يرجى اختيار فترتين مختلفتين للمقارنة"
+                        },
                         fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Amber700,
@@ -5576,317 +5633,316 @@ fun PeriodComparisonScreen(
                     )
                 }
             }
-            return@Column
-        }
-
-        // 2. Summary Strip (3 cards on a single row: Improved, Declined, Unchanged)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Improved
-            Surface(
-                color = Emerald50,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Emerald600),
-                modifier = Modifier.weight(1f)
+        } else {
+            // 2. Summary Strip (3 cards on a single row: Improved, Declined, Unchanged)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                // Improved
+                Surface(
+                    color = Emerald50,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Emerald600),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Text(
-                        text = improvedCount.toString(),
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Emerald700
-                    )
-                    Text(
-                        text = "تحسن (↑)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Emerald700
-                    )
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = improvedCount.toString(),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Emerald700
+                        )
+                        Text(
+                            text = "تحسن (↑)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Emerald700
+                        )
+                    }
+                }
+
+                // Declined
+                Surface(
+                    color = Red50,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Red600),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = declinedCount.toString(),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Red700
+                        )
+                        Text(
+                            text = "تراجع (↓)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Red700
+                        )
+                    }
+                }
+
+                // Unchanged
+                Surface(
+                    color = Slate100,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = unchangedCount.toString(),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700
+                        )
+                        Text(
+                            text = "ثابت (=)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700
+                        )
+                    }
                 }
             }
 
-            // Declined
+            // 3. Students Comparison Table
             Surface(
-                color = Red50,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Red600),
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = declinedCount.toString(),
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Red700
-                    )
-                    Text(
-                        text = "تراجع (↓)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Red700
-                    )
-                }
-            }
-
-            // Unchanged
-            Surface(
-                color = Slate100,
-                shape = RoundedCornerShape(12.dp),
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
                 border = BorderStroke(1.dp, Slate200),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
             ) {
-                Column(
-                    modifier = Modifier.padding(vertical = 10.dp, horizontal = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Text(
-                        text = unchangedCount.toString(),
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Slate700
-                    )
-                    Text(
-                        text = "ثابت (=)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Slate700
-                    )
-                }
-            }
-        }
+                if (comparisonRows.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "لا يوجد طلاب مسجلين في هذا الصف والشعبة",
+                            color = Slate500,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        // Table Header
+                        item {
+                            Surface(
+                                color = Slate900,
+                                contentColor = Color.White,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "ت",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.width(26.dp)
+                                    )
+                                    Text(
+                                        text = "اسم الطالب",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        modifier = Modifier
+                                            .weight(1.9f)
+                                            .padding(end = 4.dp)
+                                    )
+                                    Text(
+                                        text = firstPeriod?.periodName ?: "الفترة 1",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(0.95f)
+                                    )
+                                    Text(
+                                        text = secondPeriod?.periodName ?: "الفترة 2",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(0.95f)
+                                    )
+                                    Text(
+                                        text = "الفرق",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.weight(0.85f)
+                                    )
+                                    Text(
+                                        text = "الحالة",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.weight(1.05f)
+                                    )
+                                }
+                            }
+                        }
 
-        // 3. Students Comparison Table
-        Surface(
-            color = Color.White,
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, Slate200),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            if (comparisonRows.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "لا يوجد طلاب مسجلين في هذا الصف والشعبة",
-                        color = Slate500,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    // Table Header
-                    item {
-                        Surface(
-                            color = Slate900,
-                            contentColor = Color.White,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                        // Table Rows
+                        items(comparisonRows, key = { it.studentId }) { item ->
+                            val rowBg = if (item.sequence % 2 == 1) Color.White else Slate50
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .background(rowBg)
                                     .padding(horizontal = 8.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                // 1. Sequence
                                 Text(
-                                    text = "ت",
+                                    text = item.sequence.toString(),
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate500,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.width(26.dp)
                                 )
+
+                                // 2. Student Name
                                 Text(
-                                    text = "اسم الطالب",
-                                    fontSize = 11.sp,
+                                    text = item.studentName,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier
                                         .weight(1.9f)
                                         .padding(end = 4.dp)
                                 )
+
+                                // 3. First Period Score
                                 Text(
-                                    text = firstPeriod?.periodName ?: "الفترة 1",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    text = if (item.firstScore != null) GradingService.formatScore(item.firstScore) else "—",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (item.firstScore != null) Slate800 else Slate500,
                                     textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(0.95f)
                                 )
+
+                                // 4. Second Period Score
                                 Text(
-                                    text = secondPeriod?.periodName ?: "الفترة 2",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    text = if (item.secondScore != null) GradingService.formatScore(item.secondScore) else "—",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (item.secondScore != null) Slate800 else Slate500,
                                     textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(0.95f)
                                 )
+
+                                // 5. Difference
+                                val diffColor = when (item.status) {
+                                    "improved" -> Emerald700
+                                    "declined" -> Red700
+                                    else -> Slate600
+                                }
                                 Text(
-                                    text = "الفرق",
-                                    fontSize = 10.sp,
+                                    text = formatDiff(item.difference),
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
+                                    color = diffColor,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.weight(0.85f)
                                 )
-                                Text(
-                                    text = "الحالة",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.weight(1.05f)
-                                )
-                            }
-                        }
-                    }
 
-                    // Table Rows
-                    items(comparisonRows, key = { it.studentId }) { item ->
-                        val rowBg = if (item.sequence % 2 == 1) Color.White else Slate50
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(rowBg)
-                                .padding(horizontal = 8.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // 1. Sequence
-                            Text(
-                                text = item.sequence.toString(),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Slate500,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.width(26.dp)
-                            )
-
-                            // 2. Student Name
-                            Text(
-                                text = item.studentName,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate900,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .weight(1.9f)
-                                    .padding(end = 4.dp)
-                            )
-
-                            // 3. First Period Score
-                            Text(
-                                text = if (item.firstScore != null) GradingService.formatScore(item.firstScore) else "—",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (item.firstScore != null) Slate800 else Slate500,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.weight(0.95f)
-                            )
-
-                            // 4. Second Period Score
-                            Text(
-                                text = if (item.secondScore != null) GradingService.formatScore(item.secondScore) else "—",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (item.secondScore != null) Slate800 else Slate500,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.weight(0.95f)
-                            )
-
-                            // 5. Difference
-                            val diffColor = when (item.status) {
-                                "improved" -> Emerald700
-                                "declined" -> Red700
-                                else -> Slate600
-                            }
-                            Text(
-                                text = formatDiff(item.difference),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = diffColor,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.weight(0.85f)
-                            )
-
-                            // 6. Status Badge
-                            Box(
-                                modifier = Modifier.weight(1.05f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                when (item.status) {
-                                    "improved" -> {
-                                        Surface(
-                                            color = Emerald50,
-                                            shape = RoundedCornerShape(6.dp),
-                                            border = BorderStroke(1.dp, Emerald600)
-                                        ) {
+                                // 6. Status Badge
+                                Box(
+                                    modifier = Modifier.weight(1.05f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    when (item.status) {
+                                        "improved" -> {
+                                            Surface(
+                                                color = Emerald50,
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Emerald600)
+                                            ) {
+                                                Text(
+                                                    text = "↑ تحسن",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Emerald700,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        "declined" -> {
+                                            Surface(
+                                                color = Red50,
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Red600)
+                                            ) {
+                                                Text(
+                                                    text = "↓ تراجع",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Red700,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        "unchanged" -> {
+                                            Surface(
+                                                color = Slate100,
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Slate200)
+                                            ) {
+                                                Text(
+                                                    text = "= ثابت",
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    color = Slate700,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                )
+                                            }
+                                        }
+                                        else -> {
                                             Text(
-                                                text = "↑ تحسن",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = Emerald700,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                                text = "—",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Slate500
                                             )
                                         }
-                                    }
-                                    "declined" -> {
-                                        Surface(
-                                            color = Red50,
-                                            shape = RoundedCornerShape(6.dp),
-                                            border = BorderStroke(1.dp, Red600)
-                                        ) {
-                                            Text(
-                                                text = "↓ تراجع",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = Red700,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                            )
-                                        }
-                                    }
-                                    "unchanged" -> {
-                                        Surface(
-                                            color = Slate100,
-                                            shape = RoundedCornerShape(6.dp),
-                                            border = BorderStroke(1.dp, Slate200)
-                                        ) {
-                                            Text(
-                                                text = "= ثابت",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = Slate700,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                            )
-                                        }
-                                    }
-                                    else -> {
-                                        Text(
-                                            text = "—",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Slate500
-                                        )
                                     }
                                 }
                             }
+                            HorizontalDivider(color = Slate100)
                         }
-                        HorizontalDivider(color = Slate100)
                     }
                 }
             }

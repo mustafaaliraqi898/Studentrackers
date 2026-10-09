@@ -121,8 +121,8 @@ export const PeriodComparisonView: React.FC<PeriodComparisonViewProps> = ({
         (b) => b.period.id === secondPeriod.id
       );
 
-      const s1 = b1?.periodAverage ?? null;
-      const s2 = b2?.periodAverage ?? null;
+      const s1 = b1 != null ? (b1.periodAverage ?? b1.dailyGrade) : null;
+      const s2 = b2 != null ? (b2.periodAverage ?? b2.dailyGrade) : null;
 
       const diff =
         s1 !== null && s2 !== null
