@@ -255,7 +255,7 @@ fun DashboardScreen(
                         modifier = Modifier.weight(1f),
                         title = "مقارنة نتائج الفترات",
                         subtitle = "مقارنة التقدم أو التراجع بين فترتين",
-                        icon = Icons.Default.CompareArrows,
+                        icon = Icons.Default.SwapHoriz,
                         tint = Teal700,
                         onClick = { onNavigate(AppScreen.PERIOD_COMPARISON) }
                     )
