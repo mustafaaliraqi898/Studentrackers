@@ -1332,10 +1332,39 @@ fun HolidaysScreen(
     onDataChanged: () -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    var holidayDate by remember { mutableStateOf("2026-10-15") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun currentDeviceIsoDate(): String {
+        return java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+    }
+
+    var holidayDate by remember { mutableStateOf(currentDeviceIsoDate()) }
     var holidayName by remember { mutableStateOf("") }
     var holidayType by remember { mutableStateOf("عطلة رسمية") }
     var holidayNotes by remember { mutableStateOf("") }
+
+    LaunchedEffect(Unit) {
+        if (holidayName.isBlank() && holidayNotes.isBlank()) {
+            holidayDate = currentDeviceIsoDate()
+        }
+    }
+
+    fun openHolidayDatePicker() {
+        val parts = holidayDate.trim().split("-")
+        val nowCal = java.util.Calendar.getInstance()
+        val initYear = parts.getOrNull(0)?.toIntOrNull() ?: nowCal.get(java.util.Calendar.YEAR)
+        val initMonth = (parts.getOrNull(1)?.toIntOrNull()?.minus(1))?.coerceIn(0, 11) ?: nowCal.get(java.util.Calendar.MONTH)
+        val initDay = parts.getOrNull(2)?.toIntOrNull()?.coerceIn(1, 31) ?: nowCal.get(java.util.Calendar.DAY_OF_MONTH)
+
+        android.app.DatePickerDialog(
+            context,
+            { _, year, monthOfYear, dayOfMonth ->
+                holidayDate = String.format(java.util.Locale.US, "%04d-%02d-%02d", year, monthOfYear + 1, dayOfMonth)
+            },
+            initYear,
+            initMonth,
+            initDay
+        ).show()
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -1375,13 +1404,25 @@ fun HolidaysScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("إضافة عطلة أو مناسبة جديدة", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Slate900)
-                    OutlinedTextField(
-                        value = holidayDate,
-                        onValueChange = { holidayDate = it },
-                        label = { Text("تاريخ العطلة (YYYY-MM-DD)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = holidayDate,
+                            onValueChange = { holidayDate = it },
+                            label = { Text("تاريخ العطلة (YYYY-MM-DD)") },
+                            trailingIcon = {
+                                IconButton(onClick = { openHolidayDatePicker() }) {
+                                    Icon(Icons.Default.CalendarMonth, contentDescription = "اختيار التاريخ من التقويم", tint = Teal700)
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clickable { openHolidayDatePicker() }
+                        )
+                    }
                     OutlinedTextField(
                         value = holidayName,
                         onValueChange = { holidayName = it },

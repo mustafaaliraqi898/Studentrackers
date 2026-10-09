@@ -24,7 +24,14 @@ export class TrackerRepository {
   }
 
   static canonicalArabicComparisonKey(name: string): string {
-    return this.normalizeStudentName(name).replace(/[\u064B-\u065F\u0670]/g, '');
+    return this.normalizeStudentName(name)
+      .replace(/[\u064B-\u065F\u0670]/g, '')
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .replace(/ؤ/g, 'و')
+      .replace(/ئ/g, 'ي')
+      .toLowerCase();
   }
 
   // ---------------- CLASSES ----------------

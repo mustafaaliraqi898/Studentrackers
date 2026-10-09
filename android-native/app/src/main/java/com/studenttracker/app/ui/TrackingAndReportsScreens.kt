@@ -260,7 +260,7 @@ fun DailyTrackingScreen(
         mutableStateOf<StudentEntity?>(null)
     }
 
-    var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
+    var searchQuery by remember(selectedClassId, selectedSectionId, selectedDate) { mutableStateOf("") }
 
     val filteredStudents = remember(students, searchQuery) {
         val q = TrackerRepository.normalizeStudentName(searchQuery)
@@ -268,9 +268,13 @@ fun DailyTrackingScreen(
             students
         } else {
             val qKey = TrackerRepository.canonicalArabicComparisonKey(q)
+            val qTokens = qKey.split(" ").filter { it.isNotEmpty() }
             students.filter { st ->
-                st.studentName.contains(q) ||
-                    TrackerRepository.canonicalArabicComparisonKey(st.studentName).contains(qKey)
+                val stNormalized = TrackerRepository.normalizeStudentName(st.studentName)
+                val stKey = TrackerRepository.canonicalArabicComparisonKey(st.studentName)
+                stNormalized.contains(q, ignoreCase = true) ||
+                    stKey.contains(qKey) ||
+                    (qTokens.isNotEmpty() && qTokens.all { tok -> stKey.contains(tok) })
             }
         }
     }
@@ -289,6 +293,7 @@ fun DailyTrackingScreen(
         entriesMap = updatedEntries
         savedEntriesSnapshot = repository.getSessionEntries(selectedClassId, selectedSectionId, selectedDate)
         hasSaved = true
+        isEditingSaved = true
         if (targetStatus == AttendanceStatus.ABSENT) {
             explicitlyTouchedPresentIds = explicitlyTouchedPresentIds - student.id
             showTopNotification(
@@ -1031,7 +1036,7 @@ fun DailyTrackingScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                placeholder = { Text("ابحث عن طالب بالاسم داخل الشعبة لتسجيل الغياب أو التقييم...") },
+                                placeholder = { Text("ابحث باسم الطالب أو جزء من اسمه داخل الشعبة...") },
                                 leadingIcon = {
                                     Icon(Icons.Default.Search, contentDescription = "بحث", tint = Teal700)
                                 },
@@ -1047,92 +1052,24 @@ fun DailyTrackingScreen(
                             )
 
                             if (searchQuery.trim().isNotEmpty()) {
-                                Text(
-                                    text = "نتائج البحث (${filteredStudents.size} طالب) — بدّل الحالة مباشرة مع الحفظ الفوري:",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Slate700
-                                )
-
-                                if (filteredStudents.isEmpty()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "لا يوجد طالب مطابق للاسم \"$searchQuery\" في هذه الشعبة",
+                                        text = if (filteredStudents.isEmpty()) {
+                                            "لا يوجد طالب مطابق للاسم \"$searchQuery\" في هذه الشعبة"
+                                        } else {
+                                            "نتائج البحث (${filteredStudents.size} من ${students.size} طالب) — يمكنك تسجيل الحضور/الغياب وتعديل جميع العناصر مباشرة:"
+                                        },
                                         fontSize = 12.sp,
-                                        color = Red700,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = if (filteredStudents.isEmpty()) Red700 else Slate700,
+                                        modifier = Modifier.weight(1f)
                                     )
-                                } else {
-                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        filteredStudents.forEach { st ->
-                                            val stEntry = entriesMap[st.id] ?: StudentDailyEntry(studentId = st.id)
-                                            val isAlreadyAbsent = stEntry.attendance == AttendanceStatus.ABSENT
-                                            val wasSavedInDb = savedEntriesSnapshot.containsKey(st.id)
-
-                                            Surface(
-                                                color = if (isAlreadyAbsent) Red50 else Slate50,
-                                                shape = RoundedCornerShape(10.dp),
-                                                border = BorderStroke(1.dp, if (isAlreadyAbsent) Red600 else Slate200),
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Row(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Column(modifier = Modifier.weight(1f)) {
-                                                        Text(
-                                                            text = "${st.studentName} — ${if (isAlreadyAbsent) "غائب" else "حاضر"}",
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            fontSize = 14.sp,
-                                                            color = Slate900,
-                                                            maxLines = 1,
-                                                            softWrap = false,
-                                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                                        )
-                                                        Text(
-                                                            text = when {
-                                                                isAlreadyAbsent -> "الحالة الحالية: غائب (درجة الحضور لليوم = 0 / 19)"
-                                                                wasSavedInDb -> "الحالة الحالية: حاضر (درجة الحضور لليوم = 19 / 19)"
-                                                                else -> "الحالة الحالية: حاضر افتراضياً (19 / 19)"
-                                                            },
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = if (isAlreadyAbsent) Red700 else Emerald700
-                                                        )
-                                                    }
-
-                                                    Spacer(modifier = Modifier.width(8.dp))
-
-                                                    if (isAlreadyAbsent) {
-                                                        Button(
-                                                            onClick = {
-                                                                executeImmediateAttendanceStatus(st, AttendanceStatus.PRESENT)
-                                                            },
-                                                            colors = ButtonDefaults.buttonColors(containerColor = Emerald600),
-                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                                        ) {
-                                                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text("حاضر", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                                                        }
-                                                    } else {
-                                                        Button(
-                                                            onClick = {
-                                                                requestMarkAbsentFromSearch(st)
-                                                            },
-                                                            colors = ButtonDefaults.buttonColors(containerColor = Red600),
-                                                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                                                        ) {
-                                                            Icon(Icons.Default.PersonOff, contentDescription = null, modifier = Modifier.size(15.dp))
-                                                            Spacer(modifier = Modifier.width(4.dp))
-                                                            Text("غائب", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                    TextButton(onClick = { searchQuery = "" }) {
+                                        Text("عرض الكل", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Teal700)
                                     }
                                 }
                             }
@@ -1300,14 +1237,15 @@ fun DailyTrackingScreen(
                                 }
                             }
 
-                            // Evaluations & Daily Quiz remain visible and editable even when the student is ABSENT
-                            val evalEnabled = canEdit
+                            // Evaluations & Daily Quiz remain visible and editable even when the student is ABSENT or when searching
+                            val evalEnabled = !dayStatus.isNonWorkingDay && (isEditingSaved || searchQuery.trim().isNotEmpty())
                             ThreeStateRatingRow(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
                                 scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
+                                    isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(participation = v))
                                     }
@@ -1320,6 +1258,7 @@ fun DailyTrackingScreen(
                                 enabled = evalEnabled,
                                 scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
+                                    isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(notebook = v))
                                     }
@@ -1332,6 +1271,7 @@ fun DailyTrackingScreen(
                                 enabled = evalEnabled,
                                 scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
+                                    isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(homework = v))
                                     }
@@ -1344,6 +1284,7 @@ fun DailyTrackingScreen(
                                 enabled = evalEnabled,
                                 scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)} / 19)",
                                 onValueChange = { v ->
+                                    isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
                                         put(st.id, entry.copy(behavior = v))
                                     }
@@ -1394,6 +1335,7 @@ fun DailyTrackingScreen(
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .clickable(enabled = evalEnabled) {
+                                                    isEditingSaved = true
                                                     val nextVal = if (isSel) null else sc
                                                     entriesMap = entriesMap.toMutableMap().apply {
                                                         put(st.id, entry.copy(dailyTestScore = nextVal))
@@ -3519,6 +3461,12 @@ fun AbsenceTrackingScreen(
             sectionId = if (filterClassId == null) null else filterSectionId,
             monthPrefix = "ALL"
         )
+            .filter { it.absentDays > 0 }
+            .sortedWith(
+                compareByDescending<StudentAbsenceSummary> { it.absentDays }
+                    .thenBy { it.attendancePercentage }
+                    .thenBy { it.studentName }
+            )
     }
 
     val exportAbsenceLauncher = rememberLauncherForActivityResult(
@@ -3728,7 +3676,7 @@ fun AbsenceTrackingScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "لا يوجد طلاب ضمن الفلتر المحدد حالياً",
+                        text = "لا يوجد طلاب لديهم غياب مسجل حالياً",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = Slate600,

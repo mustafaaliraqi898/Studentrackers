@@ -241,13 +241,9 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     const updatedDraftStudent: StudentDailyEntry =
       targetStatus === 'absent'
         ? {
+            ...currentDraftStudent,
             studentId: student.id,
             attendance: 'absent',
-            participation: null,
-            notebook: null,
-            homework: null,
-            behavior: null,
-            dailyTestScore: null,
           }
         : {
             ...currentDraftStudent,
@@ -258,13 +254,9 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     const updatedSavedStudent: StudentDailyEntry =
       targetStatus === 'absent'
         ? {
+            ...currentSavedStudent,
             studentId: student.id,
             attendance: 'absent',
-            participation: null,
-            notebook: null,
-            homework: null,
-            behavior: null,
-            dailyTestScore: null,
           }
         : {
             ...currentSavedStudent,
@@ -287,9 +279,6 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     nextDbEntries[student.id] = updatedSavedStudent;
 
     setDraftEntries(nextDraft);
-    if (targetStatus === 'absent') {
-      setDraftQuizStrings((prev) => ({ ...prev, [student.id]: '' }));
-    }
 
     await TrackerRepository.saveDailySession(
       currentClass.id,
@@ -299,6 +288,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     );
     setSavedEntriesMap(nextDbEntries);
     setIsSavedRecord(true);
+    setIsEditingSaved(true);
     setSavedDatesSet((prev) => new Set([...prev, selectedDate]));
     if (targetStatus === 'absent') {
       setExplicitlyMarkedPresentIds((prev) => {
@@ -340,12 +330,17 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     }
   };
 
+  // Clear search text when Class, Section, or Date changes
+  useEffect(() => {
+    setSearchText('');
+  }, [currentClass?.id, currentSection?.id, selectedDate]);
+
   useEffect(() => {
     registerPendingSaveHandler(handleSaveSession);
   });
 
   const isLocked =
-    dayStatus.isNonWorkingDay || (isSavedRecord && !isEditingSaved);
+    dayStatus.isNonWorkingDay || (isSavedRecord && !isEditingSaved && searchText.trim() === '');
 
   const updateAttendance = (studentId: number, status: AttendanceStatus) => {
     if (dayStatus.isNonWorkingDay) return;
@@ -364,7 +359,8 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     field: 'participation' | 'notebook' | 'homework' | 'behavior',
     value: RatingValue
   ) => {
-    if (isLocked) return;
+    if (dayStatus.isNonWorkingDay) return;
+    if (!isEditingSaved) setIsEditingSaved(true);
     setDraftEntries((prev) => ({
       ...prev,
       [studentId]: {
@@ -377,7 +373,8 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
   };
 
   const updateQuizInput = (studentId: number, rawVal: string) => {
-    if (isLocked) return;
+    if (dayStatus.isNonWorkingDay) return;
+    if (!isEditingSaved) setIsEditingSaved(true);
     if (rawVal === '') {
       setDraftQuizStrings((prev) => ({ ...prev, [studentId]: '' }));
       setDraftEntries((prev) => ({
@@ -404,6 +401,27 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
       setIsDirty(true);
     }
   };
+
+  const matchesStudentSearch = (studentName: string, query: string): boolean => {
+    const q = TrackerRepository.normalizeStudentName(query);
+    if (!q) return true;
+    const qKey = TrackerRepository.canonicalArabicComparisonKey(q);
+    const qTokens = qKey.split(' ').filter(Boolean);
+    const stNorm = TrackerRepository.normalizeStudentName(studentName);
+    const stKey = TrackerRepository.canonicalArabicComparisonKey(studentName);
+    return (
+      stNorm.includes(q) ||
+      stKey.includes(qKey) ||
+      (qTokens.length > 0 && qTokens.every((tok) => stKey.includes(tok)))
+    );
+  };
+
+  const filteredStudents = sectionStudents.filter((st) => {
+    const matchesSearch = matchesStudentSearch(st.studentName, searchText);
+    const entry = draftEntries[st.id] || createDefaultStudentEntry(st.id);
+    const matchesAbsent = !showAbsentOnly || entry.attendance === 'absent';
+    return matchesSearch && matchesAbsent;
+  });
 
   const allQuickDates = Array.from(
     new Set([...QUICK_OCT_DATES, ...Array.from(savedDatesSet), selectedDate])
@@ -617,7 +635,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                   type="text"
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="بحث عن طالب داخل الشعبة لتسجيله غائباً مباشرة (اكتب الاسم أو جزءاً منه)..."
+                  placeholder="ابحث باسم الطالب كاملاً أو بجزء من اسمه داخل الصف والشعبة..."
                   className="w-full min-h-[44px] px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white"
                 />
                 {searchText && (
@@ -660,96 +678,28 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
             </div>
 
             {searchText.trim() !== '' && (
-              <div className="pt-2 border-t border-slate-100 space-y-2">
-                <p className="text-xs font-extrabold text-slate-700">
-                  نتائج البحث السريع — بدّل الحالة مباشرة بين حاضر وغائب مع الحفظ الفوري في قاعدة البيانات:
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <p
+                  className={`text-xs font-extrabold ${
+                    filteredStudents.length === 0 ? 'text-rose-700' : 'text-slate-700'
+                  }`}
+                >
+                  {filteredStudents.length === 0
+                    ? `لا يوجد طالب مطابق للاسم "${searchText}" في هذه الشعبة`
+                    : `نتائج البحث (${filteredStudents.length} من ${sectionStudents.length} طالب) — يمكنك تسجيل الحضور/الغياب وتعديل جميع العناصر مباشرة:`}
                 </p>
-                {sectionStudents.filter((st) =>
-                  st.studentName.includes(searchText.trim())
-                ).length === 0 ? (
-                  <p className="text-xs font-bold text-rose-700 py-2">
-                    لا يوجد طالب مطابق للاسم &quot;{searchText}&quot; في هذه الشعبة
-                  </p>
-                ) : (
-                  <div className="space-y-1.5">
-                    {sectionStudents
-                      .filter((st) => st.studentName.includes(searchText.trim()))
-                      .map((st) => {
-                        const stEntry =
-                          draftEntries[st.id] || createDefaultStudentEntry(st.id);
-                        const isAlreadyAbsent = stEntry.attendance === 'absent';
-                        const wasSavedInDb = Boolean(savedEntriesMap[st.id]);
-
-                        return (
-                          <div
-                            key={`search-quick-${st.id}`}
-                            className={`p-2.5 rounded-xl border flex items-center justify-between gap-3 ${
-                              isAlreadyAbsent
-                                ? 'bg-rose-50/80 border-rose-200'
-                                : 'bg-slate-50 border-slate-200/80'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-extrabold text-slate-900 truncate">
-                                {st.studentName} — {isAlreadyAbsent ? 'غائب' : 'حاضر'}
-                              </p>
-                              <p
-                                className={`text-[11px] font-bold mt-0.5 ${
-                                  isAlreadyAbsent
-                                    ? 'text-rose-700'
-                                    : 'text-emerald-700'
-                                }`}
-                              >
-                                {isAlreadyAbsent
-                                  ? 'الحالة الحالية: غائب (درجة حضور اليوم = 0)'
-                                  : wasSavedInDb
-                                  ? 'الحالة الحالية: حاضر (درجة حضور اليوم = 19)'
-                                  : 'الحالة الحالية: غير مسجل / حاضر افتراضياً (19)'}
-                              </p>
-                            </div>
-
-                            {isAlreadyAbsent ? (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  executeImmediateAttendanceStatus(st, 'present')
-                                }
-                                className="min-h-[38px] px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
-                              >
-                                <UserCheck className="w-4 h-4" />
-                                <span>حاضر</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleQuickAbsentFromSearch(st)}
-                                className="min-h-[38px] px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors shrink-0 shadow-2xs"
-                              >
-                                <UserX className="w-4 h-4" />
-                                <span>غائب</span>
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setSearchText('')}
+                  className="text-xs font-extrabold text-emerald-700 hover:text-emerald-800 shrink-0"
+                >
+                  عرض الكل
+                </button>
               </div>
             )}
           </div>
 
-          {sectionStudents
-            .filter((st) => {
-              const matchesSearch =
-                !searchText.trim() ||
-                st.studentName.includes(searchText.trim());
-              const entry =
-                draftEntries[st.id] || createDefaultStudentEntry(st.id);
-              const matchesAbsent =
-                !showAbsentOnly || entry.attendance === 'absent';
-              return matchesSearch && matchesAbsent;
-            })
-            .map((student, index) => {
+          {filteredStudents.map((student, index) => {
             const entry =
               draftEntries[student.id] || createDefaultStudentEntry(student.id);
             const rawQuizStr = draftQuizStrings[student.id] ?? '';

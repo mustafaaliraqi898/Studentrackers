@@ -32,6 +32,15 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             val base = normalizeStudentName(name)
             val withoutTashkeel = base.replace(Regex("[\\u064B-\\u065F\\u0670]"), "")
             return withoutTashkeel
+                .replace('أ', 'ا')
+                .replace('إ', 'ا')
+                .replace('آ', 'ا')
+                .replace('ٱ', 'ا')
+                .replace('ة', 'ه')
+                .replace('ى', 'ي')
+                .replace('ؤ', 'و')
+                .replace('ئ', 'ي')
+                .lowercase()
         }
     }
 

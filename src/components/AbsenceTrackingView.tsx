@@ -58,7 +58,18 @@ export const AbsenceTrackingView: React.FC<AbsenceTrackingViewProps> = ({
         'ALL'
       );
       if (!active) return;
-      setSummaries(list);
+      const filteredAndSorted = list
+        .filter((item) => item.absentDays > 0)
+        .sort((a, b) => {
+          if (b.absentDays !== a.absentDays) {
+            return b.absentDays - a.absentDays;
+          }
+          if (a.attendancePercentage !== b.attendancePercentage) {
+            return a.attendancePercentage - b.attendancePercentage;
+          }
+          return a.studentName.localeCompare(b.studentName, 'ar');
+        });
+      setSummaries(filteredAndSorted);
     }
     loadAbsenceSummaries();
     return () => {
@@ -199,7 +210,7 @@ export const AbsenceTrackingView: React.FC<AbsenceTrackingViewProps> = ({
 
         {summaries.length === 0 ? (
           <div className="p-6 text-center text-xs font-bold text-slate-500">
-            لا يوجد طلاب ضمن الفلتر المحدد حالياً
+            لا يوجد طلاب لديهم غياب مسجل حالياً
           </div>
         ) : (
           <div className="divide-y divide-slate-200/70">
