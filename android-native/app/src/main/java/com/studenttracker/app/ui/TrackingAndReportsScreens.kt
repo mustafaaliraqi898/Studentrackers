@@ -2451,6 +2451,134 @@ fun StudentProfileScreen(
                 ProfileHistoryCard("سجل الاختبارات اليومية (من 5)", grade.dailyTests, isTest = true)
             }
         }
+
+        // Daily Plans linked to this student's Class + Section (independent section, shown per day)
+        item {
+            val studentDailyPlans = remember(refreshTick, localTick, grade.classId, grade.sectionId, selectedPeriodId, studyPeriods) {
+                val allPlans = repository.getDailyPlansForClassAndSection(grade.classId, grade.sectionId)
+                val activePeriod = studyPeriods.firstOrNull { it.id == selectedPeriodId }
+                if (activePeriod != null) {
+                    allPlans.filter { p ->
+                        p.planDate >= activePeriod.startDate &&
+                            (activePeriod.endDate.isNullOrBlank() || p.planDate <= activePeriod.endDate)
+                    }
+                } else {
+                    allPlans
+                }
+            }
+            var previewPlanImage by remember { mutableStateOf<DailyPlanImageEntity?>(null) }
+
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "الخطة اليومية للدروس (${grade.className} — شعبة ${grade.sectionName})",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = Slate900
+                            )
+                            Text(
+                                text = "مواضيع الدروس والصور المرفقة حسب التاريخ والصف والشعبة",
+                                fontSize = 11.sp,
+                                color = Slate600
+                            )
+                        }
+                        Surface(
+                            color = Teal50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Teal600)
+                        ) {
+                            Text(
+                                text = "${studentDailyPlans.size} خطة",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Teal700,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    if (studentDailyPlans.isEmpty()) {
+                        Text(
+                            text = "لا توجد خطط يومية مسجلة لهذا الصف والشعبة حالياً.",
+                            fontSize = 12.sp,
+                            color = Slate500
+                        )
+                    } else {
+                        studentDailyPlans.forEach { plan ->
+                            Surface(
+                                color = Slate50,
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Slate200),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "${GradingService.getArabicDayName(plan.planDate)} ${GradingService.formatDisplayDate(plan.planDate)}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Teal700
+                                        )
+                                        Text(
+                                            text = "${plan.className} • شعب: ${plan.sectionNames.joinToString("، ")}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Slate600
+                                        )
+                                    }
+                                    Text(
+                                        text = plan.lessonTopic,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Slate900
+                                    )
+                                    if (plan.images.isNotEmpty()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            plan.images.forEach { img ->
+                                                DailyPlanThumbnailItem(
+                                                    imageEntity = img,
+                                                    onClick = { previewPlanImage = img }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (previewPlanImage != null) {
+                DailyPlanFullScreenImageDialog(
+                    imageEntity = previewPlanImage!!,
+                    onDismiss = { previewPlanImage = null }
+                )
+            }
+        }
     }
 
     // Written Exam Entry/Edit Dialog
@@ -5950,4 +6078,1096 @@ fun PeriodComparisonScreen(
     }
 }
 
+// ============================================================================
+// DAILY PLAN SCREEN ("الخطة اليومية" - Independent Section for All Classes & Sections)
+// ============================================================================
+private data class DraftPlanImageItem(
+    val fileName: String,
+    val imageBase64: String
+)
 
+private fun decodePlanBitmap(
+    context: android.content.Context,
+    repository: TrackerRepository,
+    fileName: String,
+    imageBase64: String
+): androidx.compose.ui.graphics.ImageBitmap? {
+    return runCatching {
+        val dir = repository.getDailyPlanImagesDir(context)
+        val file = if (fileName.isNotBlank()) java.io.File(dir, fileName) else null
+        val bmp = if (file != null && file.exists() && file.length() > 0L) {
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+        } else if (imageBase64.isNotBlank()) {
+            val bytes = android.util.Base64.decode(imageBase64, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } else {
+            null
+        }
+        bmp?.let { androidx.compose.ui.graphics.asImageBitmap(it) }
+    }.getOrNull()
+}
+
+private fun encodeUriToCompressedBase64(
+    context: android.content.Context,
+    uri: android.net.Uri
+): Pair<String, String>? {
+    return runCatching {
+        val rawBytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+        val originalBmp = android.graphics.BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return null
+        val maxDim = 1280
+        val w = originalBmp.width
+        val h = originalBmp.height
+        val scaledBmp = if (w > maxDim || h > maxDim) {
+            val ratio = minOf(maxDim.toFloat() / w.toFloat(), maxDim.toFloat() / h.toFloat())
+            val nw = (w * ratio).toInt().coerceAtLeast(1)
+            val nh = (h * ratio).toInt().coerceAtLeast(1)
+            android.graphics.Bitmap.createScaledBitmap(originalBmp, nw, nh, true)
+        } else {
+            originalBmp
+        }
+        val baos = java.io.ByteArrayOutputStream()
+        scaledBmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, baos)
+        val compressedBytes = baos.toByteArray()
+        val b64 = android.util.Base64.encodeToString(compressedBytes, android.util.Base64.NO_WRAP)
+        val fileName = "plan_img_${System.currentTimeMillis()}_${(1000..9999).random()}.jpg"
+        fileName to b64
+    }.getOrNull()
+}
+
+@Composable
+fun DailyPlanThumbnailItem(
+    imageEntity: DailyPlanImageEntity,
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null
+) {
+    val context = LocalContext.current
+    val dbHelper = remember { AppDatabaseHelper.getInstance(context) }
+    val repository = remember { TrackerRepository(dbHelper) }
+    val imageBitmap = remember(imageEntity.fileName, imageEntity.imageBase64) {
+        decodePlanBitmap(context, repository, imageEntity.fileName, imageEntity.imageBase64)
+    }
+
+    Box(
+        modifier = Modifier
+            .size(84.dp)
+    ) {
+        Surface(
+            color = Slate100,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable { onClick() }
+        ) {
+            if (imageBitmap != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = imageBitmap,
+                    contentDescription = "صورة الدرس",
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("صورة", fontSize = 11.sp, color = Slate500, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        if (onDelete != null) {
+            Surface(
+                color = Red600,
+                shape = RoundedCornerShape(50),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .size(22.dp)
+                    .clickable { onDelete() }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "حذف الصورة",
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyPlanFullScreenImageDialog(
+    imageEntity: DailyPlanImageEntity,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val dbHelper = remember { AppDatabaseHelper.getInstance(context) }
+    val repository = remember { TrackerRepository(dbHelper) }
+    val imageBitmap = remember(imageEntity.fileName, imageEntity.imageBase64) {
+        decodePlanBitmap(context, repository, imageEntity.fileName, imageEntity.imageBase64)
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            color = Color(0xEE0F172A),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "معاينة صورة الدرس",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(containerColor = Red600),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("إغلاق", fontWeight = FontWeight.ExtraBold)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (imageBitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = imageBitmap,
+                            contentDescription = "صورة الدرس بالحجم الكامل",
+                            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Text(
+                            text = "تعذر عرض الصورة",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DailyPlanScreen(
+    classes: List<ClassEntity>,
+    sections: List<SectionEntity>,
+    repository: TrackerRepository,
+    refreshTick: Int,
+    onDataChanged: () -> Unit,
+    onShowMessage: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var localTick by remember { mutableIntStateOf(0) }
+
+    // Form State (Create or Edit Plan)
+    var editingPlanId by remember { mutableStateOf<Long?>(null) }
+    var formDate by remember {
+        mutableStateOf(java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString())
+    }
+    var formClassId by remember(classes) {
+        mutableLongStateOf(classes.firstOrNull()?.id ?: 0L)
+    }
+    LaunchedEffect(classes) {
+        if (classes.isNotEmpty() && classes.none { it.id == formClassId }) {
+            formClassId = classes.first().id
+        }
+    }
+    val formClassSections = remember(sections, formClassId) {
+        sections.filter { it.classId == formClassId }
+    }
+    var formSelectedSectionIds by remember {
+        mutableStateOf<Set<Long>>(emptySet())
+    }
+    LaunchedEffect(formClassId, formClassSections) {
+        val validIds = formClassSections.map { it.id }.toSet()
+        val intersection = formSelectedSectionIds.intersect(validIds)
+        formSelectedSectionIds = if (intersection.isNotEmpty()) {
+            intersection
+        } else if (editingPlanId == null && formClassSections.isNotEmpty()) {
+            setOf(formClassSections.first().id)
+        } else {
+            emptySet()
+        }
+    }
+
+    var formLessonTopic by remember { mutableStateOf("") }
+    var formImages by remember { mutableStateOf<List<DraftPlanImageItem>>(emptyList()) }
+    var formError by remember { mutableStateOf<String?>(null) }
+
+    // Filter State for Saved Daily Plans
+    var filterDate by remember { mutableStateOf("") } // empty = جميع التواريخ
+    var filterClassId by remember { mutableStateOf<Long?>(null) } // null = جميع الصفوف
+    var filterSectionId by remember { mutableStateOf<Long?>(null) } // null = جميع الشعب
+    var searchTopicQuery by remember { mutableStateOf("") }
+
+    val filterAvailableSections = remember(sections, filterClassId) {
+        if (filterClassId == null) emptyList() else sections.filter { it.classId == filterClassId }
+    }
+    LaunchedEffect(filterClassId, filterAvailableSections) {
+        if (filterClassId == null) {
+            filterSectionId = null
+        } else if (filterSectionId != null && filterAvailableSections.none { it.id == filterSectionId }) {
+            filterSectionId = null
+        }
+    }
+
+    val savedPlans = remember(
+        refreshTick,
+        localTick,
+        filterDate,
+        filterClassId,
+        filterSectionId,
+        searchTopicQuery,
+        classes,
+        sections
+    ) {
+        repository.getDailyPlans(
+            filterDate = filterDate.takeIf { it.isNotBlank() },
+            filterClassId = filterClassId,
+            filterSectionId = filterSectionId,
+            searchTopic = searchTopicQuery.takeIf { it.isNotBlank() }
+        )
+    }
+
+    var previewImage by remember { mutableStateOf<DailyPlanImageEntity?>(null) }
+    var pendingDeletePlan by remember { mutableStateOf<DailyPlanEntity?>(null) }
+
+    // Multi-image picker from phone storage
+    val pickMultipleImagesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val encoded = uris.mapNotNull { u ->
+                encodeUriToCompressedBase64(context, u)?.let { (fName, b64) ->
+                    DraftPlanImageItem(fileName = fName, imageBase64 = b64)
+                }
+            }
+            if (encoded.isNotEmpty()) {
+                formImages = formImages + encoded
+                formError = null
+            } else {
+                onShowMessage("تعذر قراءة الصور المختارة")
+            }
+        }
+    }
+
+    fun openDatePickerDialog(initialIso: String, onPicked: (String) -> Unit) {
+        val parsed = runCatching { java.time.LocalDate.parse(initialIso) }
+            .getOrElse { java.time.LocalDate.now(java.time.ZoneId.systemDefault()) }
+        android.app.DatePickerDialog(
+            context,
+            { _, year, monthZeroBased, dayOfMonth ->
+                val picked = java.time.LocalDate.of(year, monthZeroBased + 1, dayOfMonth).toString()
+                onPicked(picked)
+            },
+            parsed.year,
+            parsed.monthValue - 1,
+            parsed.dayOfMonth
+        ).show()
+    }
+
+    fun resetFormToNew() {
+        editingPlanId = null
+        formDate = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+        val firstCls = classes.firstOrNull()?.id ?: 0L
+        formClassId = firstCls
+        val firstSec = sections.firstOrNull { it.classId == firstCls }?.id
+        formSelectedSectionIds = if (firstSec != null) setOf(firstSec) else emptySet()
+        formLessonTopic = ""
+        formImages = emptyList()
+        formError = null
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // 1. Header Banner
+        item {
+            Surface(
+                color = Slate900,
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "الخطة اليومية للدروس",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Text(
+                                text = "قسم مستقل يدعم جميع الصفوف والشعب مع إرفاق عدد غير محدود من الصور",
+                                color = Teal100,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Surface(
+                            color = Emerald700,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                text = "${savedPlans.size} خطة محفوظة",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Create / Edit Daily Plan Form Card
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, if (editingPlanId != null) Amber600 else Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (editingPlanId != null) "تعديل الخطة اليومية" else "إضافة خطة يومية جديدة",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 15.sp,
+                            color = if (editingPlanId != null) Amber700 else Slate900
+                        )
+                        if (editingPlanId != null) {
+                            TextButton(onClick = { resetFormToNew() }) {
+                                Text("إلغاء التعديل", color = Red600, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+
+                    if (formError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = formError!!,
+                                color = Red700,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+
+                    // Date Picker Field
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "1. التاريخ:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate800
+                        )
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    openDatePickerDialog(formDate) { picked ->
+                                        formDate = picked
+                                        formError = null
+                                    }
+                                }
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${GradingService.getArabicDayName(formDate)} — ${GradingService.formatDisplayDate(formDate)}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate900
+                                )
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = Teal700)
+                            }
+                        }
+                    }
+
+                    // Class Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "2. الصف الدراسي:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate800
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            classes.forEach { cls ->
+                                val isSel = formClassId == cls.id
+                                Surface(
+                                    color = if (isSel) Slate900 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable {
+                                        if (formClassId != cls.id) {
+                                            formClassId = cls.id
+                                            val secs = sections.filter { it.classId == cls.id }
+                                            formSelectedSectionIds = if (secs.isNotEmpty()) setOf(secs.first().id) else emptySet()
+                                            formError = null
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = cls.className,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Multi-Section Selector (supports selecting one or multiple sections of the same class)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "3. الشعبة أو الشعب المشمولة بالخطة (يمكن اختيار أكثر من شعبة):",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate800,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (formClassSections.size > 1) {
+                                val allSelected = formSelectedSectionIds.size == formClassSections.size
+                                TextButton(
+                                    onClick = {
+                                        formSelectedSectionIds = if (allSelected) {
+                                            emptySet()
+                                        } else {
+                                            formClassSections.map { it.id }.toSet()
+                                        }
+                                        formError = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (allSelected) "إلغاء تحديد الكل" else "تحديد كل الشعب",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Teal700
+                                    )
+                                }
+                            }
+                        }
+
+                        if (formClassSections.isEmpty()) {
+                            Text("لا توجد شعب مضافة لهذا الصف", fontSize = 12.sp, color = Slate500)
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                formClassSections.forEach { sec ->
+                                    val isChecked = sec.id in formSelectedSectionIds
+                                    Surface(
+                                        color = if (isChecked) Teal700 else Slate100,
+                                        contentColor = if (isChecked) Color.White else Slate800,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, if (isChecked) Teal700 else Slate200),
+                                        modifier = Modifier.clickable {
+                                            formSelectedSectionIds = if (isChecked) {
+                                                formSelectedSectionIds - sec.id
+                                            } else {
+                                                formSelectedSectionIds + sec.id
+                                            }
+                                            formError = null
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isChecked) Icons.Default.CheckCircle else Icons.Default.Add,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Text(
+                                                text = "شعبة ${sec.sectionName}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.ExtraBold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Lesson Topic Text Input
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "4. عنوان الدرس أو الموضوع:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate800
+                        )
+                        OutlinedTextField(
+                            value = formLessonTopic,
+                            onValueChange = {
+                                formLessonTopic = it
+                                formError = null
+                            },
+                            placeholder = { Text("اكتب عنوان الدرس، الموضوع، أو تفاصيل الخطة اليومية...") },
+                            minLines = 3,
+                            maxLines = 6,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Unlimited Images Attachment Section
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "5. صور الدرس المرفقة (${formImages.size} صورة):",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate800
+                                )
+                                Text(
+                                    text = "يمكنك إرفاق عدة صور للدرس الواحد من الهاتف ومعاينتها أو حذف أي صورة",
+                                    fontSize = 11.sp,
+                                    color = Slate500
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = { pickMultipleImagesLauncher.launch("image/*") },
+                                shape = RoundedCornerShape(10.dp),
+                                border = BorderStroke(1.dp, Teal700)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, tint = Teal700, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("إضافة صور", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Teal700)
+                            }
+                        }
+
+                        if (formImages.isNotEmpty()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                formImages.forEachIndexed { idx, draftImg ->
+                                    val tempEntity = DailyPlanImageEntity(
+                                        id = idx.toLong(),
+                                        planId = editingPlanId ?: 0L,
+                                        fileName = draftImg.fileName,
+                                        imageBase64 = draftImg.imageBase64,
+                                        sortOrder = idx,
+                                        createdDate = ""
+                                    )
+                                    DailyPlanThumbnailItem(
+                                        imageEntity = tempEntity,
+                                        onClick = { previewImage = tempEntity },
+                                        onDelete = {
+                                            formImages = formImages.filterIndexed { i, _ -> i != idx }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Save Button
+                    Button(
+                        onClick = {
+                            val orderedSecIds = formClassSections
+                                .filter { it.id in formSelectedSectionIds }
+                                .map { it.id }
+                            val (_, err) = repository.saveDailyPlan(
+                                context = context,
+                                existingPlanId = editingPlanId,
+                                planDate = formDate,
+                                classId = formClassId,
+                                sectionIds = orderedSecIds,
+                                lessonTopic = formLessonTopic,
+                                images = formImages.map { it.fileName to it.imageBase64 }
+                            )
+                            if (err != null) {
+                                formError = err
+                            } else {
+                                val wasEditing = editingPlanId != null
+                                resetFormToNew()
+                                localTick++
+                                onDataChanged()
+                                onShowMessage(
+                                    if (wasEditing) "تم حفظ تعديلات الخطة اليومية بنجاح"
+                                    else "تم حفظ الخطة اليومية في قاعدة البيانات بنجاح"
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (editingPlanId != null) Amber700 else Emerald600
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (editingPlanId != null) "حفظ التعديلات على الخطة" else "حفظ الخطة اليومية",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Search & Filters Card for Saved Plans
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "الفلترة والبحث في الخطط المحفوظة",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = Slate900
+                        )
+                        if (filterDate.isNotBlank() || filterClassId != null || filterSectionId != null || searchTopicQuery.isNotBlank()) {
+                            TextButton(
+                                onClick = {
+                                    filterDate = ""
+                                    filterClassId = null
+                                    filterSectionId = null
+                                    searchTopicQuery = ""
+                                }
+                            ) {
+                                Text("إعادة ضبط الفلاتر", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Teal700)
+                            }
+                        }
+                    }
+
+                    // Search by Lesson Topic
+                    OutlinedTextField(
+                        value = searchTopicQuery,
+                        onValueChange = { searchTopicQuery = it },
+                        placeholder = { Text("بحث في عنوان الدرس أو الموضوع...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Teal700) },
+                        trailingIcon = {
+                            if (searchTopicQuery.isNotBlank()) {
+                                IconButton(onClick = { searchTopicQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "مسح")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Filter by Date
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("التاريخ:", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Slate800)
+                        Surface(
+                            color = if (filterDate.isBlank()) Slate900 else Slate100,
+                            contentColor = if (filterDate.isBlank()) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable { filterDate = "" }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        Surface(
+                            color = if (filterDate.isNotBlank()) Teal700 else Slate100,
+                            contentColor = if (filterDate.isNotBlank()) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                val init = filterDate.ifBlank {
+                                    java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
+                                }
+                                openDatePickerDialog(init) { picked -> filterDate = picked }
+                            }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Text(
+                                    text = if (filterDate.isNotBlank()) GradingService.formatDisplayDate(filterDate) else "تحديد تاريخ",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Filter by Class
+                    Text("الصف:", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Slate800)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (filterClassId == null) Slate900 else Slate100,
+                            contentColor = if (filterClassId == null) Color.White else Slate800,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.clickable {
+                                filterClassId = null
+                                filterSectionId = null
+                            }
+                        ) {
+                            Text(
+                                text = "الكل",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                        classes.forEach { cls ->
+                            val isSel = filterClassId == cls.id
+                            Surface(
+                                color = if (isSel) Slate900 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable {
+                                    filterClassId = cls.id
+                                    filterSectionId = null
+                                }
+                            ) {
+                                Text(
+                                    text = cls.className,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Filter by Section (when Class is selected)
+                    if (filterClassId != null && filterAvailableSections.isNotEmpty()) {
+                        Text("الشعبة:", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Slate800)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Surface(
+                                color = if (filterSectionId == null) Teal700 else Slate100,
+                                contentColor = if (filterSectionId == null) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { filterSectionId = null }
+                            ) {
+                                Text(
+                                    text = "الكل",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                )
+                            }
+                            filterAvailableSections.forEach { sec ->
+                                val isSel = filterSectionId == sec.id
+                                Surface(
+                                    color = if (isSel) Teal700 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable { filterSectionId = sec.id }
+                                ) {
+                                    Text(
+                                        text = "شعبة ${sec.sectionName}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Saved Daily Plans List
+        if (savedPlans.isEmpty()) {
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "لا توجد خطط يومية محفوظة تطابق البحث أو الفلتر المحدد حالياً.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Slate600,
+                        modifier = Modifier.padding(18.dp)
+                    )
+                }
+            }
+        } else {
+            items(savedPlans, key = { it.id }) { plan ->
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = "${GradingService.getArabicDayName(plan.planDate)} — ${GradingService.formatDisplayDate(plan.planDate)}",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp,
+                                    color = Teal700
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(color = Slate900, shape = RoundedCornerShape(6.dp)) {
+                                        Text(
+                                            text = plan.className,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Surface(
+                                        color = Teal50,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, Teal600)
+                                    ) {
+                                        Text(
+                                            text = "الشعب: ${plan.sectionNames.joinToString("، ")}",
+                                            color = Teal700,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        editingPlanId = plan.id
+                                        formDate = plan.planDate
+                                        formClassId = plan.classId
+                                        formSelectedSectionIds = plan.sectionIds.toSet()
+                                        formLessonTopic = plan.lessonTopic
+                                        formImages = plan.images.map {
+                                            DraftPlanImageItem(fileName = it.fileName, imageBase64 = it.imageBase64)
+                                        }
+                                        formError = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = "تعديل", modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("تعديل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = { pendingDeletePlan = plan },
+                                    border = BorderStroke(1.dp, Red600),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = "حذف", tint = Red600, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("حذف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Red700)
+                                }
+                            }
+                        }
+
+                        Surface(
+                            color = Slate50,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Slate200),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = plan.lessonTopic,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate900,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+
+                        if (plan.images.isNotEmpty()) {
+                            Text(
+                                text = "الصور المرفقة (${plan.images.size}) — اضغط على أي صورة لعرضها بالحجم الكامل:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Slate600
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                plan.images.forEach { img ->
+                                    DailyPlanThumbnailItem(
+                                        imageEntity = img,
+                                        onClick = { previewImage = img }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (previewImage != null) {
+        DailyPlanFullScreenImageDialog(
+            imageEntity = previewImage!!,
+            onDismiss = { previewImage = null }
+        )
+    }
+
+    if (pendingDeletePlan != null) {
+        val target = pendingDeletePlan!!
+        AlertDialog(
+            onDismissRequest = { pendingDeletePlan = null },
+            title = {
+                Text("تأكيد حذف الخطة اليومية", fontWeight = FontWeight.ExtraBold, color = Red700)
+            },
+            text = {
+                Text(
+                    text = "هل أنت متأكد من حذف الخطة اليومية لتاريخ ${GradingService.formatDisplayDate(target.planDate)} (${target.className} — الشعب: ${target.sectionNames.joinToString("، ")})؟\nسيتم حذف الخطة وجميع الصور المرفقة بها.",
+                    fontSize = 13.sp,
+                    color = Slate800
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        repository.deleteDailyPlan(context, target.id)
+                        if (editingPlanId == target.id) {
+                            resetFormToNew()
+                        }
+                        pendingDeletePlan = null
+                        localTick++
+                        onDataChanged()
+                        onShowMessage("تم حذف الخطة اليومية بنجاح")
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Red600)
+                ) {
+                    Text("تأكيد الحذف", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletePlan = null }) {
+                    Text("إلغاء", fontWeight = FontWeight.Bold, color = Slate700)
+                }
+            }
+        )
+    }
+}

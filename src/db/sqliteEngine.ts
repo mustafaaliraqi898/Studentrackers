@@ -8,7 +8,7 @@ let sqlPromise: Promise<SqlJsStatic> | null = null;
 let dbInstance: Database | null = null;
 let lastMigrationWarning: string | null = null;
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export function getLastMigrationWarning(): string | null {
   return lastMigrationWarning;
@@ -146,6 +146,35 @@ CREATE TABLE IF NOT EXISTS PeriodGrades (
   UNIQUE(StudentID, PeriodID)
 );
 
+CREATE TABLE IF NOT EXISTS DailyPlans (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  PlanDate TEXT NOT NULL,
+  ClassID INTEGER NOT NULL,
+  LessonTopic TEXT NOT NULL,
+  CreatedDate TEXT NOT NULL,
+  UpdatedDate TEXT NOT NULL,
+  FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS DailyPlanSections (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  PlanID INTEGER NOT NULL,
+  SectionID INTEGER NOT NULL,
+  FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE,
+  FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+  UNIQUE(PlanID, SectionID)
+);
+
+CREATE TABLE IF NOT EXISTS DailyPlanImages (
+  ID INTEGER PRIMARY KEY AUTOINCREMENT,
+  PlanID INTEGER NOT NULL,
+  FileName TEXT NOT NULL,
+  ImageBase64 TEXT NOT NULL DEFAULT '',
+  SortOrder INTEGER NOT NULL DEFAULT 0,
+  CreatedDate TEXT NOT NULL,
+  FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE
+);
+
 CREATE INDEX IF NOT EXISTS idx_sections_class ON Sections(ClassID);
 CREATE INDEX IF NOT EXISTS idx_students_class_sec ON Students(ClassID, SectionID);
 CREATE INDEX IF NOT EXISTS idx_students_name ON Students(StudentName);
@@ -163,6 +192,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_studyperiods_single_open ON StudyPeriods(S
 CREATE INDEX IF NOT EXISTS idx_periodgrades_student ON PeriodGrades(StudentID);
 CREATE INDEX IF NOT EXISTS idx_periodgrades_period ON PeriodGrades(PeriodID);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_periodgrades_unique_student_period ON PeriodGrades(StudentID, PeriodID);
+CREATE INDEX IF NOT EXISTS idx_dailyplans_date_class ON DailyPlans(PlanDate, ClassID);
+CREATE INDEX IF NOT EXISTS idx_dailyplansections_plan ON DailyPlanSections(PlanID);
+CREATE INDEX IF NOT EXISTS idx_dailyplansections_sec ON DailyPlanSections(SectionID);
+CREATE INDEX IF NOT EXISTS idx_dailyplanimages_plan ON DailyPlanImages(PlanID, SortOrder);
 `;
 
 function openIndexedDB(): Promise<IDBDatabase> {
@@ -432,6 +465,56 @@ function runMigrations(db: Database): void {
       );
     } catch (err) {
       console.warn('Migration v7 warning:', err);
+    }
+  }
+
+  if (currentVer < 8) {
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS DailyPlans (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          PlanDate TEXT NOT NULL,
+          ClassID INTEGER NOT NULL,
+          LessonTopic TEXT NOT NULL,
+          CreatedDate TEXT NOT NULL,
+          UpdatedDate TEXT NOT NULL,
+          FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS DailyPlanSections (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          PlanID INTEGER NOT NULL,
+          SectionID INTEGER NOT NULL,
+          FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE,
+          FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+          UNIQUE(PlanID, SectionID)
+        );
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS DailyPlanImages (
+          ID INTEGER PRIMARY KEY AUTOINCREMENT,
+          PlanID INTEGER NOT NULL,
+          FileName TEXT NOT NULL,
+          ImageBase64 TEXT NOT NULL DEFAULT '',
+          SortOrder INTEGER NOT NULL DEFAULT 0,
+          CreatedDate TEXT NOT NULL,
+          FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE
+        );
+      `);
+      db.run('CREATE INDEX IF NOT EXISTS idx_dailyplans_date_class ON DailyPlans(PlanDate, ClassID);');
+      db.run('CREATE INDEX IF NOT EXISTS idx_dailyplansections_plan ON DailyPlanSections(PlanID);');
+      db.run('CREATE INDEX IF NOT EXISTS idx_dailyplansections_sec ON DailyPlanSections(SectionID);');
+      db.run('CREATE INDEX IF NOT EXISTS idx_dailyplanimages_plan ON DailyPlanImages(PlanID, SortOrder);');
+      db.run(
+        `INSERT INTO SchemaMigrations (Version, AppliedAt, Description) VALUES (8, ?, ?);`,
+        [
+          new Date().toISOString(),
+          'Added DailyPlans, DailyPlanSections, and DailyPlanImages tables for independent multi-section daily lesson plans and images',
+        ]
+      );
+    } catch (err) {
+      console.warn('Migration v8 warning:', err);
     }
   }
 }

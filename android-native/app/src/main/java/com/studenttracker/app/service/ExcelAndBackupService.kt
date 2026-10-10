@@ -1153,6 +1153,11 @@ object ExcelAndBackupService {
                 "فشل التحقق بعد الاستعادة: النسخة تحتوي ($expectedStudents طالب) ولكن القاعدة المستعادة تحتوي ($restoredStudents طالب)"
             }
 
+            // 5. Restore physical DailyPlan image files from the restored SQLite database
+            runCatching {
+                TrackerRepository(dbHelper).syncDailyPlanImageFilesFromDb(context)
+            }
+
             return safetyBackup
         } catch (e: Exception) {
             recordBackupError(context, "restoreBackup", e)
@@ -1242,6 +1247,11 @@ object ExcelAndBackupService {
         }
         require(actualStudents == expectedStudents) {
             "فشل التحقق بعد استعادة الملف الخارجي: المتوقع ($expectedStudents طالب) والموجود ($actualStudents طالب)"
+        }
+
+        // 5. Restore physical DailyPlan image files from the restored SQLite database
+        runCatching {
+            TrackerRepository(dbHelper).syncDailyPlanImageFilesFromDb(context)
         }
     }
 }

@@ -37,6 +37,7 @@ import { SavedRecordsView } from './components/SavedRecordsView';
 import { StudentProfileView } from './components/StudentProfileView';
 import { ReportsView } from './components/ReportsView';
 import { PeriodComparisonView } from './components/PeriodComparisonView';
+import { DailyPlanView } from './components/DailyPlanView';
 import { ExcelCenterView } from './components/ExcelCenterView';
 import { BackupRestoreView } from './components/BackupRestoreView';
 import { SchemaAndSettingsView } from './components/SchemaAndSettingsView';
@@ -539,6 +540,15 @@ export default function App() {
             sections={sections}
             recordsVersion={refreshVersion}
             onScheduleChanged={refreshAllFromSQLite}
+          />
+        )}
+
+        {currentScreen === 'daily-plan' && (
+          <DailyPlanView
+            classes={classes}
+            sections={sections}
+            onDataChanged={refreshAllFromSQLite}
+            onShowToast={() => {}}
           />
         )}
 

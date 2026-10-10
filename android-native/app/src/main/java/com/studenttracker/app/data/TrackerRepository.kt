@@ -1721,4 +1721,344 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         )
         return null
     }
+
+    // ---------------- DAILY PLANS ("الخطة اليومية") ----------------
+    fun getDailyPlanImagesDir(context: android.content.Context): java.io.File {
+        val dir = java.io.File(context.filesDir, "daily_plan_images")
+        if (!dir.exists()) dir.mkdirs()
+        return dir
+    }
+
+    fun getDailyPlans(
+        filterDate: String? = null,
+        filterClassId: Long? = null,
+        filterSectionId: Long? = null,
+        searchTopic: String? = null
+    ): List<DailyPlanEntity> {
+        val db = dbHelper.readableDatabase
+        val whereClauses = mutableListOf<String>()
+        val args = mutableListOf<String>()
+
+        if (!filterDate.isNullOrBlank()) {
+            whereClauses.add("dp.PlanDate = ?")
+            args.add(filterDate.trim())
+        }
+        if (filterClassId != null && filterClassId > 0L) {
+            whereClauses.add("dp.ClassID = ?")
+            args.add(filterClassId.toString())
+        }
+        if (filterSectionId != null && filterSectionId > 0L) {
+            whereClauses.add("EXISTS (SELECT 1 FROM DailyPlanSections dps WHERE dps.PlanID = dp.ID AND dps.SectionID = ?)")
+            args.add(filterSectionId.toString())
+        }
+        if (!searchTopic.isNullOrBlank()) {
+            whereClauses.add("dp.LessonTopic LIKE ?")
+            args.add("%${searchTopic.trim()}%")
+        }
+
+        val whereSql = if (whereClauses.isNotEmpty()) {
+            "WHERE " + whereClauses.joinToString(" AND ")
+        } else {
+            ""
+        }
+
+        val plansRaw = mutableListOf<Triple<Long, Array<String>, Long>>() // id, [planDate, className, lessonTopic, createdDate, updatedDate], classId
+        db.rawQuery(
+            """
+            SELECT dp.ID, dp.PlanDate, dp.ClassID, COALESCE(c.ClassName, ''), dp.LessonTopic, dp.CreatedDate, dp.UpdatedDate
+            FROM DailyPlans dp
+            LEFT JOIN Classes c ON c.ID = dp.ClassID
+            $whereSql
+            ORDER BY dp.PlanDate DESC, dp.ID DESC
+            """.trimIndent(),
+            args.toTypedArray()
+        ).use { c ->
+            while (c.moveToNext()) {
+                val id = c.getLong(0)
+                val planDate = c.getString(1) ?: ""
+                val clsId = c.getLong(2)
+                val clsName = c.getString(3) ?: ""
+                val topic = c.getString(4) ?: ""
+                val created = c.getString(5) ?: ""
+                val updated = c.getString(6) ?: ""
+                plansRaw.add(Triple(id, arrayOf(planDate, clsName, topic, created, updated), clsId))
+            }
+        }
+
+        if (plansRaw.isEmpty()) return emptyList()
+
+        // Load sections per plan
+        val sectionsByPlan = mutableMapOf<Long, MutableList<Pair<Long, String>>>()
+        db.rawQuery(
+            """
+            SELECT dps.PlanID, dps.SectionID, COALESCE(s.SectionName, '')
+            FROM DailyPlanSections dps
+            LEFT JOIN Sections s ON s.ID = dps.SectionID
+            ORDER BY dps.SectionID ASC
+            """.trimIndent(),
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val pId = c.getLong(0)
+                val sId = c.getLong(1)
+                val sName = c.getString(2) ?: ""
+                sectionsByPlan.getOrPut(pId) { mutableListOf() }.add(sId to sName)
+            }
+        }
+
+        // Load images per plan
+        val imagesByPlan = mutableMapOf<Long, MutableList<DailyPlanImageEntity>>()
+        db.rawQuery(
+            """
+            SELECT ID, PlanID, FileName, ImageBase64, SortOrder, CreatedDate
+            FROM DailyPlanImages
+            ORDER BY PlanID ASC, SortOrder ASC, ID ASC
+            """.trimIndent(),
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val imgId = c.getLong(0)
+                val pId = c.getLong(1)
+                val fName = c.getString(2) ?: ""
+                val b64 = c.getString(3) ?: ""
+                val order = c.getInt(4)
+                val created = c.getString(5) ?: ""
+                imagesByPlan.getOrPut(pId) { mutableListOf() }.add(
+                    DailyPlanImageEntity(
+                        id = imgId,
+                        planId = pId,
+                        fileName = fName,
+                        imageBase64 = b64,
+                        sortOrder = order,
+                        createdDate = created
+                    )
+                )
+            }
+        }
+
+        return plansRaw.map { (planId, fields, clsId) ->
+            val secPairs = sectionsByPlan[planId] ?: emptyList()
+            DailyPlanEntity(
+                id = planId,
+                planDate = fields[0],
+                classId = clsId,
+                className = fields[1],
+                sectionIds = secPairs.map { it.first },
+                sectionNames = secPairs.map { it.second },
+                lessonTopic = fields[2],
+                images = imagesByPlan[planId] ?: emptyList(),
+                createdDate = fields[3],
+                updatedDate = fields[4]
+            )
+        }
+    }
+
+    /**
+     * Gets all DailyPlans matching a specific date, classId, and sectionId (for StudentProfileScreen integration).
+     */
+    fun getDailyPlansForClassSectionAndDate(
+        classId: Long,
+        sectionId: Long,
+        recordDate: String
+    ): List<DailyPlanEntity> {
+        return getDailyPlans(
+            filterDate = recordDate,
+            filterClassId = classId,
+            filterSectionId = sectionId
+        )
+    }
+
+    /**
+     * Gets all DailyPlans matching a classId and sectionId across all dates (keyed by PlanDate),
+     * used for displaying daily lesson plans inside StudentProfileScreen.
+     */
+    fun getDailyPlansForClassAndSection(
+        classId: Long,
+        sectionId: Long
+    ): List<DailyPlanEntity> {
+        return getDailyPlans(
+            filterClassId = classId,
+            filterSectionId = sectionId
+        )
+    }
+
+    /**
+     * Saves a new DailyPlan or updates an existing one (when existingPlanId != null).
+     * Supports selecting one or multiple sections from the same class, and attaching unlimited images.
+     * Images are stored both in internal app storage (`filesDir/daily_plan_images/<fileName>`) AND as Base64
+     * inside `DailyPlanImages` so SQLite backups are 100% self-contained.
+     */
+    fun saveDailyPlan(
+        context: android.content.Context,
+        existingPlanId: Long? = null,
+        planDate: String,
+        classId: Long,
+        sectionIds: List<Long>,
+        lessonTopic: String,
+        images: List<Pair<String, String>> // Pair(fileName, imageBase64)
+    ): Pair<Long, String?> {
+        val cleanDate = planDate.trim()
+        if (cleanDate.isEmpty()) {
+            return -1L to "يرجى اختيار التاريخ للخطة اليومية"
+        }
+        if (classId <= 0L) {
+            return -1L to "يرجى اختيار الصف الدراسي"
+        }
+        val distinctSecIds = sectionIds.distinct().filter { it > 0L }
+        if (distinctSecIds.isEmpty()) {
+            return -1L to "يرجى اختيار شعبة واحدة على الأقل من الصف المحدد"
+        }
+        val cleanTopic = lessonTopic.trim()
+        if (cleanTopic.isEmpty()) {
+            return -1L to "يرجى كتابة عنوان الدرس أو الموضوع"
+        }
+
+        val db = dbHelper.writableDatabase
+        val now = Instant.now().toString()
+        val imagesDir = getDailyPlanImagesDir(context)
+        var savedPlanId = existingPlanId ?: -1L
+
+        db.beginTransaction()
+        try {
+            if (existingPlanId != null && existingPlanId > 0L) {
+                // Find old image files that were removed so we can clean them from disk
+                val oldFileNames = mutableListOf<String>()
+                db.rawQuery(
+                    "SELECT FileName FROM DailyPlanImages WHERE PlanID = ?",
+                    arrayOf(existingPlanId.toString())
+                ).use { c ->
+                    while (c.moveToNext()) {
+                        oldFileNames.add(c.getString(0) ?: "")
+                    }
+                }
+                val keptNames = images.map { it.first }.toSet()
+                oldFileNames.filter { it.isNotEmpty() && it !in keptNames }.forEach { removedName ->
+                    runCatching { java.io.File(imagesDir, removedName).delete() }
+                }
+
+                val cv = ContentValues().apply {
+                    put("PlanDate", cleanDate)
+                    put("ClassID", classId)
+                    put("LessonTopic", cleanTopic)
+                    put("UpdatedDate", now)
+                }
+                db.update("DailyPlans", cv, "ID = ?", arrayOf(existingPlanId.toString()))
+                db.delete("DailyPlanSections", "PlanID = ?", arrayOf(existingPlanId.toString()))
+                db.delete("DailyPlanImages", "PlanID = ?", arrayOf(existingPlanId.toString()))
+                savedPlanId = existingPlanId
+            } else {
+                val cv = ContentValues().apply {
+                    put("PlanDate", cleanDate)
+                    put("ClassID", classId)
+                    put("LessonTopic", cleanTopic)
+                    put("CreatedDate", now)
+                    put("UpdatedDate", now)
+                }
+                savedPlanId = db.insertOrThrow("DailyPlans", null, cv)
+            }
+
+            distinctSecIds.forEach { secId ->
+                val secCv = ContentValues().apply {
+                    put("PlanID", savedPlanId)
+                    put("SectionID", secId)
+                }
+                db.insertWithOnConflict("DailyPlanSections", null, secCv, SQLiteDatabase.CONFLICT_IGNORE)
+            }
+
+            images.forEachIndexed { idx, (rawFileName, base64Data) ->
+                val fName = rawFileName.ifBlank { "plan_${savedPlanId}_img_${idx + 1}_${System.currentTimeMillis()}.jpg" }
+                // Write physical file to internal storage if not already written
+                if (base64Data.isNotBlank()) {
+                    runCatching {
+                        val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                        val outFile = java.io.File(imagesDir, fName)
+                        if (!outFile.exists() || outFile.length() == 0L) {
+                            java.io.FileOutputStream(outFile).use { it.write(bytes) }
+                        }
+                    }
+                }
+                val imgCv = ContentValues().apply {
+                    put("PlanID", savedPlanId)
+                    put("FileName", fName)
+                    put("ImageBase64", base64Data)
+                    put("SortOrder", idx)
+                    put("CreatedDate", now)
+                }
+                db.insert("DailyPlanImages", null, imgCv)
+            }
+
+            db.setTransactionSuccessful()
+        } catch (e: Exception) {
+            return -1L to (e.message ?: "تعذر حفظ الخطة اليومية")
+        } finally {
+            db.endTransaction()
+        }
+
+        return savedPlanId to null
+    }
+
+    /**
+     * Deletes a DailyPlan and cleans up its physical image files from internal storage.
+     */
+    fun deleteDailyPlan(context: android.content.Context, planId: Long) {
+        val db = dbHelper.writableDatabase
+        val imagesDir = getDailyPlanImagesDir(context)
+        val fileNames = mutableListOf<String>()
+        runCatching {
+            db.rawQuery(
+                "SELECT FileName FROM DailyPlanImages WHERE PlanID = ?",
+                arrayOf(planId.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    fileNames.add(c.getString(0) ?: "")
+                }
+            }
+        }
+        db.beginTransaction()
+        try {
+            db.delete("DailyPlanImages", "PlanID = ?", arrayOf(planId.toString()))
+            db.delete("DailyPlanSections", "PlanID = ?", arrayOf(planId.toString()))
+            db.delete("DailyPlans", "ID = ?", arrayOf(planId.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        fileNames.filter { it.isNotBlank() }.forEach { fName ->
+            runCatching { java.io.File(imagesDir, fName).delete() }
+        }
+    }
+
+    /**
+     * Syncs physical image files in `filesDir/daily_plan_images` from the SQLite `DailyPlanImages` table
+     * after restoring a backup (and removes orphan files not present in the restored DB).
+     */
+    fun syncDailyPlanImageFilesFromDb(context: android.content.Context) {
+        runCatching {
+            val db = dbHelper.readableDatabase
+            val imagesDir = getDailyPlanImagesDir(context)
+            val validNames = mutableSetOf<String>()
+            db.rawQuery("SELECT FileName, ImageBase64 FROM DailyPlanImages", null).use { c ->
+                while (c.moveToNext()) {
+                    val fName = c.getString(0) ?: continue
+                    val b64 = c.getString(1) ?: ""
+                    if (fName.isNotBlank()) {
+                        validNames.add(fName)
+                        val targetFile = java.io.File(imagesDir, fName)
+                        if ((!targetFile.exists() || targetFile.length() == 0L) && b64.isNotBlank()) {
+                            runCatching {
+                                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                java.io.FileOutputStream(targetFile).use { it.write(bytes) }
+                            }
+                        }
+                    }
+                }
+            }
+            imagesDir.listFiles()?.forEach { file ->
+                if (file.isFile && file.name !in validNames) {
+                    runCatching { file.delete() }
+                }
+            }
+        }
+    }
 }
+

@@ -347,6 +347,15 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.DAILY_PLAN -> DailyPlanScreen(
+                    classes = classes,
+                    sections = sections,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
                 AppScreen.STUDY_PERIODS -> StudyPeriodsScreen(
                     repository = repository,
                     refreshTick = refreshTick,

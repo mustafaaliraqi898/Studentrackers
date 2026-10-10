@@ -217,6 +217,28 @@ export interface StudentComprehensiveGradeReport {
   finalAverage: number | null;
 }
 
+export interface DailyPlanImageEntity {
+  id: number;
+  planId: number;
+  fileName: string;
+  imageBase64: string;
+  sortOrder: number;
+  createdDate: string;
+}
+
+export interface DailyPlanEntity {
+  id: number;
+  planDate: string; // YYYY-MM-DD
+  classId: number;
+  className: string;
+  sectionIds: number[];
+  sectionNames: string[];
+  lessonTopic: string;
+  images: DailyPlanImageEntity[];
+  createdDate: string;
+  updatedDate: string;
+}
+
 export type AppScreen =
   | 'dashboard'
   | 'classes-sections'
@@ -224,6 +246,7 @@ export type AppScreen =
   | 'daily-tracking'
   | 'absence-tracking'
   | 'daily-schedule'
+  | 'daily-plan'
   | 'study-periods'
   | 'holidays'
   | 'saved-records'
@@ -234,3 +257,4 @@ export type AppScreen =
   | 'backup-restore'
   | 'schema-architecture'
   | 'settings';
+

@@ -260,6 +260,16 @@ fun DashboardScreen(
                         onClick = { onNavigate(AppScreen.PERIOD_COMPARISON) }
                     )
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    NavActionTile(
+                        modifier = Modifier.fillMaxWidth(),
+                        title = "الخطة اليومية",
+                        subtitle = "خطة الدرس اليومية والصور لجميع الصفوف والشعب",
+                        icon = Icons.Default.CalendarMonth,
+                        tint = Emerald700,
+                        onClick = { onNavigate(AppScreen.DAILY_PLAN) }
+                    )
+                }
             }
         }
 

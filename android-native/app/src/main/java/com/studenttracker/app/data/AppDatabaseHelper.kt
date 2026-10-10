@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 9
+        const val DATABASE_VERSION = 10
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -84,6 +84,54 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 9) {
             migrateDailyRecordsPeriodColumns(db)
         }
+        if (oldVersion < 10) {
+            createDailyPlansTablesAndIndexes(db)
+        }
+    }
+
+    private fun createDailyPlansTablesAndIndexes(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS DailyPlans (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                PlanDate TEXT NOT NULL,
+                ClassID INTEGER NOT NULL,
+                LessonTopic TEXT NOT NULL,
+                CreatedDate TEXT NOT NULL,
+                UpdatedDate TEXT NOT NULL,
+                FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+            );
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS DailyPlanSections (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                PlanID INTEGER NOT NULL,
+                SectionID INTEGER NOT NULL,
+                FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE,
+                FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
+                UNIQUE(PlanID, SectionID)
+            );
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS DailyPlanImages (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                PlanID INTEGER NOT NULL,
+                FileName TEXT NOT NULL,
+                ImageBase64 TEXT NOT NULL DEFAULT '',
+                SortOrder INTEGER NOT NULL DEFAULT 0,
+                CreatedDate TEXT NOT NULL,
+                FOREIGN KEY (PlanID) REFERENCES DailyPlans(ID) ON DELETE CASCADE
+            );
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailyplans_date_class ON DailyPlans(PlanDate, ClassID);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailyplansections_plan ON DailyPlanSections(PlanID);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailyplansections_sec ON DailyPlanSections(SectionID);")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailyplanimages_plan ON DailyPlanImages(PlanID, SortOrder);")
     }
 
     private fun migrateDailyRecordsPeriodColumns(db: SQLiteDatabase) {
@@ -521,6 +569,7 @@ class AppDatabaseHelper(private val context: Context) :
         createDailyScheduleTableAndIndexes(db)
         createStudyPeriodsTableAndIndexes(db)
         createPeriodGradesTableAndIndexes(db)
+        createDailyPlansTablesAndIndexes(db)
     }
 
     fun seedInitialDemoData(db: SQLiteDatabase) {
@@ -688,6 +737,9 @@ class AppDatabaseHelper(private val context: Context) :
             runCatching { db.execSQL("DELETE FROM DailySchedule;") }
             runCatching { db.execSQL("DELETE FROM PeriodGrades;") }
             runCatching { db.execSQL("DELETE FROM StudyPeriods;") }
+            runCatching { db.execSQL("DELETE FROM DailyPlanImages;") }
+            runCatching { db.execSQL("DELETE FROM DailyPlanSections;") }
+            runCatching { db.execSQL("DELETE FROM DailyPlans;") }
             if (includeDemo) {
                 seedInitialDemoData(db)
             } else {

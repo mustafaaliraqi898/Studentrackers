@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import {
   ArrowRight,
+  BookOpen,
   Calendar,
   ClipboardCheck,
   Edit3,
   User,
+  X,
+  ZoomIn,
 } from 'lucide-react';
 import {
   AppScreen,
+  DailyPlanEntity,
+  DailyPlanImageEntity,
   RatingValue,
   StudentCalculatedGrade,
   StudentComprehensiveGradeReport,
@@ -19,10 +24,12 @@ import {
   GradingService,
   formatDisplayDate,
   formatScore,
+  getArabicDayName,
   getRatingLabel,
   round2,
 } from '../services/gradingService';
 import { TrackerRepository } from '../repositories/trackerRepository';
+import { getPlanImageDataSrc } from './DailyPlanView';
 
 interface StudentProfileViewProps {
   student: StudentEntity | undefined;
@@ -40,6 +47,11 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
   const [comprehensiveReport, setComprehensiveReport] =
     useState<StudentComprehensiveGradeReport | null>(null);
   const [studyPeriods, setStudyPeriods] = useState<StudyPeriodEntity[]>([]);
+  const [studentDailyPlans, setStudentDailyPlans] = useState<DailyPlanEntity[]>(
+    []
+  );
+  const [previewPlanImage, setPreviewPlanImage] =
+    useState<DailyPlanImageEntity | null>(null);
   const [reloadTick, setReloadTick] = useState<number>(0);
 
   // Written exam modal state
@@ -53,7 +65,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
     let active = true;
     async function loadProfile() {
       if (!student) return;
-      const [periods, list, compList] = await Promise.all([
+      const [periods, list, compList, plans] = await Promise.all([
         TrackerRepository.getStudyPeriods(),
         GradingService.calculateGradesForClass(
           student.classId,
@@ -65,6 +77,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
           student.sectionId,
           selectedFilter
         ),
+        TrackerRepository.getDailyPlansForClassAndSection(
+          student.classId,
+          student.sectionId
+        ),
       ]);
       if (!active) return;
       setStudyPeriods(periods);
@@ -72,6 +88,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
       setComprehensiveReport(
         compList.find((r) => r.studentId === student.id) || null
       );
+      setStudentDailyPlans(plans);
     }
     loadProfile();
     return () => {
@@ -584,6 +601,111 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
           </div>
         )}
       </section>
+
+      {/* Daily Plans Linked to Student's Class & Section */}
+      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <BookOpen className="w-5 h-5 text-teal-700" />
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900">
+                الخطط اليومية المرتبطة بالصف والشعبة ({grade.className} — شعبة{' '}
+                {grade.sectionName})
+              </h3>
+              <p className="text-xs text-slate-500">
+                جميع الدروس والخطط اليومية والصور المسجلة لصف وشعبة الطالب
+              </p>
+            </div>
+          </div>
+          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200 text-xs font-extrabold font-mono-num">
+            {studentDailyPlans.length} خطة
+          </span>
+        </div>
+
+        {studentDailyPlans.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            لا توجد خطط يومية مسجلة لصف وشعبة هذا الطالب حالياً.
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {studentDailyPlans.map((plan) => (
+              <div
+                key={plan.id}
+                className="rounded-xl p-3 bg-slate-50 border border-slate-200/80 space-y-2"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-teal-800 font-mono-num">
+                    {getArabicDayName(plan.planDate)} —{' '}
+                    {formatDisplayDate(plan.planDate)}
+                  </span>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    الشعب المشمولة: {plan.sectionNames.join('، ')}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-bold text-slate-900 whitespace-pre-wrap">
+                  {plan.lessonTopic}
+                </p>
+                {plan.images.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {plan.images.map((img) => (
+                      <button
+                        key={img.id || img.fileName}
+                        type="button"
+                        onClick={() => setPreviewPlanImage(img)}
+                        className="relative w-16 h-16 rounded-lg border border-slate-200 overflow-hidden bg-white group"
+                      >
+                        <img
+                          src={getPlanImageDataSrc(img.imageBase64)}
+                          alt="صورة الدرس"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                        <span className="absolute bottom-1 left-1 w-4 h-4 rounded-full bg-slate-900/75 text-white flex items-center justify-center">
+                          <ZoomIn className="w-2.5 h-2.5" />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Fullscreen Plan Image Modal */}
+      {previewPlanImage && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/90 flex flex-col justify-between p-4"
+          onClick={() => setPreviewPlanImage(null)}
+        >
+          <div
+            className="flex items-center justify-between max-w-5xl w-full mx-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 className="text-sm font-extrabold text-white">
+              معاينة صورة الدرس بالحجم الكامل
+            </h4>
+            <button
+              type="button"
+              onClick={() => setPreviewPlanImage(null)}
+              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5"
+            >
+              <X className="w-4 h-4" />
+              إغلاق
+            </button>
+          </div>
+          <div
+            className="flex-1 flex items-center justify-center overflow-auto my-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={getPlanImageDataSrc(previewPlanImage.imageBase64)}
+              alt="صورة الدرس"
+              className="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Written Exam Modal */}
       {editingBreakdown && (

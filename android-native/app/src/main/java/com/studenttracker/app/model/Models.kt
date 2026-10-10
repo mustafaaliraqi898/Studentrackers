@@ -264,5 +264,24 @@ data class StudentComprehensiveGradeReport(
     val annualEffort: Double? = null
 )
 
+data class DailyPlanImageEntity(
+    val id: Long,
+    val planId: Long,
+    val fileName: String,
+    val imageBase64: String,
+    val sortOrder: Int,
+    val createdDate: String
+)
 
-
+data class DailyPlanEntity(
+    val id: Long,
+    val planDate: String, // YYYY-MM-DD
+    val classId: Long,
+    val className: String,
+    val sectionIds: List<Long>,
+    val sectionNames: List<String>,
+    val lessonTopic: String,
+    val images: List<DailyPlanImageEntity>,
+    val createdDate: String,
+    val updatedDate: String
+)

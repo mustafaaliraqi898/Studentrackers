@@ -1,6 +1,8 @@
 import {
   AttendanceStatus,
   ClassEntity,
+  DailyPlanEntity,
+  DailyPlanImageEntity,
   DailyScheduleEntity,
   HolidayEntity,
   PeriodGradeEntity,
@@ -1316,4 +1318,230 @@ export class TrackerRepository {
     await persistDatabaseToStorage();
     return { error: null };
   }
+
+  // ---------------- DAILY PLANS ("الخطة اليومية") ----------------
+  static async getDailyPlans(filters?: {
+    planDate?: string;
+    classId?: number;
+    sectionId?: number;
+    searchTopic?: string;
+  }): Promise<DailyPlanEntity[]> {
+    const db = await getDatabase();
+    const whereClauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (filters?.planDate && filters.planDate.trim()) {
+      whereClauses.push('dp.PlanDate = ?');
+      params.push(filters.planDate.trim());
+    }
+    if (filters?.classId !== undefined && filters.classId > 0) {
+      whereClauses.push('dp.ClassID = ?');
+      params.push(filters.classId);
+    }
+    if (filters?.sectionId !== undefined && filters.sectionId > 0) {
+      whereClauses.push(
+        'EXISTS (SELECT 1 FROM DailyPlanSections dps WHERE dps.PlanID = dp.ID AND dps.SectionID = ?)'
+      );
+      params.push(filters.sectionId);
+    }
+    if (filters?.searchTopic && filters.searchTopic.trim()) {
+      whereClauses.push('dp.LessonTopic LIKE ?');
+      params.push(`%${filters.searchTopic.trim()}%`);
+    }
+
+    const whereSql =
+      whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const plansRes = db.exec(
+      `SELECT dp.ID, dp.PlanDate, dp.ClassID, COALESCE(c.ClassName, ''), dp.LessonTopic, dp.CreatedDate, dp.UpdatedDate
+       FROM DailyPlans dp
+       LEFT JOIN Classes c ON c.ID = dp.ClassID
+       ${whereSql}
+       ORDER BY dp.PlanDate DESC, dp.ID DESC;`,
+      params
+    );
+
+    if (plansRes.length === 0 || plansRes[0].values.length === 0) {
+      return [];
+    }
+
+    const secRes = db.exec(`
+      SELECT dps.PlanID, dps.SectionID, COALESCE(s.SectionName, '')
+      FROM DailyPlanSections dps
+      LEFT JOIN Sections s ON s.ID = dps.SectionID
+      ORDER BY dps.SectionID ASC;
+    `);
+    const sectionsByPlan = new Map<
+      number,
+      { sectionIds: number[]; sectionNames: string[] }
+    >();
+    if (secRes.length > 0) {
+      for (const r of secRes[0].values) {
+        const pId = Number(r[0]);
+        const sId = Number(r[1]);
+        const sName = String(r[2] || '');
+        if (!sectionsByPlan.has(pId)) {
+          sectionsByPlan.set(pId, { sectionIds: [], sectionNames: [] });
+        }
+        sectionsByPlan.get(pId)!.sectionIds.push(sId);
+        sectionsByPlan.get(pId)!.sectionNames.push(sName);
+      }
+    }
+
+    const imgRes = db.exec(`
+      SELECT ID, PlanID, FileName, ImageBase64, SortOrder, CreatedDate
+      FROM DailyPlanImages
+      ORDER BY PlanID ASC, SortOrder ASC, ID ASC;
+    `);
+    const imagesByPlan = new Map<number, DailyPlanImageEntity[]>();
+    if (imgRes.length > 0) {
+      for (const r of imgRes[0].values) {
+        const img: DailyPlanImageEntity = {
+          id: Number(r[0]),
+          planId: Number(r[1]),
+          fileName: String(r[2] || ''),
+          imageBase64: String(r[3] || ''),
+          sortOrder: Number(r[4] || 0),
+          createdDate: String(r[5] || ''),
+        };
+        if (!imagesByPlan.has(img.planId)) {
+          imagesByPlan.set(img.planId, []);
+        }
+        imagesByPlan.get(img.planId)!.push(img);
+      }
+    }
+
+    return plansRes[0].values.map((row) => {
+      const planId = Number(row[0]);
+      const secInfo = sectionsByPlan.get(planId) || {
+        sectionIds: [],
+        sectionNames: [],
+      };
+      return {
+        id: planId,
+        planDate: String(row[1] || ''),
+        classId: Number(row[2]),
+        className: String(row[3] || ''),
+        sectionIds: secInfo.sectionIds,
+        sectionNames: secInfo.sectionNames,
+        lessonTopic: String(row[4] || ''),
+        images: imagesByPlan.get(planId) || [],
+        createdDate: String(row[5] || ''),
+        updatedDate: String(row[6] || ''),
+      };
+    });
+  }
+
+  static async getDailyPlansForClassAndSection(
+    classId: number,
+    sectionId: number
+  ): Promise<DailyPlanEntity[]> {
+    return this.getDailyPlans({ classId, sectionId });
+  }
+
+  static async saveDailyPlan(params: {
+    existingPlanId?: number | null;
+    planDate: string;
+    classId: number;
+    sectionIds: number[];
+    lessonTopic: string;
+    images: { fileName: string; imageBase64: string }[];
+  }): Promise<{ id: number; error: string | null }> {
+    const cleanDate = params.planDate.trim();
+    if (!cleanDate) {
+      return { id: -1, error: 'يرجى اختيار التاريخ للخطة اليومية' };
+    }
+    if (!params.classId || params.classId <= 0) {
+      return { id: -1, error: 'يرجى اختيار الصف الدراسي' };
+    }
+    const distinctSecs = Array.from(
+      new Set(params.sectionIds.filter((s) => s > 0))
+    );
+    if (distinctSecs.length === 0) {
+      return {
+        id: -1,
+        error: 'يرجى اختيار شعبة واحدة على الأقل من الصف المحدد',
+      };
+    }
+    const cleanTopic = params.lessonTopic.trim();
+    if (!cleanTopic) {
+      return { id: -1, error: 'يرجى كتابة عنوان الدرس أو الموضوع' };
+    }
+
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    let savedPlanId = params.existingPlanId ?? -1;
+
+    db.run('BEGIN TRANSACTION;');
+    try {
+      if (params.existingPlanId && params.existingPlanId > 0) {
+        db.run(
+          `UPDATE DailyPlans
+           SET PlanDate = ?, ClassID = ?, LessonTopic = ?, UpdatedDate = ?
+           WHERE ID = ?;`,
+          [cleanDate, params.classId, cleanTopic, now, params.existingPlanId]
+        );
+        db.run('DELETE FROM DailyPlanSections WHERE PlanID = ?;', [
+          params.existingPlanId,
+        ]);
+        db.run('DELETE FROM DailyPlanImages WHERE PlanID = ?;', [
+          params.existingPlanId,
+        ]);
+        savedPlanId = params.existingPlanId;
+      } else {
+        db.run(
+          `INSERT INTO DailyPlans (PlanDate, ClassID, LessonTopic, CreatedDate, UpdatedDate)
+           VALUES (?, ?, ?, ?, ?);`,
+          [cleanDate, params.classId, cleanTopic, now, now]
+        );
+        const idRes = db.exec('SELECT last_insert_rowid();');
+        savedPlanId = idRes.length > 0 ? Number(idRes[0].values[0][0]) : -1;
+      }
+
+      for (const secId of distinctSecs) {
+        db.run(
+          `INSERT OR IGNORE INTO DailyPlanSections (PlanID, SectionID) VALUES (?, ?);`,
+          [savedPlanId, secId]
+        );
+      }
+
+      params.images.forEach((img, idx) => {
+        const fName =
+          img.fileName.trim() ||
+          `plan_${savedPlanId}_img_${idx + 1}_${Date.now()}.jpg`;
+        db.run(
+          `INSERT INTO DailyPlanImages (PlanID, FileName, ImageBase64, SortOrder, CreatedDate)
+           VALUES (?, ?, ?, ?, ?);`,
+          [savedPlanId, fName, img.imageBase64, idx, now]
+        );
+      });
+
+      db.run('COMMIT;');
+      await persistDatabaseToStorage();
+      return { id: savedPlanId, error: null };
+    } catch (err) {
+      db.run('ROLLBACK;');
+      return {
+        id: -1,
+        error:
+          err instanceof Error ? err.message : 'تعذر حفظ الخطة اليومية',
+      };
+    }
+  }
+
+  static async deleteDailyPlan(planId: number): Promise<void> {
+    const db = await getDatabase();
+    db.run('BEGIN TRANSACTION;');
+    try {
+      db.run('DELETE FROM DailyPlanImages WHERE PlanID = ?;', [planId]);
+      db.run('DELETE FROM DailyPlanSections WHERE PlanID = ?;', [planId]);
+      db.run('DELETE FROM DailyPlans WHERE ID = ?;', [planId]);
+      db.run('COMMIT;');
+      await persistDatabaseToStorage();
+    } catch (err) {
+      db.run('ROLLBACK;');
+      throw err;
+    }
+  }
 }
+
