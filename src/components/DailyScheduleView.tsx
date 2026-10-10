@@ -68,6 +68,21 @@ function parseTimeMinutes(timeStr: string): number | null {
   return h * 60 + m;
 }
 
+function formatTime12HourAr(timeStr: string): string {
+  const parts = timeStr.trim().split(':');
+  if (parts.length !== 2) return timeStr;
+  const h = Number(parts[0]);
+  const m = Number(parts[1]);
+  if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return timeStr;
+  }
+  const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+  const minuteStr = String(m).padStart(2, '0');
+  const periodLabel =
+    h === 0 && m === 0 ? 'منتصف الليل' : h < 12 ? 'صباحاً' : 'مساءً';
+  return `${hour12}:${minuteStr} ${periodLabel}`;
+}
+
 export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   classes,
   sections,
@@ -412,35 +427,67 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
           </div>
         </div>
 
-        {/* 5 & 6. وقت بدء الدرس و وقت انتهاء الدرس */}
+        {/* 5 & 6. وقت بدء الدرس و وقت انتهاء الدرس (نظام 12 ساعة) */}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-extrabold text-slate-800 mb-1">
               وقت بدء الدرس:
             </label>
-            <input
-              type="time"
-              value={startTime}
-              onChange={(e) => {
-                setStartTime(e.target.value);
-                setFeedbackMessage(null);
-              }}
-              className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono-num font-extrabold text-slate-900"
-            />
+            <div className="relative">
+              <div className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
+                <span>{formatTime12HourAr(startTime)}</span>
+                <Clock className="w-4 h-4 text-teal-700 shrink-0" />
+              </div>
+              <input
+                type="time"
+                value={startTime}
+                aria-label="وقت بدء الدرس"
+                onChange={(e) => {
+                  setStartTime(e.target.value);
+                  setFeedbackMessage(null);
+                }}
+                onClick={(e) => {
+                  try {
+                    if ('showPicker' in HTMLInputElement.prototype) {
+                      (e.currentTarget as HTMLInputElement).showPicker();
+                    }
+                  } catch {
+                    // Fallback to native input behavior
+                  }
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
           </div>
           <div>
             <label className="block text-xs font-extrabold text-slate-800 mb-1">
               وقت انتهاء الدرس:
             </label>
-            <input
-              type="time"
-              value={endTime}
-              onChange={(e) => {
-                setEndTime(e.target.value);
-                setFeedbackMessage(null);
-              }}
-              className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono-num font-extrabold text-slate-900"
-            />
+            <div className="relative">
+              <div className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
+                <span>{formatTime12HourAr(endTime)}</span>
+                <Clock className="w-4 h-4 text-teal-700 shrink-0" />
+              </div>
+              <input
+                type="time"
+                value={endTime}
+                aria-label="وقت انتهاء الدرس"
+                onChange={(e) => {
+                  setEndTime(e.target.value);
+                  setFeedbackMessage(null);
+                }}
+                onClick={(e) => {
+                  try {
+                    if ('showPicker' in HTMLInputElement.prototype) {
+                      (e.currentTarget as HTMLInputElement).showPicker();
+                    }
+                  } catch {
+                    // Fallback to native input behavior
+                  }
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
           </div>
         </div>
 
@@ -502,10 +549,11 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
                       <p className="text-xs font-bold text-teal-700">
                         {getArabicLessonLabel(lesson.lessonNumber)}
                       </p>
-                      <p className="text-xs font-extrabold text-slate-700 font-mono-num flex items-center gap-1">
+                      <p className="text-xs font-extrabold text-slate-700 flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-slate-500" />
                         <span>
-                          {lesson.startTime} - {lesson.endTime}
+                          {formatTime12HourAr(lesson.startTime)} -{' '}
+                          {formatTime12HourAr(lesson.endTime)}
                         </span>
                       </p>
                     </div>
@@ -551,7 +599,9 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
               هل أنت متأكد من حذف هذه الحصة؟
               <br />({pendingDeleteItem.dayOfWeek} —{' '}
               {pendingDeleteItem.className} / {pendingDeleteItem.sectionName} —{' '}
-              {getArabicLessonLabel(pendingDeleteItem.lessonNumber)})
+              {getArabicLessonLabel(pendingDeleteItem.lessonNumber)} —{' '}
+              {formatTime12HourAr(pendingDeleteItem.startTime)} -{' '}
+              {formatTime12HourAr(pendingDeleteItem.endTime)})
             </p>
             <div className="flex items-center gap-2.5 pt-2">
               <button

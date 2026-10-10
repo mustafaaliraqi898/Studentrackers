@@ -1579,6 +1579,26 @@ private fun parseTimeMinutes(timeStr: String): Int? {
     return h * 60 + m
 }
 
+private fun formatTime12HourAr(timeStr: String): String {
+    val parts = timeStr.trim().split(":")
+    if (parts.size != 2) return timeStr
+    val h = parts[0].toIntOrNull() ?: return timeStr
+    val m = parts[1].toIntOrNull() ?: return timeStr
+    if (h !in 0..23 || m !in 0..59) return timeStr
+    val hour12 = when {
+        h == 0 -> 12
+        h > 12 -> h - 12
+        else -> h
+    }
+    val minuteStr = String.format(java.util.Locale.US, "%02d", m)
+    val periodLabel = when {
+        h == 0 && m == 0 -> "منتصف الليل"
+        h < 12 -> "صباحاً"
+        else -> "مساءً"
+    }
+    return "$hour12:$minuteStr $periodLabel"
+}
+
 @Composable
 fun DailyScheduleScreen(
     classes: List<ClassEntity>,
@@ -1662,7 +1682,7 @@ fun DailyScheduleScreen(
             },
             initHour,
             initMinute,
-            true
+            false
         ).show()
     }
 
@@ -1899,7 +1919,7 @@ fun DailyScheduleScreen(
                         }
                     }
 
-                    // Field 5 & 6: وقت بدء الدرس و وقت انتهاء الدرس (Android Time Picker)
+                    // Field 5 & 6: وقت بدء الدرس و وقت انتهاء الدرس (Android Time Picker 12-Hour)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1933,7 +1953,7 @@ fun DailyScheduleScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = startTime,
+                                        text = formatTime12HourAr(startTime),
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 14.sp,
                                         color = Slate900
@@ -1972,7 +1992,7 @@ fun DailyScheduleScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = endTime,
+                                        text = formatTime12HourAr(endTime),
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 14.sp,
                                         color = Slate900
@@ -2192,7 +2212,7 @@ fun DailyScheduleScreen(
                                             modifier = Modifier.size(15.dp)
                                         )
                                         Text(
-                                            text = "${lesson.startTime} - ${lesson.endTime}",
+                                            text = "${formatTime12HourAr(lesson.startTime)} - ${formatTime12HourAr(lesson.endTime)}",
                                             fontWeight = FontWeight.ExtraBold,
                                             fontSize = 13.sp,
                                             color = Slate700
@@ -2243,7 +2263,7 @@ fun DailyScheduleScreen(
             },
             text = {
                 Text(
-                    text = "هل أنت متأكد من حذف هذه الحصة؟\n(${target.dayOfWeek} — ${target.className} / ${target.sectionName} — ${getArabicLessonLabel(target.lessonNumber)})",
+                    text = "هل أنت متأكد من حذف هذه الحصة؟\n(${target.dayOfWeek} — ${target.className} / ${target.sectionName} — ${getArabicLessonLabel(target.lessonNumber)} — ${formatTime12HourAr(target.startTime)} - ${formatTime12HourAr(target.endTime)})",
                     fontSize = 14.sp,
                     color = Slate800
                 )
