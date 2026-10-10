@@ -18,6 +18,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -6091,11 +6093,11 @@ private fun decodePlanBitmap(
     repository: TrackerRepository,
     fileName: String,
     imageBase64: String
-): androidx.compose.ui.graphics.ImageBitmap? {
+): ImageBitmap? {
     return runCatching {
         val dir = repository.getDailyPlanImagesDir(context)
         val file = if (fileName.isNotBlank()) java.io.File(dir, fileName) else null
-        val bmp = if (file != null && file.exists() && file.length() > 0L) {
+        val bmp: android.graphics.Bitmap? = if (file != null && file.exists() && file.length() > 0L) {
             android.graphics.BitmapFactory.decodeFile(file.absolutePath)
         } else if (imageBase64.isNotBlank()) {
             val bytes = android.util.Base64.decode(imageBase64, android.util.Base64.DEFAULT)
@@ -6103,7 +6105,7 @@ private fun decodePlanBitmap(
         } else {
             null
         }
-        bmp?.let { androidx.compose.ui.graphics.asImageBitmap(it) }
+        bmp?.asImageBitmap()
     }.getOrNull()
 }
 
