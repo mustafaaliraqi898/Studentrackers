@@ -138,66 +138,6 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
     );
   };
 
-  const renderRatingsList = (
-    title: string,
-    score: number,
-    average: number | null,
-    ratings: { date: string; value: 1 | 0.5 | 0 }[]
-  ) => {
-    const getValueColor = (val: RatingValue) => {
-      if (val === 1) return 'text-emerald-700 font-bold';
-      if (val === 0.5) return 'text-amber-600 font-bold';
-      return 'text-rose-600 font-bold';
-    };
-
-    return (
-      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div>
-            <h3 className="text-base font-extrabold text-slate-900">{title}</h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {ratings.length > 0
-                ? `متوسط التقييمات (${ratings.length} تقييم): ${formatScore(average || 0)} × 19`
-                : 'لا توجد تقييمات مسجلة (لا تحتسب صفراً تلقائياً)'}
-            </p>
-          </div>
-          <div className="text-left font-mono-num">
-            <span className="text-lg font-extrabold text-slate-900">
-              {formatScore(score)}
-            </span>
-            <span className="text-xs text-slate-400"> / 19</span>
-          </div>
-        </div>
-
-        {ratings.length === 0 ? (
-          <p className="text-xs text-slate-500 py-1">
-            لم يتم رصد تقييمات لهذا العنصر خلال هذه الفترة.
-          </p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {ratings.map((item, idx) => (
-              <div
-                key={`${item.date}-${idx}`}
-                className="py-2 flex items-center justify-between text-xs"
-              >
-                <span className="text-slate-600 font-mono-num flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{formatDisplayDate(item.date)}</span>
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className={getValueColor(item.value)}>
-                    {getRatingLabel(item.value)}
-                  </span>
-                  <span className="text-slate-400 font-mono-num">({item.value})</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const breakdowns = comprehensiveReport?.periodBreakdowns || [];
   const finalAvg = comprehensiveReport?.finalAverage ?? null;
   const completedCount = comprehensiveReport?.completedPeriodsCount ?? 0;
@@ -533,143 +473,230 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
         )}
       </section>
 
-      {/* 4 Evaluation Categories */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {renderRatingsList(
-          'المشاركة اليومية',
-          grade.participationScore,
-          grade.participationAverage,
-          grade.participationRatings
-        )}
-        {renderRatingsList(
-          'متابعة الدفتر',
-          grade.notebookScore,
-          grade.notebookAverage,
-          grade.notebookRatings
-        )}
-        {renderRatingsList(
-          'الواجب البيتي',
-          grade.homeworkScore,
-          grade.homeworkAverage,
-          grade.homeworkRatings
-        )}
-        {renderRatingsList(
-          'السلوك والانضباط',
-          grade.behaviorScore,
-          grade.behaviorAverage,
-          grade.behaviorRatings
-        )}
-      </div>
-
-      {/* Daily Tests History */}
-      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2.5">
-            <ClipboardCheck className="w-5 h-5 text-emerald-700" />
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                سجل الاختبارات اليومية (من 5)
-              </h3>
-              <p className="text-xs text-slate-500">
-                جميع درجات الاختبار المرصودة للطالب في جدول DailyTests
-              </p>
-            </div>
-          </div>
-          <div className="font-mono-num text-left">
-            <span className="text-lg font-extrabold text-emerald-700">
-              {formatScore(grade.quizScore)}
-            </span>
-            <span className="text-xs text-slate-400"> / 5</span>
-          </div>
-        </div>
-
-        {grade.dailyTests.length === 0 ? (
-          <p className="text-xs text-slate-500">لم يتم تسجيل اختبارات يومية بعد.</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {grade.dailyTests.map((t, i) => (
-              <div
-                key={`${t.date}-${i}`}
-                className="py-2 flex items-center justify-between text-xs font-mono-num"
-              >
-                <span className="text-slate-600">بتاريخ {formatDisplayDate(t.date)}</span>
-                <span className="font-extrabold text-slate-900">
-                  {formatScore(t.score)} / 5
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Daily Plans Linked to Student's Class & Section */}
-      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-3">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+      {/* Unified Student Evaluation Log Integrated with Daily Plan */}
+      <section className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2.5">
             <BookOpen className="w-5 h-5 text-teal-700" />
             <div>
               <h3 className="text-base font-extrabold text-slate-900">
-                الخطط اليومية المرتبطة بالصف والشعبة ({grade.className} — شعبة{' '}
-                {grade.sectionName})
+                سجل تقييم الطالب مع الخطة اليومية
               </h3>
               <p className="text-xs text-slate-500">
-                جميع الدروس والخطط اليومية والصور المسجلة لصف وشعبة الطالب
+                التقييم اليومي الموحّد وموضوع الدرس والصور المرفقة ({grade.className} — شعبة{' '}
+                {grade.sectionName})
               </p>
             </div>
           </div>
-          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200 text-xs font-extrabold font-mono-num">
-            {studentDailyPlans.length} خطة
-          </span>
         </div>
 
-        {studentDailyPlans.length === 0 ? (
-          <p className="text-xs text-slate-500">
-            لا توجد خطط يومية مسجلة لصف وشعبة هذا الطالب حالياً.
-          </p>
-        ) : (
-          <div className="space-y-2.5">
-            {studentDailyPlans.map((plan) => (
-              <div
-                key={plan.id}
-                className="rounded-xl p-3 bg-slate-50 border border-slate-200/80 space-y-2"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-extrabold text-teal-800 font-mono-num">
-                    {getArabicDayName(plan.planDate)} —{' '}
-                    {formatDisplayDate(plan.planDate)}
-                  </span>
-                  <span className="text-[11px] font-bold text-slate-500">
-                    الشعب المشمولة: {plan.sectionNames.join('، ')}
-                  </span>
-                </div>
-                <p className="text-xs sm:text-sm font-bold text-slate-900 whitespace-pre-wrap">
-                  {plan.lessonTopic}
-                </p>
-                {plan.images.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {plan.images.map((img) => (
-                      <button
-                        key={img.id || img.fileName}
-                        type="button"
-                        onClick={() => setPreviewPlanImage(img)}
-                        className="relative w-16 h-16 rounded-lg border border-slate-200 overflow-hidden bg-white group"
-                      >
-                        <img
-                          src={getPlanImageDataSrc(img.imageBase64)}
-                          alt="صورة الدرس"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <span className="absolute bottom-1 left-1 w-4 h-4 rounded-full bg-slate-900/75 text-white flex items-center justify-center">
-                          <ZoomIn className="w-2.5 h-2.5" />
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+        {(() => {
+          const attByDate = new Map(
+            grade.attendanceHistory.map((a) => [a.date, a.status])
+          );
+          const partByDate = new Map(
+            grade.participationRatings.map((r) => [r.date, r.value])
+          );
+          const noteByDate = new Map(
+            grade.notebookRatings.map((r) => [r.date, r.value])
+          );
+          const hwByDate = new Map(
+            grade.homeworkRatings.map((r) => [r.date, r.value])
+          );
+          const behByDate = new Map(
+            grade.behaviorRatings.map((r) => [r.date, r.value])
+          );
+          const testByDate = new Map(
+            grade.dailyTests.map((t) => [t.date, t.score])
+          );
+
+          // Filter plans according to selectedFilter if a period or month is selected
+          const activePeriod = selectedFilter.startsWith('PERIOD:')
+            ? studyPeriods.find(
+                (p) => p.id === Number(selectedFilter.replace('PERIOD:', ''))
+              )
+            : undefined;
+          const filteredPlans = studentDailyPlans.filter((p) => {
+            if (activePeriod) {
+              if (p.planDate < activePeriod.startDate) return false;
+              if (activePeriod.endDate && p.planDate > activePeriod.endDate)
+                return false;
+              return true;
+            }
+            if (selectedFilter !== 'ALL' && !selectedFilter.startsWith('PERIOD:')) {
+              return p.planDate.startsWith(selectedFilter);
+            }
+            return true;
+          });
+
+          const plansByDate = new Map<string, DailyPlanEntity[]>();
+          for (const p of filteredPlans) {
+            if (!plansByDate.has(p.planDate)) {
+              plansByDate.set(p.planDate, []);
+            }
+            plansByDate.get(p.planDate)!.push(p);
+          }
+
+          const allDates = Array.from(
+            new Set([
+              ...attByDate.keys(),
+              ...partByDate.keys(),
+              ...noteByDate.keys(),
+              ...hwByDate.keys(),
+              ...behByDate.keys(),
+              ...testByDate.keys(),
+              ...plansByDate.keys(),
+            ])
+          ).sort((a, b) => b.localeCompare(a));
+
+          if (allDates.length === 0) {
+            return (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-500 font-bold">
+                لا توجد تقييمات يومية أو خطط دروس مسجلة لهذا الطالب حالياً.
               </div>
-            ))}
-          </div>
-        )}
+            );
+          }
+
+          const renderRatingPill = (label: string, val: RatingValue | undefined) => {
+            const text = val !== undefined && val !== null ? getRatingLabel(val) : 'غير مسجل';
+            const colorClass =
+              val === 1
+                ? 'text-emerald-700 font-extrabold'
+                : val === 0.5
+                ? 'text-amber-600 font-extrabold'
+                : val === 0
+                ? 'text-rose-600 font-extrabold'
+                : 'text-slate-400 font-bold';
+            return (
+              <div className="bg-white rounded-lg p-2 border border-slate-200 text-center">
+                <span className="text-[11px] text-slate-500 font-bold block">{label}</span>
+                <span className={`text-xs mt-0.5 block ${colorClass}`}>{text}</span>
+              </div>
+            );
+          };
+
+          return (
+            <div className="space-y-3">
+              {allDates.map((d) => {
+                const att = attByDate.get(d);
+                const part = partByDate.get(d);
+                const note = noteByDate.get(d);
+                const hw = hwByDate.get(d);
+                const beh = behByDate.get(d);
+                const test = testByDate.get(d);
+                const dayPlans = plansByDate.get(d) || [];
+                const mergedTopics = Array.from(
+                  new Set(
+                    dayPlans
+                      .map((p) => p.lessonTopic.trim())
+                      .filter((t) => t.length > 0)
+                  )
+                ).join(' | ');
+                const dayImages = dayPlans.flatMap((p) => p.images);
+
+                return (
+                  <div
+                    key={d}
+                    className="rounded-xl p-3.5 bg-slate-50 border border-slate-200/80 space-y-2.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs sm:text-sm font-extrabold text-slate-900 font-mono-num flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-teal-700" />
+                        <span>
+                          {getArabicDayName(d)} — {formatDisplayDate(d)}
+                        </span>
+                      </span>
+
+                      {att !== undefined && (
+                        <span
+                          className={`px-2.5 py-0.5 rounded-md text-[11px] font-extrabold border ${
+                            att === 'present'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                              : 'bg-rose-50 text-rose-700 border-rose-300'
+                          }`}
+                        >
+                          {att === 'present' ? 'الحضور: حاضر' : 'الحضور: غائب'}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Lesson Topic from Daily Plan */}
+                    <div
+                      className={`bg-white rounded-lg p-2.5 border ${
+                        mergedTopics
+                          ? 'border-teal-600/40'
+                          : 'border-slate-200'
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold text-teal-700 block">
+                        موضوع الدرس (الخطة اليومية):
+                      </span>
+                      <p
+                        className={`text-xs sm:text-sm mt-0.5 whitespace-pre-wrap ${
+                          mergedTopics
+                            ? 'font-extrabold text-slate-900'
+                            : 'font-medium text-slate-400'
+                        }`}
+                      >
+                        {mergedTopics || 'لا توجد خطة مسجلة لهذا اليوم'}
+                      </p>
+                    </div>
+
+                    {/* Daily Evaluation Elements */}
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      {renderRatingPill('المشاركة', part)}
+                      {renderRatingPill('الدفتر', note)}
+                      {renderRatingPill('الواجب', hw)}
+                      {renderRatingPill('السلوك', beh)}
+                      <div className="bg-white rounded-lg p-2 border border-slate-200 text-center col-span-2 sm:col-span-1">
+                        <span className="text-[11px] text-slate-500 font-bold block">
+                          الاختبار اليومي
+                        </span>
+                        <span
+                          className={`text-xs mt-0.5 block font-mono-num ${
+                            test !== undefined
+                              ? 'text-teal-700 font-extrabold'
+                              : 'text-slate-400 font-bold'
+                          }`}
+                        >
+                          {test !== undefined ? `${formatScore(test)} / 5` : 'غير مسجل'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Attached Lesson Images */}
+                    {dayImages.length > 0 && (
+                      <div className="pt-1 space-y-1.5">
+                        <span className="text-[11px] font-bold text-slate-600 block">
+                          صور الدرس المرفقة ({dayImages.length}):
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {dayImages.map((img) => (
+                            <button
+                              key={img.id || img.fileName}
+                              type="button"
+                              onClick={() => setPreviewPlanImage(img)}
+                              className="relative w-16 h-16 rounded-lg border border-slate-200 overflow-hidden bg-white group"
+                            >
+                              <img
+                                src={getPlanImageDataSrc(img.imageBase64)}
+                                alt="صورة الدرس"
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                              />
+                              <span className="absolute bottom-1 left-1 w-4 h-4 rounded-full bg-slate-900/75 text-white flex items-center justify-center">
+                                <ZoomIn className="w-2.5 h-2.5" />
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </section>
 
       {/* Fullscreen Plan Image Modal */}

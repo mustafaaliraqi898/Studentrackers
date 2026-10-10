@@ -2438,146 +2438,22 @@ fun StudentProfileScreen(
             }
 
             item {
-                ProfileHistoryCard("سجل تقييمات المشاركة", grade.participationRatings, isTest = false)
-            }
-            item {
-                ProfileHistoryCard("سجل تقييمات الدفتر", grade.notebookRatings, isTest = false)
-            }
-            item {
-                ProfileHistoryCard("سجل تقييمات الواجب", grade.homeworkRatings, isTest = false)
-            }
-            item {
-                ProfileHistoryCard("سجل تقييمات السلوك", grade.behaviorRatings, isTest = false)
-            }
-            item {
-                ProfileHistoryCard("سجل الاختبارات اليومية (من 5)", grade.dailyTests, isTest = true)
-            }
-        }
-
-        // Daily Plans linked to this student's Class + Section (independent section, shown per day)
-        item {
-            val studentDailyPlans = remember(refreshTick, localTick, grade.classId, grade.sectionId, selectedPeriodId, studyPeriods) {
-                val allPlans = repository.getDailyPlansForClassAndSection(grade.classId, grade.sectionId)
-                val activePeriod = studyPeriods.firstOrNull { it.id == selectedPeriodId }
-                if (activePeriod != null) {
-                    allPlans.filter { p ->
-                        p.planDate >= activePeriod.startDate &&
-                            (activePeriod.endDate.isNullOrBlank() || p.planDate <= activePeriod.endDate)
-                    }
-                } else {
-                    allPlans
-                }
-            }
-            var previewPlanImage by remember { mutableStateOf<DailyPlanImageEntity?>(null) }
-
-            Surface(
-                color = Color.White,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, Slate200),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "الخطة اليومية للدروس (${grade.className} — شعبة ${grade.sectionName})",
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 14.sp,
-                                color = Slate900
-                            )
-                            Text(
-                                text = "مواضيع الدروس والصور المرفقة حسب التاريخ والصف والشعبة",
-                                fontSize = 11.sp,
-                                color = Slate600
-                            )
+                val studentDailyPlans = remember(refreshTick, localTick, grade.classId, grade.sectionId, selectedPeriodId, studyPeriods) {
+                    val allPlans = repository.getDailyPlansForClassAndSection(grade.classId, grade.sectionId)
+                    val activePeriod = studyPeriods.firstOrNull { it.id == selectedPeriodId }
+                    if (activePeriod != null) {
+                        allPlans.filter { p ->
+                            p.planDate >= activePeriod.startDate &&
+                                (activePeriod.endDate.isNullOrBlank() || p.planDate <= activePeriod.endDate)
                         }
-                        Surface(
-                            color = Teal50,
-                            shape = RoundedCornerShape(8.dp),
-                            border = BorderStroke(1.dp, Teal600)
-                        ) {
-                            Text(
-                                text = "${studentDailyPlans.size} خطة",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Teal700,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    if (studentDailyPlans.isEmpty()) {
-                        Text(
-                            text = "لا توجد خطط يومية مسجلة لهذا الصف والشعبة حالياً.",
-                            fontSize = 12.sp,
-                            color = Slate500
-                        )
                     } else {
-                        studentDailyPlans.forEach { plan ->
-                            Surface(
-                                color = Slate50,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, Slate200),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${GradingService.getArabicDayName(plan.planDate)} ${GradingService.formatDisplayDate(plan.planDate)}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Teal700
-                                        )
-                                        Text(
-                                            text = "${plan.className} • شعب: ${plan.sectionNames.joinToString("، ")}",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Slate600
-                                        )
-                                    }
-                                    Text(
-                                        text = plan.lessonTopic,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Slate900
-                                    )
-                                    if (plan.images.isNotEmpty()) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .horizontalScroll(rememberScrollState()),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            plan.images.forEach { img ->
-                                                DailyPlanThumbnailItem(
-                                                    imageEntity = img,
-                                                    onClick = { previewPlanImage = img }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        allPlans
                     }
                 }
-            }
 
-            if (previewPlanImage != null) {
-                DailyPlanFullScreenImageDialog(
-                    imageEntity = previewPlanImage!!,
-                    onDismiss = { previewPlanImage = null }
+                StudentUnifiedEvaluationAndPlanLogCard(
+                    grade = grade,
+                    dailyPlans = studentDailyPlans
                 )
             }
         }
@@ -2774,38 +2650,332 @@ private fun ProfileScoreRow(title: String, score: Double, maxScore: Int) {
     }
 }
 
+private data class StudentDailyCombinedLogEntry(
+    val date: String,
+    val attendance: AttendanceStatus?,
+    val participation: Double?,
+    val notebook: Double?,
+    val homework: Double?,
+    val behavior: Double?,
+    val dailyTest: Double?,
+    val plansForDate: List<DailyPlanEntity>
+)
+
 @Composable
-private fun ProfileHistoryCard(title: String, items: List<RatedDateItem>, isTest: Boolean) {
+private fun StudentUnifiedEvaluationAndPlanLogCard(
+    grade: StudentCalculatedGrade,
+    dailyPlans: List<DailyPlanEntity>
+) {
+    var previewPlanImage by remember { mutableStateOf<DailyPlanImageEntity?>(null) }
+
+    val combinedEntries = remember(grade, dailyPlans) {
+        val attByDate = grade.attendanceHistory.toMap()
+        val partByDate = grade.participationRatings.associate { it.date to it.value }
+        val noteByDate = grade.notebookRatings.associate { it.date to it.value }
+        val hwByDate = grade.homeworkRatings.associate { it.date to it.value }
+        val behByDate = grade.behaviorRatings.associate { it.date to it.value }
+        val testByDate = grade.dailyTests.associate { it.date to it.value }
+        val plansByDate = dailyPlans.groupBy { it.planDate }
+
+        val allDates = buildSet {
+            addAll(attByDate.keys)
+            addAll(partByDate.keys)
+            addAll(noteByDate.keys)
+            addAll(hwByDate.keys)
+            addAll(behByDate.keys)
+            addAll(testByDate.keys)
+            addAll(plansByDate.keys)
+        }.sortedDescending()
+
+        allDates.map { d ->
+            StudentDailyCombinedLogEntry(
+                date = d,
+                attendance = attByDate[d],
+                participation = partByDate[d],
+                notebook = noteByDate[d],
+                homework = hwByDate[d],
+                behavior = behByDate[d],
+                dailyTest = testByDate[d],
+                plansForDate = plansByDate[d] ?: emptyList()
+            )
+        }
+    }
+
     Surface(
         color = Color.White,
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.dp, Slate200),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, color = Slate900)
-            if (items.isEmpty()) {
-                Text("لا توجد تقييمات مسجلة بعد (تحتسب الدرجة كاملة بدون ظلم الطالب)", fontSize = 12.sp, color = Slate500)
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "سجل تقييم الطالب مع الخطة اليومية",
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp,
+                        color = Slate900
+                    )
+                    Text(
+                        text = "التقييم اليومي وموضوع الدرس والصور المرفقة (${grade.className} — شعبة ${grade.sectionName})",
+                        fontSize = 11.sp,
+                        color = Slate600
+                    )
+                }
+                Surface(
+                    color = Teal50,
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Teal600)
+                ) {
+                    Text(
+                        text = "${combinedEntries.size} يوم",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Teal700,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (combinedEntries.isEmpty()) {
+                Surface(
+                    color = Slate50,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "لا توجد تقييمات يومية أو خطط دروس مسجلة لهذا الطالب حالياً.",
+                        fontSize = 12.sp,
+                        color = Slate500,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
             } else {
-                items.forEach { item ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                combinedEntries.forEach { entry ->
+                    val mergedTopics = entry.plansForDate
+                        .map { it.lessonTopic.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct()
+                        .joinToString(" | ")
+                    val allPlanImages = entry.plansForDate.flatMap { it.images }
+
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "${GradingService.getArabicDayName(item.date)} ${GradingService.formatDisplayDate(item.date)}",
-                            fontSize = 12.sp,
-                            color = Slate700
-                        )
-                        Text(
-                            text = if (isTest) "${GradingService.formatScore(item.value)} / 5" else GradingService.getRatingLabel(item.value),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Teal700
-                        )
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // 1. Date & Day Header + Attendance Badge if recorded
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.DateRange,
+                                        contentDescription = null,
+                                        tint = Teal700,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                    Text(
+                                        text = "${GradingService.getArabicDayName(entry.date)} — ${GradingService.formatDisplayDate(entry.date)}",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Slate900
+                                    )
+                                }
+
+                                if (entry.attendance != null) {
+                                    val isPresent = entry.attendance == AttendanceStatus.PRESENT
+                                    Surface(
+                                        color = if (isPresent) Emerald50 else Red50,
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(1.dp, if (isPresent) Emerald600 else Red600)
+                                    ) {
+                                        Text(
+                                            text = if (isPresent) "الحضور: حاضر" else "الحضور: غائب",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = if (isPresent) Emerald700 else Red700,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 2. Lesson Topic from Daily Plan
+                            Surface(
+                                color = Color.White,
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (mergedTopics.isNotEmpty()) Teal600.copy(alpha = 0.4f) else Slate200),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = "موضوع الدرس (الخطة اليومية):",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Teal700
+                                    )
+                                    Text(
+                                        text = if (mergedTopics.isNotEmpty()) mergedTopics else "لا توجد خطة مسجلة لهذا اليوم",
+                                        fontSize = 12.sp,
+                                        fontWeight = if (mergedTopics.isNotEmpty()) FontWeight.ExtraBold else FontWeight.Medium,
+                                        color = if (mergedTopics.isNotEmpty()) Slate900 else Slate500
+                                    )
+                                }
+                            }
+
+                            // 3. Student Evaluation Elements for that Day (Participation, Notebook, Homework, Behavior, Daily Test)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    DailyEvaluationBadgeCell(
+                                        label = "المشاركة",
+                                        ratingValue = entry.participation,
+                                        isTest = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    DailyEvaluationBadgeCell(
+                                        label = "الدفتر",
+                                        ratingValue = entry.notebook,
+                                        isTest = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    DailyEvaluationBadgeCell(
+                                        label = "الواجب",
+                                        ratingValue = entry.homework,
+                                        isTest = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    DailyEvaluationBadgeCell(
+                                        label = "السلوك",
+                                        ratingValue = entry.behavior,
+                                        isTest = false,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    DailyEvaluationBadgeCell(
+                                        label = "الاختبار اليومي",
+                                        ratingValue = entry.dailyTest,
+                                        isTest = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            // 4. Attached Lesson Images (if any)
+                            if (allPlanImages.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text(
+                                        text = "صور الدرس المرفقة (${allPlanImages.size}):",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Slate600
+                                    )
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        allPlanImages.forEach { img ->
+                                            DailyPlanThumbnailItem(
+                                                imageEntity = img,
+                                                onClick = { previewPlanImage = img }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    if (previewPlanImage != null) {
+        DailyPlanFullScreenImageDialog(
+            imageEntity = previewPlanImage!!,
+            onDismiss = { previewPlanImage = null }
+        )
+    }
+}
+
+@Composable
+private fun DailyEvaluationBadgeCell(
+    label: String,
+    ratingValue: Double?,
+    isTest: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val valueText = if (ratingValue == null) {
+        "غير مسجل"
+    } else if (isTest) {
+        "${GradingService.formatScore(ratingValue)} / 5"
+    } else {
+        GradingService.getRatingLabel(ratingValue)
+    }
+
+    val valueColor = when {
+        ratingValue == null -> Slate500
+        isTest -> Teal700
+        ratingValue == 1.0 -> Emerald700
+        ratingValue == 0.5 -> Amber600
+        else -> Red700
+    }
+
+    Surface(
+        color = Color.White,
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Slate200),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Slate600,
+                maxLines = 1
+            )
+            Text(
+                text = valueText,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = valueColor,
+                maxLines = 1
+            )
         }
     }
 }

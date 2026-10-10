@@ -417,7 +417,8 @@ object GradingService {
                 behaviorScore = behScore,
                 dailyTests = testList,
                 quizScore = quizScore,
-                totalScore = total
+                totalScore = total,
+                attendanceHistory = attMap.toSortedMap().map { (d, stStatus) -> d to stStatus }
             )
         }
     }
