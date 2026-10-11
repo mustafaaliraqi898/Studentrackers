@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 10
+        const val DATABASE_VERSION = 11
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -86,6 +86,18 @@ class AppDatabaseHelper(private val context: Context) :
         }
         if (oldVersion < 10) {
             createDailyPlansTablesAndIndexes(db)
+        }
+        if (oldVersion < 11) {
+            migrateDailyScheduleReminderColumns(db)
+        }
+    }
+
+    private fun migrateDailyScheduleReminderColumns(db: SQLiteDatabase) {
+        runCatching {
+            db.execSQL("ALTER TABLE DailySchedule ADD COLUMN ReminderEnabled INTEGER NOT NULL DEFAULT 0;")
+        }
+        runCatching {
+            db.execSQL("ALTER TABLE DailySchedule ADD COLUMN ReminderMinutesBefore INTEGER NOT NULL DEFAULT 5;")
         }
     }
 
@@ -339,6 +351,8 @@ class AppDatabaseHelper(private val context: Context) :
                 LessonNumber INTEGER NOT NULL CHECK(LessonNumber >= 1),
                 StartTime TEXT NOT NULL,
                 EndTime TEXT NOT NULL,
+                ReminderEnabled INTEGER NOT NULL DEFAULT 0,
+                ReminderMinutesBefore INTEGER NOT NULL DEFAULT 5,
                 CreatedDate TEXT NOT NULL,
                 FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
                 FOREIGN KEY (SectionID) REFERENCES Sections(ID) ON DELETE CASCADE,
@@ -346,6 +360,7 @@ class AppDatabaseHelper(private val context: Context) :
             );
             """.trimIndent()
         )
+        migrateDailyScheduleReminderColumns(db)
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedule_day_lesson ON DailySchedule(DayOfWeek, LessonNumber, StartTime);")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedule_class_sec ON DailySchedule(ClassID, SectionID);")
         db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_unique_slot ON DailySchedule(DayOfWeek, ClassID, SectionID, LessonNumber);")

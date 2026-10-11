@@ -1,5 +1,9 @@
 package com.studenttracker.app.ui
 
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,6 +29,7 @@ import com.studenttracker.app.data.AppDatabaseHelper
 import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
 import com.studenttracker.app.service.GradingService
+import com.studenttracker.app.service.ScheduleReminderManager
 
 @Composable
 fun DashboardScreen(
@@ -1641,6 +1646,56 @@ fun DailyScheduleScreen(
     var startTime by remember { mutableStateOf("08:00") }
     var endTime by remember { mutableStateOf("08:45") }
 
+    // Day Filter State ("ALL", "TODAY", or specific Arabic day name)
+    var selectedDayFilter by remember { mutableStateOf("ALL") }
+    val todayNameAr = remember { ScheduleReminderManager.getArabicTodayName() }
+
+    // Global Lesson Reminder Settings State
+    val initialReminderSettings = remember { ScheduleReminderManager.getSettings(context) }
+    var globalReminderEnabled by remember { mutableStateOf(initialReminderSettings.enabled) }
+    var globalReminderMinutes by remember { mutableIntStateOf(initialReminderSettings.minutesBefore) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val saved = ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = true,
+                minutesBefore = globalReminderMinutes,
+                repository = repository
+            )
+            globalReminderEnabled = saved.enabled
+            globalReminderMinutes = saved.minutesBefore
+            onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل ${saved.minutesBefore} دقائق)")
+        } else {
+            globalReminderEnabled = false
+            ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = globalReminderMinutes,
+                repository = repository
+            )
+            onShowMessage("يلزم منح إذن الإشعارات لتفعيل تنبيهات الحصص على الهاتف")
+        }
+    }
+
+    fun updateGlobalReminderSettings(newEnabled: Boolean, newMinutes: Int) {
+        if (newEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !ScheduleReminderManager.hasNotificationPermission(context)) {
+            globalReminderMinutes = newMinutes
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        val saved = ScheduleReminderManager.saveSettingsAndSync(
+            context = context,
+            enabled = newEnabled,
+            minutesBefore = newMinutes,
+            repository = repository
+        )
+        globalReminderEnabled = saved.enabled
+        globalReminderMinutes = saved.minutesBefore
+    }
+
     var formBannerMessage by remember { mutableStateOf<String?>(null) }
     var formBannerIsError by remember { mutableStateOf(false) }
 
@@ -1686,9 +1741,24 @@ fun DailyScheduleScreen(
         ).show()
     }
 
-    val groupedByDay = remember(scheduleItems) {
-        WEEK_DAYS_ORDER.mapNotNull { day ->
-            val dayEntries = scheduleItems.filter { it.dayOfWeek == day }
+    val filteredScheduleItems = remember(scheduleItems, selectedDayFilter, todayNameAr) {
+        when (selectedDayFilter) {
+            "ALL" -> scheduleItems
+            "TODAY" -> scheduleItems.filter { it.dayOfWeek == todayNameAr }
+            else -> scheduleItems.filter { it.dayOfWeek == selectedDayFilter }
+        }
+    }
+
+    val groupedByDay = remember(filteredScheduleItems, selectedDayFilter, todayNameAr) {
+        val daysToConsider = when (selectedDayFilter) {
+            "ALL" -> WEEK_DAYS_ORDER
+            "TODAY" -> listOf(todayNameAr)
+            else -> listOf(selectedDayFilter)
+        }
+        daysToConsider.mapNotNull { day ->
+            val dayEntries = filteredScheduleItems
+                .filter { it.dayOfWeek == day }
+                .sortedWith(compareBy<DailyScheduleEntity> { it.lessonNumber }.thenBy { it.startTime }.thenBy { it.id })
             if (dayEntries.isEmpty()) null else day to dayEntries
         }
     }
@@ -1696,10 +1766,10 @@ fun DailyScheduleScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // 1. Add / Edit Lesson Form Card
+        // 1. Add / Edit Lesson Form Card (Organized & Compact)
         item {
             Surface(
                 color = Color.White,
@@ -1708,26 +1778,40 @@ fun DailyScheduleScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (editingItem != null) "تعديل الحصة المسجلة" else "إضافة حصة إلى الجدول اليومي",
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp,
-                            color = if (editingItem != null) Amber700 else Slate900
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (editingItem != null) Icons.Default.Edit else Icons.Default.EventNote,
+                                contentDescription = null,
+                                tint = if (editingItem != null) Amber700 else Teal700,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = if (editingItem != null) "تعديل الحصة المسجلة" else "إضافة حصة إلى الجدول اليومي",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp,
+                                color = if (editingItem != null) Amber700 else Slate900
+                            )
+                        }
                         if (editingItem != null) {
-                            TextButton(onClick = {
-                                resetFormToAddMode()
-                                formBannerMessage = null
-                            }) {
-                                Text("إلغاء التعديل", color = Red700, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            TextButton(
+                                onClick = {
+                                    resetFormToAddMode()
+                                    formBannerMessage = null
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("إلغاء التعديل", color = Red700, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             }
                         }
                     }
@@ -1735,7 +1819,7 @@ fun DailyScheduleScreen(
                     if (formBannerMessage != null) {
                         Surface(
                             color = if (formBannerIsError) Red50 else Emerald50,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, if (formBannerIsError) Red600 else Emerald600),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -1744,266 +1828,314 @@ fun DailyScheduleScreen(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = if (formBannerIsError) Red700 else Emerald700,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             )
                         }
                     }
 
-                    // Field 1: اليوم
-                    Text(
-                        text = "اليوم:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Slate800
-                    )
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll( androidx.compose.foundation.rememberScrollState() ),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        WEEK_DAYS_ORDER.forEach { day ->
-                            val isSel = selectedDay == day
-                            Surface(
-                                color = if (isSel) Slate900 else Slate100,
-                                contentColor = if (isSel) Color.White else Slate800,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable {
-                                    selectedDay = day
-                                    formBannerMessage = null
-                                }
-                            ) {
-                                Text(
-                                    text = day,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Field 2: الصف
-                    Text(
-                        text = "الصف:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Slate800
-                    )
-                    if (classes.isEmpty()) {
-                        Text(
-                            text = "لا توجد صفوف مسجلة في قاعدة البيانات. يرجى إضافة صف أولاً.",
-                            fontSize = 12.sp,
-                            color = Red700,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll( androidx.compose.foundation.rememberScrollState() ),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            classes.forEach { cls ->
-                                val isSel = selectedClassId == cls.id
-                                Surface(
-                                    color = if (isSel) Slate900 else Slate100,
-                                    contentColor = if (isSel) Color.White else Slate800,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable {
-                                        if (selectedClassId != cls.id) {
-                                            selectedClassId = cls.id
-                                            val firstSec = sections.firstOrNull { it.classId == cls.id }
-                                            selectedSectionId = firstSec?.id
-                                            formBannerMessage = null
-                                        }
-                                    }
-                                ) {
-                                    Text(
-                                        text = cls.className,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Field 3: الشعبة (التابعة للصف المحدد فقط)
-                    Text(
-                        text = "الشعبة:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Slate800
-                    )
-                    if (availableSections.isEmpty()) {
-                        Text(
-                            text = "لا توجد شعب تابعة لهذا الصف.",
-                            fontSize = 12.sp,
-                            color = Red700,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll( androidx.compose.foundation.rememberScrollState() ),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            availableSections.forEach { sec ->
-                                val isSel = selectedSectionId == sec.id
-                                Surface(
-                                    color = if (isSel) Teal700 else Slate100,
-                                    contentColor = if (isSel) Color.White else Slate800,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable {
-                                        selectedSectionId = sec.id
-                                        formBannerMessage = null
-                                    }
-                                ) {
-                                    Text(
-                                        text = "شعبة ${sec.sectionName}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Field 4: الدرس (الدرس الأول .. الدرس الثامن + قابل للتوسعة)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "الدرس:",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Slate800
-                        )
-                        TextButton(
-                            onClick = { maxLessonsCount += 1 },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("+ إضافة رقم حصة إضافي", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Teal700)
-                        }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll( androidx.compose.foundation.rememberScrollState() ),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        (1..maxLessonsCount).forEach { num ->
-                            val isSel = selectedLessonNumber == num
-                            Surface(
-                                color = if (isSel) Slate900 else Slate100,
-                                contentColor = if (isSel) Color.White else Slate800,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.clickable {
-                                    selectedLessonNumber = num
-                                    formBannerMessage = null
-                                }
-                            ) {
-                                Text(
-                                    text = getArabicLessonLabel(num),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Field 5 & 6: وقت بدء الدرس و وقت انتهاء الدرس (Android Time Picker 12-Hour)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Group A: 1. اليوم
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "وقت بدء الدرس:",
-                                fontSize = 12.sp,
+                                text = "1. اختيار اليوم:",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = Slate800
+                                color = Slate700
                             )
-                            Surface(
-                                color = Slate50,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, Slate200),
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
-                                        openAndroidTimePicker(startTime) { picked ->
-                                            startTime = picked
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                WEEK_DAYS_ORDER.forEach { day ->
+                                    val isSel = selectedDay == day
+                                    Surface(
+                                        color = if (isSel) Slate900 else Color.White,
+                                        contentColor = if (isSel) Color.White else Slate800,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, if (isSel) Slate900 else Slate200),
+                                        modifier = Modifier.clickable {
+                                            selectedDay = day
                                             formBannerMessage = null
                                         }
+                                    ) {
+                                        Text(
+                                            text = day,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                                        )
                                     }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = formatTime12HourAr(startTime),
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp,
-                                        color = Slate900
-                                    )
-                                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = Teal700, modifier = Modifier.size(18.dp))
-                                }
-                            }
-                        }
-
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = "وقت انتهاء الدرس:",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Slate800
-                            )
-                            Surface(
-                                color = Slate50,
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, Slate200),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        openAndroidTimePicker(endTime) { picked ->
-                                            endTime = picked
-                                            formBannerMessage = null
-                                        }
-                                    }
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = formatTime12HourAr(endTime),
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 14.sp,
-                                        color = Slate900
-                                    )
-                                    Icon(Icons.Default.AccessTime, contentDescription = null, tint = Teal700, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
                     }
 
-                    // Submit Button (Add or Save Edit)
+                    // Group B: 2. الصف & 3. الشعبة
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "2. اختيار الصف:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate700
+                            )
+                            if (classes.isEmpty()) {
+                                Text(
+                                    text = "لا توجد صفوف مسجلة في قاعدة البيانات. يرجى إضافة صف أولاً.",
+                                    fontSize = 11.sp,
+                                    color = Red700,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    classes.forEach { cls ->
+                                        val isSel = selectedClassId == cls.id
+                                        Surface(
+                                            color = if (isSel) Slate900 else Color.White,
+                                            contentColor = if (isSel) Color.White else Slate800,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (isSel) Slate900 else Slate200),
+                                            modifier = Modifier.clickable {
+                                                if (selectedClassId != cls.id) {
+                                                    selectedClassId = cls.id
+                                                    val firstSec = sections.firstOrNull { it.classId == cls.id }
+                                                    selectedSectionId = firstSec?.id
+                                                    formBannerMessage = null
+                                                }
+                                            }
+                                        ) {
+                                            Text(
+                                                text = cls.className,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text(
+                                text = "3. اختيار الشعبة:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Slate700
+                            )
+                            if (availableSections.isEmpty()) {
+                                Text(
+                                    text = "لا توجد شعب تابعة لهذا الصف.",
+                                    fontSize = 11.sp,
+                                    color = Red700,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            } else {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    availableSections.forEach { sec ->
+                                        val isSel = selectedSectionId == sec.id
+                                        Surface(
+                                            color = if (isSel) Teal700 else Color.White,
+                                            contentColor = if (isSel) Color.White else Slate800,
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(1.dp, if (isSel) Teal700 else Slate200),
+                                            modifier = Modifier.clickable {
+                                                selectedSectionId = sec.id
+                                                formBannerMessage = null
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "شعبة ${sec.sectionName}",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Group C: 4. رقم الدرس + 5. وقت بدء الدرس + 6. وقت انتهاء الدرس
+                    Surface(
+                        color = Slate50,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, Slate200),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "4. اختيار رقم الدرس:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Slate700
+                                )
+                                Surface(
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(1.dp, Teal700.copy(alpha = 0.4f)),
+                                    modifier = Modifier.clickable { maxLessonsCount += 1 }
+                                ) {
+                                    Text(
+                                        text = "+ إضافة رقم حصة إضافي",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Teal700,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                (1..maxLessonsCount).forEach { num ->
+                                    val isSel = selectedLessonNumber == num
+                                    Surface(
+                                        color = if (isSel) Slate900 else Color.White,
+                                        contentColor = if (isSel) Color.White else Slate800,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, if (isSel) Slate900 else Slate200),
+                                        modifier = Modifier.clickable {
+                                            selectedLessonNumber = num
+                                            formBannerMessage = null
+                                        }
+                                    ) {
+                                        Text(
+                                            text = getArabicLessonLabel(num),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 5 & 6: وقت بدء الدرس و وقت انتهاء الدرس (Android Time Picker 12-Hour)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "5. وقت بدء الدرس:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Slate700
+                                    )
+                                    Surface(
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                openAndroidTimePicker(startTime) { picked ->
+                                                    startTime = picked
+                                                    formBannerMessage = null
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = formatTime12HourAr(startTime),
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 13.sp,
+                                                color = Slate900
+                                            )
+                                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = Teal700, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "6. وقت انتهاء الدرس:",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Slate700
+                                    )
+                                    Surface(
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = BorderStroke(1.dp, Slate200),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                openAndroidTimePicker(endTime) { picked ->
+                                                    endTime = picked
+                                                    formBannerMessage = null
+                                                }
+                                            }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = formatTime12HourAr(endTime),
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 13.sp,
+                                                color = Slate900
+                                            )
+                                            Icon(Icons.Default.AccessTime, contentDescription = null, tint = Teal700, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 7. Submit Button (Add or Save Edit)
                     Button(
                         onClick = {
                             if (selectedDay.isBlank()) {
@@ -2052,6 +2184,7 @@ fun DailyScheduleScreen(
                                     )
                                 } else {
                                     onDataChanged()
+                                    ScheduleReminderManager.syncAllLessonReminders(context, repository.getDailySchedules())
                                     showFormFeedback("تمت إضافة الحصة إلى الجدول اليومي بنجاح", isError = false)
                                 }
                             } else {
@@ -2072,6 +2205,7 @@ fun DailyScheduleScreen(
                                 } else {
                                     editingItem = null
                                     onDataChanged()
+                                    ScheduleReminderManager.syncAllLessonReminders(context, repository.getDailySchedules())
                                     showFormFeedback("تم حفظ تعديلات الحصة بنجاح", isError = false)
                                 }
                             }
@@ -2082,24 +2216,193 @@ fun DailyScheduleScreen(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(48.dp)
+                            .height(44.dp)
                     ) {
                         Icon(
                             imageVector = if (editingItem != null) Icons.Default.Save else Icons.Default.Add,
-                            contentDescription = null
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
                             text = if (editingItem != null) "حفظ تعديل الحصة" else "إضافة الحصة إلى الجدول",
                             fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
+                            fontSize = 13.sp
                         )
                     }
                 }
             }
         }
 
-        // 2. Display Weekly Schedule Grouped by Day (Mobile-First RTL Cards)
+        // 2. Global Reminder Settings Card (إعداد التنبيه العام لجميع الحصص)
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, if (globalReminderEnabled) Teal700 else Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                color = if (globalReminderEnabled) Emerald50 else Slate100,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (globalReminderEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
+                                    contentDescription = null,
+                                    tint = if (globalReminderEnabled) Teal700 else Slate600,
+                                    modifier = Modifier
+                                        .padding(6.dp)
+                                        .size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "تفعيل التنبيه لجميع الدروس",
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 13.sp,
+                                    color = Slate900
+                                )
+                                Text(
+                                    text = if (globalReminderEnabled) {
+                                        "مفعّل: إشعار قبل بداية كل حصة بـ $globalReminderMinutes دقائق"
+                                    } else {
+                                        "إرسال إشعار تذكير على الهاتف قبل بدء كل حصة في الجدول"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = if (globalReminderEnabled) Teal700 else Slate600,
+                                    fontWeight = if (globalReminderEnabled) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = globalReminderEnabled,
+                            onCheckedChange = { checked ->
+                                updateGlobalReminderSettings(checked, globalReminderMinutes)
+                                if (!checked) {
+                                    onShowMessage("تم إيقاف تنبيهات الحصص")
+                                } else if (ScheduleReminderManager.hasNotificationPermission(context)) {
+                                    onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل $globalReminderMinutes دقائق)")
+                                }
+                            }
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "وقت التذكير قبل الدرس:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            ScheduleReminderManager.SUPPORTED_MINUTES_OPTIONS.forEach { mins ->
+                                val isSel = globalReminderMinutes == mins
+                                Surface(
+                                    color = if (isSel) Teal700 else Slate100,
+                                    contentColor = if (isSel) Color.White else Slate800,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.clickable {
+                                        updateGlobalReminderSettings(globalReminderEnabled, mins)
+                                        if (globalReminderEnabled) {
+                                            onShowMessage("تم ضبط التنبيه قبل $mins دقائق لجميع الحصص")
+                                        }
+                                    }
+                                ) {
+                                    Text(
+                                        text = "قبل $mins د",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Day Filter Bar (فلترة الأيام في عرض الجدول)
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "تصفية عرض الجدول حسب اليوم:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate800
+                        )
+                        Text(
+                            text = "اليوم الحالي: $todayNameAr",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Teal700
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val filterItems = listOf(
+                            "ALL" to "كل الأيام",
+                            "TODAY" to "اليوم الحالي ($todayNameAr)"
+                        ) + WEEK_DAYS_ORDER.map { it to it }
+
+                        filterItems.forEach { (key, label) ->
+                            val isSel = selectedDayFilter == key
+                            Surface(
+                                color = if (isSel) Slate900 else Slate100,
+                                contentColor = if (isSel) Color.White else Slate800,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.clickable { selectedDayFilter = key }
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Display Schedule Grouped by Day (Compact Mobile-First RTL Cards)
         if (groupedByDay.isEmpty()) {
             item {
                 Surface(
@@ -2111,7 +2414,7 @@ fun DailyScheduleScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(24.dp),
+                            .padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -2119,17 +2422,26 @@ fun DailyScheduleScreen(
                             Icons.Default.Schedule,
                             contentDescription = null,
                             tint = Slate500,
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(28.dp)
                         )
+                        val emptyTitle = when (selectedDayFilter) {
+                            "ALL" -> "لا توجد حصص مسجلة في الجدول اليومي حالياً"
+                            "TODAY" -> "لا توجد حصص مسجلة لليوم الحالي ($todayNameAr)"
+                            else -> "لا توجد حصص مسجلة ليوم $selectedDayFilter"
+                        }
                         Text(
-                            text = "لا توجد حصص مسجلة في الجدول اليومي حالياً",
-                            fontSize = 14.sp,
+                            text = emptyTitle,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Slate800
                         )
                         Text(
-                            text = "استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت",
-                            fontSize = 12.sp,
+                            text = if (selectedDayFilter == "ALL") {
+                                "استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت"
+                            } else {
+                                "يمكنك اختيار «كل الأيام» لعرض جميع الحصص المسجلة أو إضافة حصة جديدة لهذا اليوم"
+                            },
+                            fontSize = 11.sp,
                             color = Slate600
                         )
                     }
@@ -2140,32 +2452,51 @@ fun DailyScheduleScreen(
                 item(key = "day_header_$dayName") {
                     Surface(
                         color = Slate900,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = dayName,
-                                color = Color.White,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontSize = 15.sp
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = dayName,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 14.sp
+                                )
+                                if (dayName == todayNameAr) {
+                                    Surface(
+                                        color = Emerald600,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "اليوم",
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
                             Surface(
                                 color = Teal700,
-                                shape = RoundedCornerShape(8.dp)
+                                shape = RoundedCornerShape(6.dp)
                             ) {
                                 Text(
                                     text = "${dayLessons.size} حصة",
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                 )
                             }
                         }
@@ -2175,71 +2506,96 @@ fun DailyScheduleScreen(
                 items(dayLessons, key = { it.id }) { lesson ->
                     Surface(
                         color = Color.White,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, Slate200),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(3.dp)
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = "${lesson.className} / ${lesson.sectionName}",
-                                        fontWeight = FontWeight.ExtraBold,
-                                        fontSize = 15.sp,
-                                        color = Slate900
-                                    )
-                                    Text(
-                                        text = getArabicLessonLabel(lesson.lessonNumber),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = Teal700
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Surface(
+                                        color = Slate100,
+                                        shape = RoundedCornerShape(6.dp)
                                     ) {
-                                        Icon(
-                                            Icons.Default.AccessTime,
-                                            contentDescription = null,
-                                            tint = Slate600,
-                                            modifier = Modifier.size(15.dp)
-                                        )
                                         Text(
-                                            text = "${formatTime12HourAr(lesson.startTime)} - ${formatTime12HourAr(lesson.endTime)}",
+                                            text = getArabicLessonLabel(lesson.lessonNumber),
                                             fontWeight = FontWeight.ExtraBold,
-                                            fontSize = 13.sp,
-                                            color = Slate700
+                                            fontSize = 11.sp,
+                                            color = Teal700,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "${lesson.className} / شعبة ${lesson.sectionName}",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 14.sp,
+                                        color = Slate900,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.AccessTime,
+                                        contentDescription = null,
+                                        tint = Slate600,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "${formatTime12HourAr(lesson.startTime)} - ${formatTime12HourAr(lesson.endTime)}",
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 12.sp,
+                                        color = Slate700
+                                    )
+                                    if (globalReminderEnabled) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            Icons.Default.NotificationsActive,
+                                            contentDescription = null,
+                                            tint = Teal700,
+                                            modifier = Modifier.size(13.dp)
                                         )
                                     }
                                 }
+                            }
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    OutlinedButton(
-                                        onClick = { loadItemForEdit(lesson) },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        shape = RoundedCornerShape(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(15.dp), tint = Slate800)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("تعديل", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate800)
-                                    }
-                                    OutlinedButton(
-                                        onClick = { pendingDeleteItem = lesson },
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        shape = RoundedCornerShape(8.dp),
-                                        border = BorderStroke(1.dp, Red100)
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(15.dp), tint = Red600)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text("حذف", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Red600)
-                                    }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = { loadItemForEdit(lesson) },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = Slate800)
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("تعديل", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Slate800)
+                                }
+                                OutlinedButton(
+                                    onClick = { pendingDeleteItem = lesson },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, Red100),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp), tint = Red600)
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("حذف", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Red600)
                                 }
                             }
                         }
@@ -2277,6 +2633,7 @@ fun DailyScheduleScreen(
                         }
                         pendingDeleteItem = null
                         onDataChanged()
+                        ScheduleReminderManager.syncAllLessonReminders(context, repository.getDailySchedules())
                         showFormFeedback("تم حذف الحصة من الجدول اليومي", isError = false)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Red600)

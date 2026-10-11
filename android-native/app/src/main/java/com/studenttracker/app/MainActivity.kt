@@ -20,6 +20,7 @@ import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.service.AppExitBackupService
 import com.studenttracker.app.service.DailyBackupWorker
 import com.studenttracker.app.service.ExcelAndBackupService
+import com.studenttracker.app.service.ScheduleReminderManager
 import com.studenttracker.app.ui.*
 import kotlinx.coroutines.launch
 
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
         // Start lightweight task-removal watcher service (does NOT create a backup on launch;
         // only triggers onTaskRemoved when the user swipes the app away from Recents or taps "Close All")
         AppExitBackupService.ensureRunning(applicationContext)
+        runCatching {
+            ScheduleReminderManager.syncAllLessonReminders(applicationContext)
+        }
 
         setContent {
             StudentTrackerRtlTheme {

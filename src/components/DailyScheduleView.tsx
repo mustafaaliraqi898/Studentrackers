@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Bell,
+  BellOff,
+  Calendar,
   Clock,
   Edit3,
   Plus,
@@ -29,6 +32,15 @@ const WEEK_DAYS_ORDER = [
   'الجمعة',
   'السبت',
 ];
+
+const SUPPORTED_REMINDER_MINUTES = [5, 10, 15, 30] as const;
+const GLOBAL_REMINDER_ENABLED_KEY = 'student_tracker_global_schedule_reminder_enabled';
+const GLOBAL_REMINDER_MINUTES_KEY = 'student_tracker_global_schedule_reminder_minutes';
+
+function getArabicTodayName(): string {
+  const jsDay = new Date().getDay(); // 0 = Sunday .. 6 = Saturday
+  return WEEK_DAYS_ORDER[jsDay] ?? 'الأحد';
+}
 
 function getArabicLessonLabel(lessonNum: number): string {
   switch (lessonNum) {
@@ -127,6 +139,53 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   const [selectedLessonNumber, setSelectedLessonNumber] = useState<number>(1);
   const [startTime, setStartTime] = useState<string>('08:00');
   const [endTime, setEndTime] = useState<string>('08:45');
+
+  // Day filter state ("ALL", "TODAY", or specific Arabic day name)
+  const [selectedDayFilter, setSelectedDayFilter] = useState<string>('ALL');
+  const todayNameAr = useMemo(() => getArabicTodayName(), []);
+
+  // Global reminder settings state (persisted in localStorage)
+  const [globalReminderEnabled, setGlobalReminderEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(GLOBAL_REMINDER_ENABLED_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [globalReminderMinutes, setGlobalReminderMinutes] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(GLOBAL_REMINDER_MINUTES_KEY) || '10');
+      return (SUPPORTED_REMINDER_MINUTES as readonly number[]).includes(v) ? v : 10;
+    } catch {
+      return 10;
+    }
+  });
+
+  const updateGlobalReminderSettings = async (
+    nextEnabled: boolean,
+    nextMinutes: number
+  ) => {
+    if (
+      nextEnabled &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'default'
+    ) {
+      try {
+        await Notification.requestPermission();
+      } catch {
+        // ignore permission prompt error in iframe
+      }
+    }
+    setGlobalReminderEnabled(nextEnabled);
+    setGlobalReminderMinutes(nextMinutes);
+    try {
+      localStorage.setItem(GLOBAL_REMINDER_ENABLED_KEY, String(nextEnabled));
+      localStorage.setItem(GLOBAL_REMINDER_MINUTES_KEY, String(nextMinutes));
+    } catch {
+      // ignore storage errors
+    }
+  };
 
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [feedbackIsError, setFeedbackIsError] = useState<boolean>(false);
@@ -245,30 +304,65 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   };
 
   const groupedByDay = useMemo(() => {
-    return WEEK_DAYS_ORDER.map((day) => ({
-      day,
-      lessons: scheduleItems.filter((item) => item.dayOfWeek === day),
-    })).filter((g) => g.lessons.length > 0);
-  }, [scheduleItems]);
+    const daysToConsider =
+      selectedDayFilter === 'ALL'
+        ? WEEK_DAYS_ORDER
+        : selectedDayFilter === 'TODAY'
+          ? [todayNameAr]
+          : [selectedDayFilter];
+
+    return daysToConsider
+      .map((day) => ({
+        day,
+        lessons: scheduleItems
+          .filter((item) => item.dayOfWeek === day)
+          .sort((a, b) => {
+            if (a.lessonNumber !== b.lessonNumber) {
+              return a.lessonNumber - b.lessonNumber;
+            }
+            if (a.startTime !== b.startTime) {
+              return a.startTime.localeCompare(b.startTime);
+            }
+            return a.id - b.id;
+          }),
+      }))
+      .filter((g) => g.lessons.length > 0);
+  }, [scheduleItems, selectedDayFilter, todayNameAr]);
+
+  const dayFilterOptions = useMemo(
+    () => [
+      { key: 'ALL', label: 'كل الأيام' },
+      { key: 'TODAY', label: `اليوم الحالي (${todayNameAr})` },
+      ...WEEK_DAYS_ORDER.map((d) => ({ key: d, label: d })),
+    ],
+    [todayNameAr]
+  );
 
   return (
-    <div className="space-y-4 pb-16">
-      {/* Add / Edit Form Card */}
+    <div className="space-y-3 pb-16">
+      {/* 1. Reorganized Add / Edit Form Card */}
       <section
-        className={`bg-white rounded-2xl p-4 sm:p-5 border shadow-2xs space-y-4 ${
+        className={`bg-white rounded-2xl p-3.5 sm:p-4 border shadow-2xs space-y-2.5 ${
           editingItem ? 'border-amber-500' : 'border-slate-200/80'
         }`}
       >
         <div className="flex items-center justify-between">
-          <h2
-            className={`text-base font-extrabold ${
-              editingItem ? 'text-amber-700' : 'text-slate-900'
-            }`}
-          >
-            {editingItem
-              ? 'تعديل الحصة المسجلة'
-              : 'إضافة حصة إلى الجدول اليومي'}
-          </h2>
+          <div className="flex items-center gap-1.5">
+            <Calendar
+              className={`w-4 h-4 ${
+                editingItem ? 'text-amber-700' : 'text-teal-700'
+              }`}
+            />
+            <h2
+              className={`text-sm font-extrabold ${
+                editingItem ? 'text-amber-700' : 'text-slate-900'
+              }`}
+            >
+              {editingItem
+                ? 'تعديل الحصة المسجلة'
+                : 'إضافة حصة إلى الجدول اليومي'}
+            </h2>
+          </div>
           {editingItem && (
             <button
               type="button"
@@ -286,7 +380,7 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
         {feedbackMessage && (
           <div
             role="status"
-            className={`rounded-xl px-3.5 py-2.5 border text-xs font-extrabold ${
+            className={`rounded-xl px-3 py-2 border text-xs font-extrabold ${
               feedbackIsError
                 ? 'bg-rose-50 border-rose-300 text-rose-800'
                 : 'bg-emerald-50 border-emerald-300 text-emerald-800'
@@ -296,12 +390,12 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
           </div>
         )}
 
-        {/* 1. اليوم */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-extrabold text-slate-800">
-            اليوم:
+        {/* Group A: 1. اختيار اليوم */}
+        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/80 space-y-1.5">
+          <label className="block text-[11px] font-extrabold text-slate-700">
+            1. اختيار اليوم:
           </label>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
             {WEEK_DAYS_ORDER.map((day) => {
               const isSelected = selectedDay === day;
               return (
@@ -312,10 +406,10 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
                     setSelectedDay(day);
                     setFeedbackMessage(null);
                   }}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold shrink-0 transition-colors ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 border transition-colors ${
                     isSelected
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
                   {day}
@@ -325,176 +419,181 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
           </div>
         </div>
 
-        {/* 2. الصف */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-extrabold text-slate-800">
-            الصف:
-          </label>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            {classes.map((cls) => {
-              const isSelected = selectedClassId === cls.id;
-              return (
-                <button
-                  key={cls.id}
-                  type="button"
-                  onClick={() => {
-                    if (selectedClassId !== cls.id) {
-                      setSelectedClassId(cls.id);
-                      const firstSec = sections.find((s) => s.classId === cls.id);
-                      setSelectedSectionId(firstSec?.id ?? null);
-                      setFeedbackMessage(null);
-                    }
-                  }}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold shrink-0 transition-colors ${
-                    isSelected
-                      ? 'bg-slate-900 text-white'
-                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                  }`}
-                >
-                  {cls.className}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 3. الشعبة */}
-        <div className="space-y-1.5">
-          <label className="block text-xs font-extrabold text-slate-800">
-            الشعبة:
-          </label>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            {availableSections.map((sec) => {
-              const isSelected = selectedSectionId === sec.id;
-              return (
-                <button
-                  key={sec.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedSectionId(sec.id);
-                    setFeedbackMessage(null);
-                  }}
-                  className={`px-3 py-2 rounded-lg text-xs font-bold shrink-0 transition-colors ${
-                    isSelected
-                      ? 'bg-teal-700 text-white'
-                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                  }`}
-                >
-                  شعبة {sec.sectionName}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 4. الدرس */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="block text-xs font-extrabold text-slate-800">
-              الدرس:
+        {/* Group B: 2. اختيار الصف & 3. اختيار الشعبة */}
+        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/80 space-y-2">
+          <div className="space-y-1">
+            <label className="block text-[11px] font-extrabold text-slate-700">
+              2. اختيار الصف:
             </label>
-            <button
-              type="button"
-              onClick={() => setMaxLessonsCount((c) => c + 1)}
-              className="text-[11px] font-extrabold text-teal-700 hover:underline"
-            >
-              + إضافة رقم حصة إضافي
-            </button>
-          </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            {Array.from({ length: maxLessonsCount }, (_, i) => i + 1).map(
-              (num) => {
-                const isSelected = selectedLessonNumber === num;
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              {classes.map((cls) => {
+                const isSelected = selectedClassId === cls.id;
                 return (
                   <button
-                    key={num}
+                    key={cls.id}
                     type="button"
                     onClick={() => {
-                      setSelectedLessonNumber(num);
-                      setFeedbackMessage(null);
+                      if (selectedClassId !== cls.id) {
+                        setSelectedClassId(cls.id);
+                        const firstSec = sections.find(
+                          (s) => s.classId === cls.id
+                        );
+                        setSelectedSectionId(firstSec?.id ?? null);
+                        setFeedbackMessage(null);
+                      }
                     }}
-                    className={`px-3 py-2 rounded-lg text-xs font-bold shrink-0 transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 border transition-colors ${
                       isSelected
-                        ? 'bg-slate-900 text-white'
-                        : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    {getArabicLessonLabel(num)}
+                    {cls.className}
                   </button>
                 );
-              }
-            )}
-          </div>
-        </div>
-
-        {/* 5 & 6. وقت بدء الدرس و وقت انتهاء الدرس (نظام 12 ساعة) */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-extrabold text-slate-800 mb-1">
-              وقت بدء الدرس:
-            </label>
-            <div className="relative">
-              <div className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
-                <span>{formatTime12HourAr(startTime)}</span>
-                <Clock className="w-4 h-4 text-teal-700 shrink-0" />
-              </div>
-              <input
-                type="time"
-                value={startTime}
-                aria-label="وقت بدء الدرس"
-                onChange={(e) => {
-                  setStartTime(e.target.value);
-                  setFeedbackMessage(null);
-                }}
-                onClick={(e) => {
-                  try {
-                    if ('showPicker' in HTMLInputElement.prototype) {
-                      (e.currentTarget as HTMLInputElement).showPicker();
-                    }
-                  } catch {
-                    // Fallback to native input behavior
-                  }
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
+              })}
             </div>
           </div>
-          <div>
-            <label className="block text-xs font-extrabold text-slate-800 mb-1">
-              وقت انتهاء الدرس:
+
+          <div className="space-y-1">
+            <label className="block text-[11px] font-extrabold text-slate-700">
+              3. اختيار الشعبة:
             </label>
-            <div className="relative">
-              <div className="w-full min-h-[44px] px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
-                <span>{formatTime12HourAr(endTime)}</span>
-                <Clock className="w-4 h-4 text-teal-700 shrink-0" />
-              </div>
-              <input
-                type="time"
-                value={endTime}
-                aria-label="وقت انتهاء الدرس"
-                onChange={(e) => {
-                  setEndTime(e.target.value);
-                  setFeedbackMessage(null);
-                }}
-                onClick={(e) => {
-                  try {
-                    if ('showPicker' in HTMLInputElement.prototype) {
-                      (e.currentTarget as HTMLInputElement).showPicker();
-                    }
-                  } catch {
-                    // Fallback to native input behavior
-                  }
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              {availableSections.map((sec) => {
+                const isSelected = selectedSectionId === sec.id;
+                return (
+                  <button
+                    key={sec.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSectionId(sec.id);
+                      setFeedbackMessage(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 border transition-colors ${
+                      isSelected
+                        ? 'bg-teal-700 text-white border-teal-700'
+                        : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    شعبة {sec.sectionName}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
+        {/* Group C: 4. رقم الدرس + 5 & 6. وقت البداية والنهاية */}
+        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200/80 space-y-2">
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="block text-[11px] font-extrabold text-slate-700">
+                4. اختيار رقم الدرس:
+              </label>
+              <button
+                type="button"
+                onClick={() => setMaxLessonsCount((c) => c + 1)}
+                className="px-2 py-0.5 rounded-md bg-white border border-teal-700/40 text-[10px] font-extrabold text-teal-700 hover:bg-teal-50"
+              >
+                + إضافة رقم حصة إضافي
+              </button>
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              {Array.from({ length: maxLessonsCount }, (_, i) => i + 1).map(
+                (num) => {
+                  const isSelected = selectedLessonNumber === num;
+                  return (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => {
+                        setSelectedLessonNumber(num);
+                        setFeedbackMessage(null);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold shrink-0 border transition-colors ${
+                        isSelected
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-800 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {getArabicLessonLabel(num)}
+                    </button>
+                  );
+                }
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-extrabold text-slate-700 mb-1">
+                5. وقت بدء الدرس:
+              </label>
+              <div className="relative">
+                <div className="w-full min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
+                  <span>{formatTime12HourAr(startTime)}</span>
+                  <Clock className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                </div>
+                <input
+                  type="time"
+                  value={startTime}
+                  aria-label="وقت بدء الدرس"
+                  onChange={(e) => {
+                    setStartTime(e.target.value);
+                    setFeedbackMessage(null);
+                  }}
+                  onClick={(e) => {
+                    try {
+                      if ('showPicker' in HTMLInputElement.prototype) {
+                        (e.currentTarget as HTMLInputElement).showPicker();
+                      }
+                    } catch {
+                      // Fallback to native input behavior
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-extrabold text-slate-700 mb-1">
+                6. وقت انتهاء الدرس:
+              </label>
+              <div className="relative">
+                <div className="w-full min-h-[38px] px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-extrabold text-slate-900 flex items-center justify-between pointer-events-none">
+                  <span>{formatTime12HourAr(endTime)}</span>
+                  <Clock className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                </div>
+                <input
+                  type="time"
+                  value={endTime}
+                  aria-label="وقت انتهاء الدرس"
+                  onChange={(e) => {
+                    setEndTime(e.target.value);
+                    setFeedbackMessage(null);
+                  }}
+                  onClick={(e) => {
+                    try {
+                      if ('showPicker' in HTMLInputElement.prototype) {
+                        (e.currentTarget as HTMLInputElement).showPicker();
+                      }
+                    } catch {
+                      // Fallback to native input behavior
+                    }
+                  }}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 7. Submit Button */}
         <button
           type="button"
           onClick={handleSubmit}
-          className={`w-full min-h-[48px] px-4 py-2.5 rounded-xl text-white text-sm font-extrabold flex items-center justify-center gap-2 transition-colors shadow-2xs ${
+          className={`w-full min-h-[42px] px-4 py-2 rounded-xl text-white text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors shadow-2xs ${
             editingItem
               ? 'bg-amber-600 hover:bg-amber-700'
               : 'bg-emerald-600 hover:bg-emerald-700'
@@ -514,65 +613,204 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
         </button>
       </section>
 
-      {/* Schedule Display Grouped by Day */}
+      {/* 2. Global Reminder Settings Card (إعداد التنبيه العام لجميع الحصص) */}
+      <section
+        className={`bg-white rounded-2xl p-3.5 border shadow-2xs space-y-2.5 ${
+          globalReminderEnabled ? 'border-teal-700' : 'border-slate-200/80'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                globalReminderEnabled
+                  ? 'bg-emerald-50 text-teal-700'
+                  : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              {globalReminderEnabled ? (
+                <Bell className="w-4 h-4" />
+              ) : (
+                <BellOff className="w-4 h-4" />
+              )}
+            </div>
+            <div>
+              <h3 className="text-xs font-extrabold text-slate-900">
+                تفعيل التنبيه لجميع الدروس
+              </h3>
+              <p
+                className={`text-[11px] ${
+                  globalReminderEnabled
+                    ? 'text-teal-700 font-bold'
+                    : 'text-slate-500'
+                }`}
+              >
+                {globalReminderEnabled
+                  ? `مفعّل: إشعار قبل بداية كل حصة بـ ${globalReminderMinutes} دقائق`
+                  : 'إرسال إشعار تذكير على الهاتف قبل بدء كل حصة في الجدول'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={globalReminderEnabled}
+            onClick={() =>
+              void updateGlobalReminderSettings(
+                !globalReminderEnabled,
+                globalReminderMinutes
+              )
+            }
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors shrink-0 ${
+              globalReminderEnabled
+                ? 'bg-teal-700 text-white'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            {globalReminderEnabled ? 'مفعّل' : 'إيقاف'}
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
+          <span className="text-[11px] font-extrabold text-slate-700">
+            وقت التذكير قبل الدرس:
+          </span>
+          <div className="flex items-center gap-1.5">
+            {SUPPORTED_REMINDER_MINUTES.map((mins) => {
+              const isSelected = globalReminderMinutes === mins;
+              return (
+                <button
+                  key={mins}
+                  type="button"
+                  onClick={() =>
+                    void updateGlobalReminderSettings(
+                      globalReminderEnabled,
+                      mins
+                    )
+                  }
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                    isSelected
+                      ? 'bg-teal-700 text-white'
+                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                  }`}
+                >
+                  قبل {mins} د
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Day Filter Bar (فلترة الأيام في عرض الجدول) */}
+      <section className="bg-white rounded-xl p-3 border border-slate-200/80 shadow-2xs space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-extrabold text-slate-800">
+            تصفية عرض الجدول حسب اليوم:
+          </span>
+          <span className="text-[11px] font-bold text-teal-700">
+            اليوم الحالي: {todayNameAr}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          {dayFilterOptions.map((item) => {
+            const isSelected = selectedDayFilter === item.key;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setSelectedDayFilter(item.key)}
+                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold shrink-0 transition-colors ${
+                  isSelected
+                    ? 'bg-slate-900 text-white'
+                    : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* 4. Schedule Display Grouped by Day (Compact Cards) */}
       {groupedByDay.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-8 text-center space-y-2">
-          <Clock className="w-8 h-8 text-slate-400 mx-auto" />
-          <p className="text-sm font-extrabold text-slate-800">
-            لا توجد حصص مسجلة في الجدول اليومي حالياً
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 text-center space-y-1.5">
+          <Clock className="w-7 h-7 text-slate-400 mx-auto" />
+          <p className="text-xs font-extrabold text-slate-800">
+            {selectedDayFilter === 'ALL'
+              ? 'لا توجد حصص مسجلة في الجدول اليومي حالياً'
+              : selectedDayFilter === 'TODAY'
+                ? `لا توجد حصص مسجلة لليوم الحالي (${todayNameAr})`
+                : `لا توجد حصص مسجلة ليوم ${selectedDayFilter}`}
           </p>
-          <p className="text-xs text-slate-500">
-            استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت
+          <p className="text-[11px] text-slate-500">
+            {selectedDayFilter === 'ALL'
+              ? 'استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت'
+              : 'يمكنك اختيار «كل الأيام» لعرض جميع الحصص المسجلة أو إضافة حصة جديدة لهذا اليوم'}
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {groupedByDay.map(({ day, lessons }) => (
-            <div key={day} className="space-y-2">
-              <div className="px-4 py-3 bg-slate-900 text-white rounded-xl flex items-center justify-between">
-                <span className="text-sm font-extrabold">{day}</span>
-                <span className="px-2.5 py-1 bg-teal-700 text-white rounded-lg text-xs font-bold">
+            <div key={day} className="space-y-1.5">
+              <div className="px-3.5 py-2 bg-slate-900 text-white rounded-xl flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-extrabold">{day}</span>
+                  {day === todayNameAr && (
+                    <span className="px-2 py-0.5 bg-emerald-600 text-white rounded-md text-[10px] font-bold">
+                      اليوم
+                    </span>
+                  )}
+                </div>
+                <span className="px-2 py-0.5 bg-teal-700 text-white rounded-md text-[11px] font-bold">
                   {lessons.length} حصة
                 </span>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 {lessons.map((lesson) => (
                   <div
                     key={lesson.id}
-                    className="bg-white rounded-xl border border-slate-200/80 p-4 flex items-start justify-between gap-3 shadow-2xs"
+                    className="bg-white rounded-xl border border-slate-200/80 px-3 py-2.5 flex items-center justify-between gap-2.5 shadow-2xs"
                   >
-                    <div className="space-y-1">
-                      <p className="text-sm font-extrabold text-slate-900">
-                        {lesson.className} / {lesson.sectionName}
-                      </p>
-                      <p className="text-xs font-bold text-teal-700">
-                        {getArabicLessonLabel(lesson.lessonNumber)}
-                      </p>
-                      <p className="text-xs font-extrabold text-slate-700 flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-teal-700 text-[11px] font-extrabold shrink-0">
+                          {getArabicLessonLabel(lesson.lessonNumber)}
+                        </span>
+                        <p className="text-xs font-extrabold text-slate-900 truncate">
+                          {lesson.className} / شعبة {lesson.sectionName}
+                        </p>
+                      </div>
+                      <p className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                         <span>
                           {formatTime12HourAr(lesson.startTime)} -{' '}
                           {formatTime12HourAr(lesson.endTime)}
                         </span>
+                        {globalReminderEnabled && (
+                          <Bell className="w-3 h-3 text-teal-700 mr-1 shrink-0" />
+                        )}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
                         onClick={() => loadItemForEdit(lesson)}
-                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-800 hover:bg-slate-50 flex items-center gap-1"
+                        className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-800 hover:bg-slate-50 flex items-center gap-1"
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
+                        <Edit3 className="w-3 h-3" />
                         <span>تعديل</span>
                       </button>
                       <button
                         type="button"
                         onClick={() => setPendingDeleteItem(lesson)}
-                        className="px-3 py-1.5 rounded-lg border border-rose-200 text-xs font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-1"
+                        className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-[11px] font-bold text-rose-600 hover:bg-rose-50 flex items-center gap-1"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Trash2 className="w-3 h-3" />
                         <span>حذف</span>
                       </button>
                     </div>
