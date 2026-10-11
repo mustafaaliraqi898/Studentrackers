@@ -4925,7 +4925,7 @@ fun AveragesTableScreen(
                         enabled = reports.isNotEmpty() && currentClass != null && currentSection != null,
                         onClick = {
                             if (currentClass != null && currentSection != null) {
-                                printAveragesReportA4Landscape(
+                                printAveragesReportA4Portrait(
                                     context = context,
                                     className = currentClass.className,
                                     sectionName = currentSection.sectionName,
@@ -5236,11 +5236,12 @@ private fun escapeHtmlText(input: String): String {
 }
 
 /**
- * Prints the currently filtered class/section student averages table in A4 Landscape RTL format,
+ * Prints the currently filtered class/section student averages table in A4 Portrait RTL format,
  * using the exact same calculated values and rounding rules shown in the "المعدل" screen and StudentProfileScreen.
- * Repeats the table header (`<thead>`) on every printed page and avoids splitting rows across page breaks.
+ * Dynamically adapts vertical spacing and font size to fit all section students onto a single A4 Portrait sheet
+ * whenever possible, while repeating the table header (`<thead>`) and avoiding split rows if a very large section spans 2 pages.
  */
-private fun printAveragesReportA4Landscape(
+private fun printAveragesReportA4Portrait(
     context: android.content.Context,
     className: String,
     sectionName: String,
@@ -5251,6 +5252,60 @@ private fun printAveragesReportA4Landscape(
     runCatching {
         val todayStr = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
         val displayDate = GradingService.formatDisplayDate(todayStr)
+        val studentCount = reports.size
+
+        // Adaptive portrait density so typical sections (up to ~50-55 students) fit cleanly on 1 A4 Portrait page
+        val pageMargin = when {
+            studentCount > 45 -> "5mm 6mm"
+            studentCount > 35 -> "6mm 7mm"
+            else -> "8mm 8mm"
+        }
+        val headerPadding = when {
+            studentCount > 40 -> "5px 10px"
+            studentCount > 28 -> "6px 12px"
+            else -> "8px 14px"
+        }
+        val headerMarginBottom = when {
+            studentCount > 40 -> "5px"
+            studentCount > 28 -> "7px"
+            else -> "10px"
+        }
+        val titleFontSize = when {
+            studentCount > 40 -> "15px"
+            studentCount > 28 -> "16px"
+            else -> "18px"
+        }
+        val metaFontSize = when {
+            studentCount > 40 -> "10.5px"
+            studentCount > 28 -> "11px"
+            else -> "12px"
+        }
+        val thPadding = when {
+            studentCount > 45 -> "4px 4px"
+            studentCount > 35 -> "5px 5px"
+            else -> "6px 6px"
+        }
+        val tdPadding = when {
+            studentCount > 48 -> "2.5px 5px"
+            studentCount > 38 -> "3.5px 6px"
+            studentCount > 28 -> "4.5px 6px"
+            else -> "6px 7px"
+        }
+        val tableFontSize = when {
+            studentCount > 48 -> "10px"
+            studentCount > 38 -> "10.5px"
+            studentCount > 28 -> "11.5px"
+            else -> "12.5px"
+        }
+        val thFontSize = when {
+            studentCount > 40 -> "10.5px"
+            studentCount > 28 -> "11px"
+            else -> "12px"
+        }
+        val rowLineHeight = when {
+            studentCount > 40 -> "1.15"
+            else -> "1.25"
+        }
 
         val rowsHtml = StringBuilder()
         reports.forEach { rep ->
@@ -5296,8 +5351,8 @@ private fun printAveragesReportA4Landscape(
                 <title>المعدل - ${escapeHtmlText(className)} - شعبة ${escapeHtmlText(sectionName)}</title>
                 <style>
                     @page {
-                        size: A4 landscape;
-                        margin: 12mm;
+                        size: A4 portrait;
+                        margin: $pageMargin;
                     }
                     * {
                         box-sizing: border-box;
@@ -5313,28 +5368,31 @@ private fun printAveragesReportA4Landscape(
                         padding: 0;
                     }
                     .report-header {
-                        border: 2px solid #0F172A;
-                        border-radius: 8px;
-                        padding: 10px 16px;
-                        margin-bottom: 12px;
+                        border: 1.5px solid #0F172A;
+                        border-radius: 6px;
+                        padding: $headerPadding;
+                        margin-bottom: $headerMarginBottom;
                         background-color: #F8FAFC;
+                        page-break-inside: avoid;
+                        break-inside: avoid;
                     }
                     .report-title {
-                        font-size: 20px;
+                        font-size: $titleFontSize;
                         font-weight: 800;
                         text-align: center;
-                        margin: 0 0 8px 0;
+                        margin: 0 0 4px 0;
                         color: #0F172A;
+                        line-height: 1.2;
                     }
                     .meta-row {
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        font-size: 13px;
+                        font-size: $metaFontSize;
                         font-weight: 700;
                         color: #1E293B;
                         flex-wrap: wrap;
-                        gap: 12px;
+                        gap: 8px;
                     }
                     table {
                         width: 100%;
@@ -5354,33 +5412,42 @@ private fun printAveragesReportA4Landscape(
                     }
                     th, td {
                         border: 1px solid #334155;
-                        padding: 8px 10px;
-                        font-size: 13px;
+                        font-size: $tableFontSize;
+                        line-height: $rowLineHeight;
+                        vertical-align: middle;
                     }
                     th {
                         background-color: #0F172A;
                         color: #FFFFFF;
+                        font-size: $thFontSize;
                         font-weight: 800;
                         text-align: center;
+                        padding: $thPadding;
+                    }
+                    td {
+                        padding: $tdPadding;
                     }
                     th.name-header {
-                        width: 36%;
+                        width: 38%;
                         text-align: right;
+                        padding-right: 8px;
                     }
                     th.score-header {
-                        width: 16%;
+                        width: 15.5%;
                         text-align: center;
                     }
                     td.student-name {
                         font-weight: 800;
                         text-align: right;
-                        white-space: nowrap;
-                        overflow: hidden;
-                        text-overflow: ellipsis;
+                        padding-right: 8px;
+                        white-space: normal;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
                     }
                     td.score-cell {
                         text-align: center;
                         font-weight: 800;
+                        white-space: nowrap;
                     }
                     td.annual-cell {
                         background-color: #F0FDF4;
@@ -5389,6 +5456,7 @@ private fun printAveragesReportA4Landscape(
                     td.incomplete {
                         color: #64748B;
                         font-weight: 600;
+                        font-size: 92%;
                         background-color: #FFFFFF;
                     }
                     tbody tr:nth-child(even) td:not(.annual-cell) {
@@ -5436,7 +5504,7 @@ private fun printAveragesReportA4Landscape(
                 val jobName = "المعدل_${className}_شعبة_${sectionName}"
                 val printAdapter = webView.createPrintDocumentAdapter(jobName)
                 val printAttributes = android.print.PrintAttributes.Builder()
-                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asLandscape())
+                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
                     .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
                     .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
                     .build()
