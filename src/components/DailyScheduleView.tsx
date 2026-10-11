@@ -33,9 +33,19 @@ const WEEK_DAYS_ORDER = [
   'السبت',
 ];
 
-const SUPPORTED_REMINDER_MINUTES = [5, 10, 15, 30] as const;
 const GLOBAL_REMINDER_ENABLED_KEY = 'student_tracker_global_schedule_reminder_enabled';
 const GLOBAL_REMINDER_MINUTES_KEY = 'student_tracker_global_schedule_reminder_minutes';
+
+function parsePositiveIntegerMinutes(rawInput: string): number | null {
+  const normalized = rawInput
+    .trim()
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - '٠'.charCodeAt(0)))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - '۰'.charCodeAt(0)));
+  if (!normalized || !/^\d+$/.test(normalized)) return null;
+  const num = Number(normalized);
+  if (!Number.isSafeInteger(num) || num <= 0) return null;
+  return num;
+}
 
 function getArabicTodayName(): string {
   const jsDay = new Date().getDay(); // 0 = Sunday .. 6 = Saturday
@@ -144,29 +154,110 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('ALL');
   const todayNameAr = useMemo(() => getArabicTodayName(), []);
 
-  // Global reminder settings state (persisted in localStorage)
+  // Global reminder settings state (persisted in localStorage, no forced default)
+  const [globalReminderMinutes, setGlobalReminderMinutes] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem(GLOBAL_REMINDER_MINUTES_KEY);
+      if (!saved) return null;
+      return parsePositiveIntegerMinutes(saved);
+    } catch {
+      return null;
+    }
+  });
+  const [reminderMinutesInput, setReminderMinutesInput] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem(GLOBAL_REMINDER_MINUTES_KEY);
+      if (!saved) return '';
+      const parsed = parsePositiveIntegerMinutes(saved);
+      return parsed !== null ? String(parsed) : '';
+    } catch {
+      return '';
+    }
+  });
   const [globalReminderEnabled, setGlobalReminderEnabled] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(GLOBAL_REMINDER_ENABLED_KEY) === 'true';
+      const savedEnabled = localStorage.getItem(GLOBAL_REMINDER_ENABLED_KEY) === 'true';
+      const savedMins = localStorage.getItem(GLOBAL_REMINDER_MINUTES_KEY);
+      const parsedMins = savedMins ? parsePositiveIntegerMinutes(savedMins) : null;
+      return savedEnabled && parsedMins !== null;
     } catch {
       return false;
     }
   });
-  const [globalReminderMinutes, setGlobalReminderMinutes] = useState<number>(() => {
-    try {
-      const v = Number(localStorage.getItem(GLOBAL_REMINDER_MINUTES_KEY) || '10');
-      return (SUPPORTED_REMINDER_MINUTES as readonly number[]).includes(v) ? v : 10;
-    } catch {
-      return 10;
-    }
-  });
+  const [reminderInputError, setReminderInputError] = useState<string | null>(null);
 
-  const updateGlobalReminderSettings = async (
-    nextEnabled: boolean,
-    nextMinutes: number
-  ) => {
+  const persistReminderState = (nextEnabled: boolean, nextMinutes: number | null) => {
+    const effectiveEnabled = nextEnabled && nextMinutes !== null && nextMinutes > 0;
+    setGlobalReminderEnabled(effectiveEnabled);
+    setGlobalReminderMinutes(nextMinutes);
+    try {
+      localStorage.setItem(GLOBAL_REMINDER_ENABLED_KEY, String(effectiveEnabled));
+      if (nextMinutes !== null && nextMinutes > 0) {
+        localStorage.setItem(GLOBAL_REMINDER_MINUTES_KEY, String(nextMinutes));
+      } else {
+        localStorage.removeItem(GLOBAL_REMINDER_MINUTES_KEY);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const handleReminderMinutesInputChange = (rawText: string) => {
+    setReminderMinutesInput(rawText);
+    const trimmed = rawText.trim();
+    if (!trimmed) {
+      if (globalReminderEnabled) {
+        setReminderInputError(
+          'يرجى إدخال مدة التذكير بالدقائق (رقم صحيح موجب) لجدولة التنبيهات'
+        );
+      } else {
+        setReminderInputError(null);
+      }
+      persistReminderState(false, null);
+      return;
+    }
+
+    const parsed = parsePositiveIntegerMinutes(trimmed);
+    if (parsed === null) {
+      setReminderInputError(
+        'يرجى إدخال رقم صحيح موجب للدقائق (أكبر من صفر، مثل: 2 أو 7 أو 15)'
+      );
+      persistReminderState(false, null);
+      return;
+    }
+
+    setReminderInputError(null);
+    persistReminderState(globalReminderEnabled, parsed);
+  };
+
+  const handleToggleGlobalReminder = async (nextChecked: boolean) => {
+    if (!nextChecked) {
+      setReminderInputError(null);
+      const validMins = parsePositiveIntegerMinutes(reminderMinutesInput);
+      persistReminderState(false, validMins);
+      return;
+    }
+
+    const trimmed = reminderMinutesInput.trim();
+    if (!trimmed) {
+      setReminderInputError(
+        'يرجى إدخال مدة التذكير بالدقائق أولاً (مثل: 5 أو 10 أو 25) قبل تفعيل التنبيهات'
+      );
+      persistReminderState(false, null);
+      return;
+    }
+
+    const parsed = parsePositiveIntegerMinutes(trimmed);
+    if (parsed === null) {
+      setReminderInputError(
+        'يرجى إدخال رقم صحيح موجب للدقائق (أكبر من صفر، مثل: 2 أو 7 أو 15)'
+      );
+      persistReminderState(false, null);
+      return;
+    }
+
+    setReminderInputError(null);
     if (
-      nextEnabled &&
       typeof window !== 'undefined' &&
       'Notification' in window &&
       Notification.permission === 'default'
@@ -177,14 +268,7 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
         // ignore permission prompt error in iframe
       }
     }
-    setGlobalReminderEnabled(nextEnabled);
-    setGlobalReminderMinutes(nextMinutes);
-    try {
-      localStorage.setItem(GLOBAL_REMINDER_ENABLED_KEY, String(nextEnabled));
-      localStorage.setItem(GLOBAL_REMINDER_MINUTES_KEY, String(nextMinutes));
-    } catch {
-      // ignore storage errors
-    }
+    persistReminderState(true, parsed);
   };
 
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -616,19 +700,21 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
       {/* 2. Global Reminder Settings Card (إعداد التنبيه العام لجميع الحصص) */}
       <section
         className={`bg-white rounded-2xl p-3.5 border shadow-2xs space-y-2.5 ${
-          globalReminderEnabled ? 'border-teal-700' : 'border-slate-200/80'
+          globalReminderEnabled && globalReminderMinutes !== null
+            ? 'border-teal-700'
+            : 'border-slate-200/80'
         }`}
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div
               className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                globalReminderEnabled
+                globalReminderEnabled && globalReminderMinutes !== null
                   ? 'bg-emerald-50 text-teal-700'
                   : 'bg-slate-100 text-slate-600'
               }`}
             >
-              {globalReminderEnabled ? (
+              {globalReminderEnabled && globalReminderMinutes !== null ? (
                 <Bell className="w-4 h-4" />
               ) : (
                 <BellOff className="w-4 h-4" />
@@ -640,14 +726,16 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
               </h3>
               <p
                 className={`text-[11px] ${
-                  globalReminderEnabled
+                  globalReminderEnabled && globalReminderMinutes !== null
                     ? 'text-teal-700 font-bold'
                     : 'text-slate-500'
                 }`}
               >
-                {globalReminderEnabled
-                  ? `مفعّل: إشعار قبل بداية كل حصة بـ ${globalReminderMinutes} دقائق`
-                  : 'إرسال إشعار تذكير على الهاتف قبل بدء كل حصة في الجدول'}
+                {globalReminderEnabled && globalReminderMinutes !== null
+                  ? `مفعّل: إشعار قبل بداية كل حصة بـ ${globalReminderMinutes} دقيقة`
+                  : globalReminderMinutes !== null
+                    ? `متوقف حالياً (المدة المحفوظة: ${globalReminderMinutes} دقيقة قبل الدرس)`
+                    : 'أدخل مدة التذكير بالدقائق ثم فعّل المفتاح لجدولة تنبيهات الحصص'}
               </p>
             </div>
           </div>
@@ -655,52 +743,51 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
           <button
             type="button"
             role="switch"
-            aria-checked={globalReminderEnabled}
-            onClick={() =>
-              void updateGlobalReminderSettings(
-                !globalReminderEnabled,
-                globalReminderMinutes
-              )
-            }
+            aria-checked={globalReminderEnabled && globalReminderMinutes !== null}
+            onClick={() => void handleToggleGlobalReminder(!globalReminderEnabled)}
             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-colors shrink-0 ${
-              globalReminderEnabled
+              globalReminderEnabled && globalReminderMinutes !== null
                 ? 'bg-teal-700 text-white'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
-            {globalReminderEnabled ? 'مفعّل' : 'إيقاف'}
+            {globalReminderEnabled && globalReminderMinutes !== null ? 'مفعّل' : 'إيقاف'}
           </button>
         </div>
 
-        <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100">
-          <span className="text-[11px] font-extrabold text-slate-700">
-            وقت التذكير قبل الدرس:
-          </span>
+        <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-slate-100">
+          <label
+            htmlFor="global-reminder-minutes-input"
+            className="text-[11px] font-extrabold text-slate-700"
+          >
+            مدة التذكير قبل الدرس (بالدقائق):
+          </label>
           <div className="flex items-center gap-1.5">
-            {SUPPORTED_REMINDER_MINUTES.map((mins) => {
-              const isSelected = globalReminderMinutes === mins;
-              return (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() =>
-                    void updateGlobalReminderSettings(
-                      globalReminderEnabled,
-                      mins
-                    )
-                  }
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                    isSelected
-                      ? 'bg-teal-700 text-white'
-                      : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                  }`}
-                >
-                  قبل {mins} د
-                </button>
-              );
-            })}
+            <input
+              id="global-reminder-minutes-input"
+              type="text"
+              inputMode="numeric"
+              value={reminderMinutesInput}
+              onChange={(e) => handleReminderMinutesInputChange(e.target.value)}
+              placeholder="مثال: 7 أو 15"
+              className={`w-28 px-2.5 py-1.5 rounded-lg border text-xs font-extrabold text-slate-900 text-center focus:outline-none ${
+                reminderInputError
+                  ? 'border-rose-500 bg-rose-50/40'
+                  : 'border-slate-200 bg-slate-50 focus:border-teal-700 focus:bg-white'
+              }`}
+            />
+            <span className="text-[11px] font-bold text-slate-600">دقيقة</span>
           </div>
         </div>
+
+        {reminderInputError && (
+          <div
+            role="alert"
+            className="rounded-lg px-2.5 py-1.5 bg-rose-50 border border-rose-300 text-[11px] font-extrabold text-rose-700"
+          >
+            {reminderInputError}
+          </div>
+        )}
       </section>
 
       {/* 3. Day Filter Bar (فلترة الأيام في عرض الجدول) */}
@@ -790,7 +877,7 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
                           {formatTime12HourAr(lesson.startTime)} -{' '}
                           {formatTime12HourAr(lesson.endTime)}
                         </span>
-                        {globalReminderEnabled && (
+                        {globalReminderEnabled && globalReminderMinutes !== null && (
                           <Bell className="w-3 h-3 text-teal-700 mr-1 shrink-0" />
                         )}
                       </p>

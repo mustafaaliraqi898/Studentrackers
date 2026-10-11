@@ -24,7 +24,7 @@ import java.time.ZoneId
 
 data class GlobalScheduleReminderSettings(
     val enabled: Boolean,
-    val minutesBefore: Int
+    val minutesBefore: Int?
 )
 
 object ScheduleReminderManager {
@@ -48,41 +48,67 @@ object ScheduleReminderManager {
     const val EXTRA_END_TIME = "extra_end_time"
     const val EXTRA_MINUTES_BEFORE = "extra_minutes_before"
 
-    val SUPPORTED_MINUTES_OPTIONS = listOf(5, 10, 15, 30)
+    fun parsePositiveMinutes(rawInput: String): Int? {
+        val normalized = buildString {
+            for (ch in rawInput.trim()) {
+                when (ch) {
+                    in '٠'..'٩' -> append(('0'.code + (ch.code - '٠'.code)).toChar())
+                    in '۰'..'۹' -> append(('0'.code + (ch.code - '۰'.code)).toChar())
+                    else -> append(ch)
+                }
+            }
+        }
+        if (normalized.isEmpty() || !normalized.all { it.isDigit() }) return null
+        val value = normalized.toIntOrNull() ?: return null
+        return if (value > 0) value else null
+    }
 
     fun getSettings(context: Context): GlobalScheduleReminderSettings {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val enabled = prefs.getBoolean(KEY_GLOBAL_REMINDER_ENABLED, false)
-        val minutes = prefs.getInt(KEY_GLOBAL_REMINDER_MINUTES, 10).let {
-            if (it in SUPPORTED_MINUTES_OPTIONS) it else 10
+        val rawMinutes = if (prefs.contains(KEY_GLOBAL_REMINDER_MINUTES)) {
+            prefs.getInt(KEY_GLOBAL_REMINDER_MINUTES, -1)
+        } else {
+            -1
         }
-        return GlobalScheduleReminderSettings(enabled = enabled, minutesBefore = minutes)
+        val minutes = if (rawMinutes > 0) rawMinutes else null
+        return GlobalScheduleReminderSettings(
+            enabled = enabled && minutes != null,
+            minutesBefore = minutes
+        )
     }
 
     fun saveSettingsAndSync(
         context: Context,
         enabled: Boolean,
-        minutesBefore: Int,
+        minutesBefore: Int?,
         repository: TrackerRepository? = null
     ): GlobalScheduleReminderSettings {
-        val cleanMinutes = if (minutesBefore in SUPPORTED_MINUTES_OPTIONS) minutesBefore else 10
+        val validMinutes = minutesBefore?.takeIf { it > 0 }
+        val effectiveEnabled = enabled && validMinutes != null
         val appCtx = context.applicationContext
-        appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_GLOBAL_REMINDER_ENABLED, enabled)
-            .putInt(KEY_GLOBAL_REMINDER_MINUTES, cleanMinutes)
-            .apply()
+        val editor = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        editor.putBoolean(KEY_GLOBAL_REMINDER_ENABLED, effectiveEnabled)
+        if (validMinutes != null) {
+            editor.putInt(KEY_GLOBAL_REMINDER_MINUTES, validMinutes)
+        } else {
+            editor.remove(KEY_GLOBAL_REMINDER_MINUTES)
+        }
+        editor.apply()
 
         val repo = repository ?: TrackerRepository(AppDatabaseHelper.getInstance(appCtx))
         runCatching {
             val db = AppDatabaseHelper.getInstance(appCtx).writableDatabase
             db.execSQL(
                 "UPDATE DailySchedule SET ReminderEnabled = ?, ReminderMinutesBefore = ?;",
-                arrayOf<Any>(if (enabled) 1 else 0, cleanMinutes)
+                arrayOf<Any>(if (effectiveEnabled) 1 else 0, validMinutes ?: 0)
             )
         }
         syncAllLessonReminders(appCtx, repo.getDailySchedules())
-        return GlobalScheduleReminderSettings(enabled = enabled, minutesBefore = cleanMinutes)
+        return GlobalScheduleReminderSettings(
+            enabled = effectiveEnabled,
+            minutesBefore = validMinutes
+        )
     }
 
     fun hasNotificationPermission(context: Context): Boolean {
@@ -122,36 +148,39 @@ object ScheduleReminderManager {
         val alarmManager = appCtx.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         val prefs = appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        // Cancel previously registered alarms first so deleted/modified lessons never leave stale alarms
-        val oldIds = prefs.getStringSet(KEY_KNOWN_LESSON_IDS, emptySet()).orEmpty()
-        oldIds.forEach { idStr ->
-            idStr.toLongOrNull()?.let { oldId ->
-                cancelAlarmForLessonId(appCtx, alarmManager, oldId)
-            }
-        }
-
-        if (!settings.enabled) {
-            prefs.edit().putStringSet(KEY_KNOWN_LESSON_IDS, emptySet()).apply()
-            return
-        }
-
         val allLessons = schedules ?: runCatching {
             TrackerRepository(AppDatabaseHelper.getInstance(appCtx)).getDailySchedules()
         }.getOrDefault(emptyList())
+
+        // Cancel previously registered alarms and all current schedule IDs first so deleted/modified lessons or updated durations never duplicate
+        val oldIds = prefs.getStringSet(KEY_KNOWN_LESSON_IDS, emptySet()).orEmpty()
+        val idsToCancel = buildSet {
+            oldIds.forEach { it.toLongOrNull()?.let(::add) }
+            allLessons.forEach { add(it.id) }
+        }
+        idsToCancel.forEach { oldId ->
+            cancelAlarmForLessonId(appCtx, alarmManager, oldId)
+        }
+
+        val validMinutes = settings.minutesBefore
+        if (!settings.enabled || validMinutes == null || validMinutes <= 0) {
+            prefs.edit().putStringSet(KEY_KNOWN_LESSON_IDS, emptySet()).apply()
+            return
+        }
 
         val activeIds = mutableSetOf<String>()
         for (lesson in allLessons) {
             val triggerMillis = computeNextTriggerMillis(
                 dayOfWeekAr = lesson.dayOfWeek,
                 startTime24 = lesson.startTime,
-                minutesBefore = settings.minutesBefore
+                minutesBefore = validMinutes
             ) ?: continue
 
             scheduleSingleLessonAlarm(
                 context = appCtx,
                 alarmManager = alarmManager,
                 lesson = lesson,
-                minutesBefore = settings.minutesBefore,
+                minutesBefore = validMinutes,
                 triggerAtMillis = triggerMillis
             )
             activeIds.add(lesson.id.toString())
@@ -338,7 +367,8 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
 
         if (action == ScheduleReminderManager.ACTION_LESSON_REMINDER) {
             val settings = ScheduleReminderManager.getSettings(appCtx)
-            if (!settings.enabled) return
+            val savedMinutes = settings.minutesBefore
+            if (!settings.enabled || savedMinutes == null || savedMinutes <= 0) return
 
             val lessonId = intent.getLongExtra(ScheduleReminderManager.EXTRA_LESSON_ID, -1L)
             val dayOfWeek = intent.getStringExtra(ScheduleReminderManager.EXTRA_DAY_OF_WEEK) ?: ""
@@ -348,7 +378,7 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
             val startTime = intent.getStringExtra(ScheduleReminderManager.EXTRA_START_TIME) ?: ""
             val minutesBefore = intent.getIntExtra(
                 ScheduleReminderManager.EXTRA_MINUTES_BEFORE,
-                settings.minutesBefore
+                savedMinutes
             )
 
             if (ScheduleReminderManager.hasNotificationPermission(appCtx)) {

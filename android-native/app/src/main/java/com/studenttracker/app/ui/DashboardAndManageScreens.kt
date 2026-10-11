@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1653,47 +1655,142 @@ fun DailyScheduleScreen(
     // Global Lesson Reminder Settings State
     val initialReminderSettings = remember { ScheduleReminderManager.getSettings(context) }
     var globalReminderEnabled by remember { mutableStateOf(initialReminderSettings.enabled) }
-    var globalReminderMinutes by remember { mutableIntStateOf(initialReminderSettings.minutesBefore) }
+    var globalReminderMinutes by remember { mutableStateOf<Int?>(initialReminderSettings.minutesBefore) }
+    var reminderMinutesInput by remember {
+        mutableStateOf(initialReminderSettings.minutesBefore?.toString() ?: "")
+    }
+    var reminderInputError by remember { mutableStateOf<String?>(null) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
+        val validMinutes = ScheduleReminderManager.parsePositiveMinutes(reminderMinutesInput)
+            ?: globalReminderMinutes
+        if (granted && validMinutes != null) {
             val saved = ScheduleReminderManager.saveSettingsAndSync(
                 context = context,
                 enabled = true,
-                minutesBefore = globalReminderMinutes,
+                minutesBefore = validMinutes,
                 repository = repository
             )
             globalReminderEnabled = saved.enabled
             globalReminderMinutes = saved.minutesBefore
-            onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل ${saved.minutesBefore} دقائق)")
+            reminderInputError = null
+            onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل ${saved.minutesBefore} دقيقة)")
         } else {
             globalReminderEnabled = false
             ScheduleReminderManager.saveSettingsAndSync(
                 context = context,
                 enabled = false,
-                minutesBefore = globalReminderMinutes,
+                minutesBefore = validMinutes,
                 repository = repository
             )
             onShowMessage("يلزم منح إذن الإشعارات لتفعيل تنبيهات الحصص على الهاتف")
         }
     }
 
-    fun updateGlobalReminderSettings(newEnabled: Boolean, newMinutes: Int) {
-        if (newEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !ScheduleReminderManager.hasNotificationPermission(context)) {
-            globalReminderMinutes = newMinutes
+    fun applyReminderMinutesTextChange(newText: String) {
+        reminderMinutesInput = newText
+        val trimmed = newText.trim()
+        if (trimmed.isEmpty()) {
+            reminderInputError = if (globalReminderEnabled) {
+                "يرجى إدخال مدة التذكير بالدقائق (رقم صحيح موجب) لجدولة التنبيهات"
+            } else {
+                null
+            }
+            val saved = ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = null,
+                repository = repository
+            )
+            globalReminderMinutes = saved.minutesBefore
+            return
+        }
+
+        val parsed = ScheduleReminderManager.parsePositiveMinutes(trimmed)
+        if (parsed == null) {
+            reminderInputError = "يرجى إدخال رقم صحيح موجب للدقائق (أكبر من صفر، مثل: 2 أو 7 أو 15)"
+            ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = null,
+                repository = repository
+            )
+            globalReminderMinutes = null
+            return
+        }
+
+        reminderInputError = null
+        val saved = ScheduleReminderManager.saveSettingsAndSync(
+            context = context,
+            enabled = globalReminderEnabled,
+            minutesBefore = parsed,
+            repository = repository
+        )
+        globalReminderMinutes = saved.minutesBefore
+    }
+
+    fun toggleGlobalReminderSwitch(checked: Boolean) {
+        if (!checked) {
+            reminderInputError = null
+            val currentValid = ScheduleReminderManager.parsePositiveMinutes(reminderMinutesInput)
+            val saved = ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = currentValid,
+                repository = repository
+            )
+            globalReminderEnabled = saved.enabled
+            globalReminderMinutes = saved.minutesBefore
+            onShowMessage("تم إيقاف تنبيهات الدروس وإلغاء الإشعارات المجدولة")
+            return
+        }
+
+        val trimmed = reminderMinutesInput.trim()
+        if (trimmed.isEmpty()) {
+            globalReminderEnabled = false
+            reminderInputError = "يرجى إدخال مدة التذكير بالدقائق أولاً (مثل: 5 أو 10 أو 25) قبل تفعيل التنبيهات"
+            ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = null,
+                repository = repository
+            )
+            onShowMessage("يرجى تحديد مدة التذكير بالدقائق أولاً لتفعيل التنبيهات")
+            return
+        }
+
+        val parsed = ScheduleReminderManager.parsePositiveMinutes(trimmed)
+        if (parsed == null) {
+            globalReminderEnabled = false
+            reminderInputError = "يرجى إدخال رقم صحيح موجب للدقائق (أكبر من صفر، مثل: 2 أو 7 أو 15)"
+            ScheduleReminderManager.saveSettingsAndSync(
+                context = context,
+                enabled = false,
+                minutesBefore = null,
+                repository = repository
+            )
+            onShowMessage("مدة التذكير غير صحيحة؛ يرجى إدخال رقم صحيح موجب")
+            return
+        }
+
+        reminderInputError = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !ScheduleReminderManager.hasNotificationPermission(context)) {
+            globalReminderMinutes = parsed
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
+
         val saved = ScheduleReminderManager.saveSettingsAndSync(
             context = context,
-            enabled = newEnabled,
-            minutesBefore = newMinutes,
+            enabled = true,
+            minutesBefore = parsed,
             repository = repository
         )
         globalReminderEnabled = saved.enabled
         globalReminderMinutes = saved.minutesBefore
+        onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل $parsed دقيقة)")
     }
 
     var formBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -2236,10 +2333,11 @@ fun DailyScheduleScreen(
 
         // 2. Global Reminder Settings Card (إعداد التنبيه العام لجميع الحصص)
         item {
+            val isActivelyScheduled = globalReminderEnabled && globalReminderMinutes != null && globalReminderMinutes!! > 0
             Surface(
                 color = Color.White,
                 shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, if (globalReminderEnabled) Teal700 else Slate200),
+                border = BorderStroke(1.dp, if (isActivelyScheduled) Teal700 else Slate200),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -2257,13 +2355,13 @@ fun DailyScheduleScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Surface(
-                                color = if (globalReminderEnabled) Emerald50 else Slate100,
+                                color = if (isActivelyScheduled) Emerald50 else Slate100,
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (globalReminderEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
+                                    imageVector = if (isActivelyScheduled) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
                                     contentDescription = null,
-                                    tint = if (globalReminderEnabled) Teal700 else Slate600,
+                                    tint = if (isActivelyScheduled) Teal700 else Slate600,
                                     modifier = Modifier
                                         .padding(6.dp)
                                         .size(18.dp)
@@ -2277,26 +2375,21 @@ fun DailyScheduleScreen(
                                     color = Slate900
                                 )
                                 Text(
-                                    text = if (globalReminderEnabled) {
-                                        "مفعّل: إشعار قبل بداية كل حصة بـ $globalReminderMinutes دقائق"
-                                    } else {
-                                        "إرسال إشعار تذكير على الهاتف قبل بدء كل حصة في الجدول"
+                                    text = when {
+                                        isActivelyScheduled -> "مفعّل: إشعار قبل بداية كل حصة بـ $globalReminderMinutes دقيقة"
+                                        globalReminderMinutes != null -> "متوقف حالياً (المدة المحفوظة: $globalReminderMinutes دقيقة قبل الدرس)"
+                                        else -> "أدخل مدة التذكير بالدقائق ثم فعّل المفتاح لجدولة تنبيهات الحصص"
                                     },
                                     fontSize = 11.sp,
-                                    color = if (globalReminderEnabled) Teal700 else Slate600,
-                                    fontWeight = if (globalReminderEnabled) FontWeight.Bold else FontWeight.Normal
+                                    color = if (isActivelyScheduled) Teal700 else Slate600,
+                                    fontWeight = if (isActivelyScheduled) FontWeight.Bold else FontWeight.Normal
                                 )
                             }
                         }
                         Switch(
                             checked = globalReminderEnabled,
                             onCheckedChange = { checked ->
-                                updateGlobalReminderSettings(checked, globalReminderMinutes)
-                                if (!checked) {
-                                    onShowMessage("تم إيقاف تنبيهات الحصص")
-                                } else if (ScheduleReminderManager.hasNotificationPermission(context)) {
-                                    onShowMessage("تم تفعيل التنبيه لجميع الحصص (قبل $globalReminderMinutes دقائق)")
-                                }
+                                toggleGlobalReminderSwitch(checked)
                             }
                         )
                     }
@@ -2304,36 +2397,54 @@ fun DailyScheduleScreen(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "وقت التذكير قبل الدرس:",
+                            text = "مدة التذكير قبل الدرس (بالدقائق):",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = Slate700
+                            color = Slate700,
+                            modifier = Modifier.weight(1f)
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            ScheduleReminderManager.SUPPORTED_MINUTES_OPTIONS.forEach { mins ->
-                                val isSel = globalReminderMinutes == mins
-                                Surface(
-                                    color = if (isSel) Teal700 else Slate100,
-                                    contentColor = if (isSel) Color.White else Slate800,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.clickable {
-                                        updateGlobalReminderSettings(globalReminderEnabled, mins)
-                                        if (globalReminderEnabled) {
-                                            onShowMessage("تم ضبط التنبيه قبل $mins دقائق لجميع الحصص")
-                                        }
-                                    }
-                                ) {
-                                    Text(
-                                        text = "قبل $mins د",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
-                                    )
-                                }
-                            }
+                        OutlinedTextField(
+                            value = reminderMinutesInput,
+                            onValueChange = { applyReminderMinutesTextChange(it) },
+                            placeholder = {
+                                Text(
+                                    text = "مثال: 7 أو 15",
+                                    fontSize = 11.sp,
+                                    color = Slate500
+                                )
+                            },
+                            suffix = {
+                                Text(
+                                    text = "دقيقة",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate600
+                                )
+                            },
+                            singleLine = true,
+                            isError = reminderInputError != null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(145.dp)
+                        )
+                    }
+
+                    if (reminderInputError != null) {
+                        Surface(
+                            color = Red50,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, Red600),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = reminderInputError!!,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Red700,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
                         }
                     }
                 }
@@ -2563,7 +2674,7 @@ fun DailyScheduleScreen(
                                         fontSize = 12.sp,
                                         color = Slate700
                                     )
-                                    if (globalReminderEnabled) {
+                                    if (globalReminderEnabled && globalReminderMinutes != null && globalReminderMinutes!! > 0) {
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Icon(
                                             Icons.Default.NotificationsActive,
