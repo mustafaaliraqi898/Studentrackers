@@ -789,38 +789,10 @@ export const DailyPlanView: React.FC<DailyPlanViewProps> = ({
 
       {/* Fullscreen Image Lightbox Modal */}
       {previewImage && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/90 flex flex-col justify-between p-4"
-          onClick={() => setPreviewImage(null)}
-        >
-          <div
-            className="flex items-center justify-between max-w-5xl w-full mx-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 className="text-sm font-extrabold text-white">
-              معاينة صورة الدرس بالحجم الكامل
-            </h4>
-            <button
-              type="button"
-              onClick={() => setPreviewImage(null)}
-              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5"
-            >
-              <X className="w-4 h-4" />
-              إغلاق
-            </button>
-          </div>
-
-          <div
-            className="flex-1 flex items-center justify-center overflow-auto my-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={getPlanImageDataSrc(previewImage.imageBase64)}
-              alt="معاينة صورة الدرس"
-              className="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl"
-            />
-          </div>
-        </div>
+        <ZoomablePlanImageModal
+          image={previewImage}
+          onClose={() => setPreviewImage(null)}
+        />
       )}
 
       {/* Delete Plan Confirmation Modal */}
@@ -864,3 +836,251 @@ export const DailyPlanView: React.FC<DailyPlanViewProps> = ({
     </div>
   );
 };
+
+export const ZoomablePlanImageModal: React.FC<{
+  image: DailyPlanImageEntity;
+  onClose: () => void;
+}> = ({ image, onClose }) => {
+  const [scale, setScale] = useState<number>(1);
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const gestureRef = useRef<{
+    isPinching: boolean;
+    initialPinchDistance: number;
+    initialScale: number;
+    isPanning: boolean;
+    panStartX: number;
+    panStartY: number;
+    initialOffsetX: number;
+    initialOffsetY: number;
+    lastTapTime: number;
+  }>({
+    isPinching: false,
+    initialPinchDistance: 0,
+    initialScale: 1,
+    isPanning: false,
+    panStartX: 0,
+    panStartY: 0,
+    initialOffsetX: 0,
+    initialOffsetY: 0,
+    lastTapTime: 0,
+  });
+
+  useEffect(() => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }, [image.id, image.fileName, image.imageBase64]);
+
+  const clampOffset = (
+    nextX: number,
+    nextY: number,
+    targetScale: number
+  ): { x: number; y: number } => {
+    if (targetScale <= 1) return { x: 0, y: 0 };
+    const el = containerRef.current;
+    const width = el ? el.clientWidth : window.innerWidth;
+    const height = el ? el.clientHeight : window.innerHeight;
+    const maxX = (width * (targetScale - 1)) / 2;
+    const maxY = (height * (targetScale - 1)) / 2;
+    return {
+      x: Math.max(-maxX, Math.min(maxX, nextX)),
+      y: Math.max(-maxY, Math.min(maxY, nextY)),
+    };
+  };
+
+  const resetZoom = () => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const getTouchDistance = (touches: React.TouchList): number => {
+    if (touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.touches.length === 2) {
+      const dist = getTouchDistance(e.touches);
+      gestureRef.current.isPinching = true;
+      gestureRef.current.isPanning = false;
+      gestureRef.current.initialPinchDistance = dist > 0 ? dist : 1;
+      gestureRef.current.initialScale = scale;
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - gestureRef.current.lastTapTime < 300) {
+        e.preventDefault();
+        resetZoom();
+        gestureRef.current.lastTapTime = 0;
+        gestureRef.current.isPanning = false;
+        return;
+      }
+      gestureRef.current.lastTapTime = now;
+
+      if (scale > 1) {
+        gestureRef.current.isPanning = true;
+        gestureRef.current.panStartX = e.touches[0].clientX;
+        gestureRef.current.panStartY = e.touches[0].clientY;
+        gestureRef.current.initialOffsetX = offset.x;
+        gestureRef.current.initialOffsetY = offset.y;
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.touches.length === 2 && gestureRef.current.isPinching) {
+      e.preventDefault();
+      const dist = getTouchDistance(e.touches);
+      if (dist > 0 && gestureRef.current.initialPinchDistance > 0) {
+        const ratio = dist / gestureRef.current.initialPinchDistance;
+        const nextScale = Math.max(
+          1,
+          Math.min(5, gestureRef.current.initialScale * ratio)
+        );
+        if (nextScale <= 1.01) {
+          setScale(1);
+          setOffset({ x: 0, y: 0 });
+        } else {
+          setScale(nextScale);
+          setOffset((prev) => clampOffset(prev.x, prev.y, nextScale));
+        }
+      }
+    } else if (
+      e.touches.length === 1 &&
+      gestureRef.current.isPanning &&
+      scale > 1
+    ) {
+      e.preventDefault();
+      const dx = e.touches[0].clientX - gestureRef.current.panStartX;
+      const dy = e.touches[0].clientY - gestureRef.current.panStartY;
+      setOffset(
+        clampOffset(
+          gestureRef.current.initialOffsetX + dx,
+          gestureRef.current.initialOffsetY + dy,
+          scale
+        )
+      );
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (e.touches.length < 2) {
+      gestureRef.current.isPinching = false;
+    }
+    if (e.touches.length === 1 && scale > 1) {
+      gestureRef.current.isPanning = true;
+      gestureRef.current.panStartX = e.touches[0].clientX;
+      gestureRef.current.panStartY = e.touches[0].clientY;
+      gestureRef.current.initialOffsetX = offset.x;
+      gestureRef.current.initialOffsetY = offset.y;
+    } else if (e.touches.length === 0) {
+      gestureRef.current.isPanning = false;
+      if (scale <= 1.01) {
+        resetZoom();
+      }
+    }
+  };
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    if (scale <= 1) return;
+    gestureRef.current.isPanning = true;
+    gestureRef.current.panStartX = e.clientX;
+    gestureRef.current.panStartY = e.clientY;
+    gestureRef.current.initialOffsetX = offset.x;
+    gestureRef.current.initialOffsetY = offset.y;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!gestureRef.current.isPanning || scale <= 1) return;
+    e.preventDefault();
+    const dx = e.clientX - gestureRef.current.panStartX;
+    const dy = e.clientY - gestureRef.current.panStartY;
+    setOffset(
+      clampOffset(
+        gestureRef.current.initialOffsetX + dx,
+        gestureRef.current.initialOffsetY + dy,
+        scale
+      )
+    );
+  };
+
+  const handleMouseUp = () => {
+    gestureRef.current.isPanning = false;
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const factor = e.deltaY < 0 ? 1.15 : 0.87;
+    const nextScale = Math.max(1, Math.min(5, scale * factor));
+    if (nextScale <= 1.01) {
+      resetZoom();
+    } else {
+      setScale(nextScale);
+      setOffset((prev) => clampOffset(prev.x, prev.y, nextScale));
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-slate-950/90 flex flex-col justify-between p-4 select-none"
+      onClick={() => {
+        if (scale <= 1) onClose();
+      }}
+    >
+      <div
+        className="flex items-center justify-between max-w-5xl w-full mx-auto z-10"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h4 className="text-sm font-extrabold text-white">
+          معاينة صورة الدرس بالحجم الكامل
+        </h4>
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5"
+        >
+          <X className="w-4 h-4" />
+          إغلاق
+        </button>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex-1 flex items-center justify-center overflow-hidden my-4 touch-none"
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          resetZoom();
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onWheel={handleWheel}
+      >
+        <img
+          src={getPlanImageDataSrc(image.imageBase64)}
+          alt="معاينة صورة الدرس"
+          draggable={false}
+          style={{
+            transform: `translate3d(${offset.x}px, ${offset.y}px, 0) scale(${scale})`,
+            transformOrigin: 'center center',
+            cursor: scale > 1 ? 'grab' : 'default',
+          }}
+          className="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl pointer-events-none select-none"
+        />
+      </div>
+    </div>
+  );
+};
+

@@ -29,7 +29,7 @@ import {
   round2,
 } from '../services/gradingService';
 import { TrackerRepository } from '../repositories/trackerRepository';
-import { getPlanImageDataSrc } from './DailyPlanView';
+import { getPlanImageDataSrc, ZoomablePlanImageModal } from './DailyPlanView';
 
 interface StudentProfileViewProps {
   student: StudentEntity | undefined;
@@ -701,37 +701,10 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
 
       {/* Fullscreen Plan Image Modal */}
       {previewPlanImage && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/90 flex flex-col justify-between p-4"
-          onClick={() => setPreviewPlanImage(null)}
-        >
-          <div
-            className="flex items-center justify-between max-w-5xl w-full mx-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h4 className="text-sm font-extrabold text-white">
-              معاينة صورة الدرس بالحجم الكامل
-            </h4>
-            <button
-              type="button"
-              onClick={() => setPreviewPlanImage(null)}
-              className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-extrabold flex items-center gap-1.5"
-            >
-              <X className="w-4 h-4" />
-              إغلاق
-            </button>
-          </div>
-          <div
-            className="flex-1 flex items-center justify-center overflow-auto my-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <img
-              src={getPlanImageDataSrc(previewPlanImage.imageBase64)}
-              alt="صورة الدرس"
-              className="max-w-full max-h-[82vh] object-contain rounded-xl shadow-2xl"
-            />
-          </div>
-        </div>
+        <ZoomablePlanImageModal
+          image={previewPlanImage}
+          onClose={() => setPreviewPlanImage(null)}
+        />
       )}
 
       {/* Written Exam Modal */}

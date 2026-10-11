@@ -5,6 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,13 +19,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
@@ -6379,6 +6388,22 @@ fun DailyPlanFullScreenImageDialog(
         decodePlanBitmap(context, repository, imageEntity.fileName, imageEntity.imageBase64)
     }
 
+    var scale by remember(imageEntity.id, imageEntity.fileName) { mutableFloatStateOf(1f) }
+    var offset by remember(imageEntity.id, imageEntity.fileName) { mutableStateOf(Offset.Zero) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    fun clampOffset(targetOffset: Offset, targetScale: Float): Offset {
+        if (targetScale <= 1f || containerSize.width <= 0 || containerSize.height <= 0) {
+            return Offset.Zero
+        }
+        val maxX = (containerSize.width * (targetScale - 1f)) / 2f
+        val maxY = (containerSize.height * (targetScale - 1f)) / 2f
+        return Offset(
+            x = targetOffset.x.coerceIn(-maxX, maxX),
+            y = targetOffset.y.coerceIn(-maxY, maxY)
+        )
+    }
+
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
@@ -6419,7 +6444,30 @@ fun DailyPlanFullScreenImageDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 12.dp)
+                        .clipToBounds()
+                        .onSizeChanged { containerSize = it }
+                        .pointerInput(imageEntity.id, imageEntity.fileName) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                }
+                            )
+                        }
+                        .pointerInput(imageEntity.id, imageEntity.fileName) {
+                            detectTransformGestures { _, pan, zoom, _ ->
+                                val newScale = (scale * zoom).coerceIn(1f, 5f)
+                                if (newScale <= 1.01f) {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                } else {
+                                    val scaledOffset = offset + pan
+                                    scale = newScale
+                                    offset = clampOffset(scaledOffset, newScale)
+                                }
+                            }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     if (imageBitmap != null) {
@@ -6427,7 +6475,15 @@ fun DailyPlanFullScreenImageDialog(
                             bitmap = imageBitmap,
                             contentDescription = "صورة الدرس بالحجم الكامل",
                             contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
+                            filterQuality = FilterQuality.High,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    scaleX = scale
+                                    scaleY = scale
+                                    translationX = offset.x
+                                    translationY = offset.y
+                                }
                         )
                     } else {
                         Text(
