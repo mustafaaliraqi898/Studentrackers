@@ -5546,12 +5546,15 @@ private fun printAveragesReportA4Portrait(
 
 /**
  * Prints a formal student names roster ("طباعة سجل أسماء الطلبة") in A4 Portrait RTL format.
- * Strictly fits all students of the selected class/section onto a single A4 Portrait sheet without creating a second page:
- * 1. Top-Right: Blank space for writing the school name manually.
- * 2. Top-Center: Title "أسماء الطلبة للعام الدراسي" with a blank space for writing the academic year manually.
- * 3. Top-Left: Currently selected Class and Section clearly displayed.
- * 4. Two-column table ("ت" and "اسم الطالب") numbered 1..N in the exact current order.
- * 5. Programmatically calculates and verifies the exact single-page layout height before invoking the Android PrintManager.
+ * Uses Android's native [android.graphics.pdf.PdfDocument] + [android.print.PrintDocumentAdapter]
+ * with exact A4 Portrait dimensions (595 x 842 pt) instead of WebView so that:
+ * 1. The roster is guaranteed to be strictly 1 page (`setPageCount(1)`).
+ * 2. The available vertical space after the top header is accurately measured and distributed across all student rows,
+ *    preventing the table from being squished at the top of the page or rendered with tiny unreadable text.
+ * 3. Top-Right: "المدرسة:" with a blank dotted line for manual writing.
+ * 4. Top-Center: "أسماء الطلبة للعام الدراسي" with a blank dotted space for manual writing.
+ * 5. Top-Left: Selected Class and Section clearly displayed.
+ * 6. Two-column RTL table ("ت" on the right, "اسم الطالب" on the left) numbered 1..N in the exact current order.
  */
 private fun printStudentNamesRosterSinglePageA4Portrait(
     context: android.content.Context,
@@ -5561,285 +5564,354 @@ private fun printStudentNamesRosterSinglePageA4Portrait(
     onError: (String) -> Unit
 ) {
     runCatching {
-        val totalStudents = studentNames.size.coerceAtLeast(1)
-
-        // A4 Portrait total height = 297mm (~1122.5px at 96 DPI).
-        // We use a safe printable height budget of 1045px (with 6mm top/bottom @page margins)
-        // and pre-calculate header + table header + N rows so total height is strictly <= 1045px.
-        val pageMarginMm = when {
-            totalStudents > 55 -> "4mm 7mm"
-            totalStudents > 40 -> "5mm 8mm"
-            else -> "7mm 10mm"
-        }
-        val safePrintableHeightPx = when {
-            totalStudents > 55 -> 1068.0
-            totalStudents > 40 -> 1054.0
-            else -> 1030.0
-        }
-        val headerBoxHeightPx = when {
-            totalStudents > 55 -> 44.0
-            totalStudents > 40 -> 50.0
-            else -> 58.0
-        }
-        val headerMarginBottomPx = when {
-            totalStudents > 45 -> 4.0
-            else -> 6.0
-        }
-        val tableHeaderHeightPx = when {
-            totalStudents > 55 -> 20.0
-            totalStudents > 40 -> 23.0
-            else -> 27.0
+        val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as? android.print.PrintManager
+        if (printManager == null) {
+            onError("خدمة الطباعة غير متوفرة على هذا الجهاز")
+            return
         }
 
-        val availableRowsHeightPx = (safePrintableHeightPx - headerBoxHeightPx - headerMarginBottomPx - tableHeaderHeightPx)
-            .coerceAtLeast(totalStudents * 10.0)
-        val computedRowHeightPx = (availableRowsHeightPx / totalStudents)
-            .coerceIn(10.5, 28.0)
-        val computedFontSizePx = (computedRowHeightPx * 0.56)
-            .coerceIn(8.5, 14.0)
-        val computedHeaderFontSizePx = (computedFontSizePx + 0.5)
-            .coerceIn(9.5, 13.5)
+        val jobName = "سجل_أسماء_الطلبة_${className}_شعبة_${sectionName}"
+        val cleanNames = studentNames.toList()
 
-        val rowsHtml = StringBuilder()
-        studentNames.forEachIndexed { index, fullName ->
-            val seq = index + 1
-            rowsHtml.append(
-                """
-                <tr>
-                    <td class="seq-cell">$seq</td>
-                    <td class="name-cell">${escapeHtmlText(fullName)}</td>
-                </tr>
-                """.trimIndent()
-            )
-        }
+        val printAdapter = object : android.print.PrintDocumentAdapter() {
+            override fun onLayout(
+                oldAttributes: android.print.PrintAttributes?,
+                newAttributes: android.print.PrintAttributes,
+                cancellationSignal: android.os.CancellationSignal?,
+                callback: LayoutResultCallback,
+                extras: android.os.Bundle?
+            ) {
+                if (cancellationSignal?.isCanceled == true) {
+                    callback.onLayoutCancelled()
+                    return
+                }
+                val info = android.print.PrintDocumentInfo.Builder("$jobName.pdf")
+                    .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                    .setPageCount(1)
+                    .build()
+                callback.onLayoutFinished(info, true)
+            }
 
-        val htmlDocument = """
-            <!DOCTYPE html>
-            <html lang="ar" dir="rtl">
-            <head>
-                <meta charset="UTF-8" />
-                <title>سجل أسماء الطلبة - ${escapeHtmlText(className)} - شعبة ${escapeHtmlText(sectionName)}</title>
-                <style>
-                    @page {
-                        size: A4 portrait;
-                        margin: $pageMarginMm;
+            override fun onWrite(
+                pages: Array<out android.print.PageRange>?,
+                destination: android.os.ParcelFileDescriptor,
+                cancellationSignal: android.os.CancellationSignal?,
+                callback: WriteResultCallback
+            ) {
+                val pdfDocument = android.graphics.pdf.PdfDocument()
+                try {
+                    if (cancellationSignal?.isCanceled == true) {
+                        callback.onWriteCancelled()
+                        return
                     }
-                    * {
-                        box-sizing: border-box;
-                        -webkit-print-color-adjust: exact !important;
-                        print-color-adjust: exact !important;
-                    }
-                    html, body {
-                        width: 100%;
-                        margin: 0;
-                        padding: 0;
-                        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
-                        direction: rtl;
-                        text-align: right;
-                        color: #0F172A;
-                        background-color: #FFFFFF;
-                    }
-                    #single-page-sheet {
-                        width: 100%;
-                        page-break-inside: avoid !important;
-                        break-inside: avoid !important;
-                        page-break-after: avoid !important;
-                        break-after: avoid !important;
-                        transform-origin: top center;
-                    }
-                    .roster-header {
-                        display: flex;
-                        flex-direction: row;
-                        justify-content: space-between;
-                        align-items: center;
-                        border: 1.5px solid #0F172A;
-                        border-radius: 6px;
-                        padding: 4px 10px;
-                        height: ${String.format(java.util.Locale.US, "%.1f", headerBoxHeightPx)}px;
-                        margin-bottom: ${String.format(java.util.Locale.US, "%.1f", headerMarginBottomPx)}px;
-                        background-color: #F8FAFC;
-                    }
-                    .header-right {
-                        width: 30%;
-                        text-align: right;
-                        font-size: ${String.format(java.util.Locale.US, "%.1f", computedHeaderFontSizePx)}px;
-                        font-weight: 800;
-                        color: #0F172A;
-                        display: flex;
-                        align-items: center;
-                        gap: 6px;
-                    }
-                    .school-blank-line {
-                        flex: 1;
-                        border-bottom: 1.5px dotted #334155;
-                        height: 18px;
-                        display: inline-block;
-                    }
-                    .header-center {
-                        width: 42%;
-                        text-align: center;
-                        font-size: ${String.format(java.util.Locale.US, "%.1f", (computedHeaderFontSizePx + 1.5).coerceAtMost(15.5))}px;
-                        font-weight: 800;
-                        color: #0F172A;
-                        white-space: nowrap;
-                    }
-                    .year-blank-space {
-                        display: inline-block;
-                        min-width: 95px;
-                        border-bottom: 1.5px dotted #334155;
-                        margin-right: 4px;
-                    }
-                    .header-left {
-                        width: 28%;
-                        text-align: left;
-                        font-size: ${String.format(java.util.Locale.US, "%.1f", computedHeaderFontSizePx)}px;
-                        font-weight: 800;
-                        color: #0F172A;
-                        white-space: nowrap;
-                    }
-                    table {
-                        width: 100%;
-                        border-collapse: collapse;
-                        table-layout: fixed;
-                        direction: rtl;
-                        page-break-inside: avoid !important;
-                        break-inside: avoid !important;
-                    }
-                    tr {
-                        height: ${String.format(java.util.Locale.US, "%.2f", computedRowHeightPx)}px;
-                        page-break-inside: avoid !important;
-                        break-inside: avoid !important;
-                    }
-                    thead tr {
-                        height: ${String.format(java.util.Locale.US, "%.1f", tableHeaderHeightPx)}px;
-                    }
-                    th, td {
-                        border: 1px solid #1E293B;
-                        padding: 0 8px;
-                        font-size: ${String.format(java.util.Locale.US, "%.2f", computedFontSizePx)}px;
-                        line-height: 1.1;
-                        vertical-align: middle;
-                    }
-                    th {
-                        background-color: #0F172A;
-                        color: #FFFFFF;
-                        font-weight: 800;
-                        text-align: center;
-                    }
-                    th.seq-col, td.seq-cell {
-                        width: 11%;
-                        text-align: center;
-                        font-weight: 800;
-                    }
-                    th.name-col {
-                        width: 89%;
-                        text-align: right;
-                        padding-right: 10px;
-                    }
-                    td.name-cell {
-                        width: 89%;
-                        text-align: right;
-                        padding-right: 10px;
-                        font-weight: 800;
-                        white-space: normal;
-                        word-wrap: break-word;
-                        overflow-wrap: break-word;
-                    }
-                    tbody tr:nth-child(even) td {
-                        background-color: #F8FAFC;
-                    }
-                </style>
-                <script>
-                    function fitRosterStrictlyOnSingleA4Page() {
-                        try {
-                            var sheet = document.getElementById('single-page-sheet');
-                            if (!sheet) return 'OK';
-                            var maxSinglePageHeightPx = ${String.format(java.util.Locale.US, "%.1f", safePrintableHeightPx)};
-                            var rows = document.querySelectorAll('tbody tr');
-                            var cells = document.querySelectorAll('tbody td');
-                            var currentRowH = ${String.format(java.util.Locale.US, "%.2f", computedRowHeightPx)};
-                            var currentFont = ${String.format(java.util.Locale.US, "%.2f", computedFontSizePx)};
 
-                            var guard = 0;
-                            while (sheet.scrollHeight > maxSinglePageHeightPx && guard < 25) {
-                                var ratio = maxSinglePageHeightPx / sheet.scrollHeight;
-                                currentRowH = Math.max(8.0, currentRowH * ratio * 0.97);
-                                currentFont = Math.max(7.0, currentFont * ratio * 0.97);
-                                for (var i = 0; i < rows.length; i++) {
-                                    rows[i].style.height = currentRowH + 'px';
-                                }
-                                for (var j = 0; j < cells.length; j++) {
-                                    cells[j].style.fontSize = currentFont + 'px';
-                                    cells[j].style.lineHeight = '1.05';
-                                }
-                                guard++;
-                            }
+                    // Standard ISO A4 Portrait in PostScript points (1/72 inch): 595 x 842 pt
+                    val pageWidth = 595
+                    val pageHeight = 842
+                    val pageInfo = android.graphics.pdf.PdfDocument.PageInfo.Builder(pageWidth, pageHeight, 1).create()
+                    val page = pdfDocument.startPage(pageInfo)
+                    val canvas = page.canvas
 
-                            if (sheet.scrollHeight > maxSinglePageHeightPx) {
-                                var scale = maxSinglePageHeightPx / sheet.scrollHeight;
-                                sheet.style.zoom = scale;
-                            }
-                            return 'FITTED:' + sheet.scrollHeight;
-                        } catch (e) {
-                            return 'ERR:' + e.message;
+                    // White page background
+                    canvas.drawColor(android.graphics.Color.WHITE)
+
+                    val totalStudents = cleanNames.size.coerceAtLeast(1)
+
+                    // Balanced margins in points (adaptive for very large sections while utilizing full A4 height)
+                    val marginH = if (totalStudents > 45) 22f else 28f
+                    val marginTop = if (totalStudents > 45) 20f else 26f
+                    val marginBottom = if (totalStudents > 45) 20f else 26f
+
+                    val contentLeft = marginH
+                    val contentRight = pageWidth - marginH
+                    val contentWidth = contentRight - contentLeft
+
+                    // 1. Header Box dimensions
+                    val headerHeight = when {
+                        totalStudents > 50 -> 42f
+                        totalStudents > 38 -> 46f
+                        else -> 52f
+                    }
+                    val headerBottomGap = when {
+                        totalStudents > 50 -> 8f
+                        else -> 10f
+                    }
+                    val headerTop = marginTop
+                    val headerBottom = headerTop + headerHeight
+                    val headerRect = android.graphics.RectF(contentLeft, headerTop, contentRight, headerBottom)
+
+                    val headerBgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.FILL
+                        color = android.graphics.Color.parseColor("#F8FAFC")
+                    }
+                    val headerBorderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 1.5f
+                        color = android.graphics.Color.parseColor("#0F172A")
+                    }
+                    canvas.drawRoundRect(headerRect, 6f, 6f, headerBgPaint)
+                    canvas.drawRoundRect(headerRect, 6f, 6f, headerBorderPaint)
+
+                    val boldTypeface = android.graphics.Typeface.create(
+                        android.graphics.Typeface.DEFAULT,
+                        android.graphics.Typeface.BOLD
+                    )
+
+                    val headerSideFontSize = when {
+                        totalStudents > 50 -> 11f
+                        totalStudents > 38 -> 11.5f
+                        else -> 12.5f
+                    }
+                    val headerCenterFontSize = when {
+                        totalStudents > 50 -> 13f
+                        totalStudents > 38 -> 14f
+                        else -> 15f
+                    }
+
+                    val headerCenterY = headerTop + headerHeight / 2f
+
+                    // Top-Right: "المدرسة: ......................"
+                    val rightHeaderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = headerSideFontSize
+                        color = android.graphics.Color.parseColor("#0F172A")
+                        textAlign = android.graphics.Paint.Align.RIGHT
+                    }
+                    val rightFontMetrics = rightHeaderPaint.fontMetrics
+                    val rightBaselineY = headerCenterY - (rightFontMetrics.ascent + rightFontMetrics.descent) / 2f
+                    val schoolLabel = "المدرسة: "
+                    val schoolRightX = contentRight - 10f
+                    canvas.drawText(schoolLabel, schoolRightX, rightBaselineY, rightHeaderPaint)
+
+                    val schoolLabelWidth = rightHeaderPaint.measureText(schoolLabel)
+                    val dottedLinePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 1.1f
+                        color = android.graphics.Color.parseColor("#475569")
+                        pathEffect = android.graphics.DashPathEffect(floatArrayOf(3f, 3f), 0f)
+                    }
+                    val schoolLineEndX = schoolRightX - schoolLabelWidth - 2f
+                    val schoolLineStartX = contentRight - contentWidth * 0.28f
+                    if (schoolLineEndX > schoolLineStartX) {
+                        canvas.drawLine(
+                            schoolLineStartX,
+                            rightBaselineY + 3f,
+                            schoolLineEndX,
+                            rightBaselineY + 3f,
+                            dottedLinePaint
+                        )
+                    }
+
+                    // Top-Center: "أسماء الطلبة للعام الدراسي ................"
+                    val centerHeaderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = headerCenterFontSize
+                        color = android.graphics.Color.parseColor("#0F172A")
+                        textAlign = android.graphics.Paint.Align.CENTER
+                    }
+                    val centerFontMetrics = centerHeaderPaint.fontMetrics
+                    val centerBaselineY = headerCenterY - (centerFontMetrics.ascent + centerFontMetrics.descent) / 2f
+                    val centerTitleText = "أسماء الطلبة للعام الدراسي                        "
+                    val centerX = (contentLeft + contentRight) / 2f
+                    canvas.drawText(centerTitleText, centerX, centerBaselineY, centerHeaderPaint)
+
+                    // Draw dotted blank line for the academic year on the left side of the centered title
+                    val fullCenterWidth = centerHeaderPaint.measureText(centerTitleText)
+                    val titleOnlyWidth = centerHeaderPaint.measureText("أسماء الطلبة للعام الدراسي ")
+                    val yearLineRightX = (centerX + fullCenterWidth / 2f) - titleOnlyWidth
+                    val yearLineLeftX = centerX - fullCenterWidth / 2f + 4f
+                    if (yearLineRightX > yearLineLeftX) {
+                        canvas.drawLine(
+                            yearLineLeftX,
+                            centerBaselineY + 3f,
+                            yearLineRightX,
+                            centerBaselineY + 3f,
+                            dottedLinePaint
+                        )
+                    }
+
+                    // Top-Left: "الصف: ... / شعبة: ..."
+                    val leftHeaderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = headerSideFontSize
+                        color = android.graphics.Color.parseColor("#0F172A")
+                        textAlign = android.graphics.Paint.Align.LEFT
+                    }
+                    val classSectionLabel = "الصف: $className / شعبة: $sectionName"
+                    val maxLeftWidth = contentWidth * 0.28f
+                    var leftTextSize = headerSideFontSize
+                    while (leftHeaderPaint.measureText(classSectionLabel) > maxLeftWidth && leftTextSize > 8.5f) {
+                        leftTextSize -= 0.5f
+                        leftHeaderPaint.textSize = leftTextSize
+                    }
+                    val leftBaselineY = headerCenterY - (leftHeaderPaint.fontMetrics.ascent + leftHeaderPaint.fontMetrics.descent) / 2f
+                    canvas.drawText(classSectionLabel, contentLeft + 10f, leftBaselineY, leftHeaderPaint)
+
+                    // 2. Calculate available vertical space for the table on this single A4 Portrait page
+                    val tableTop = headerBottom + headerBottomGap
+                    val maxTableBottom = pageHeight - marginBottom
+                    val availableTableHeight = (maxTableBottom - tableTop).coerceAtLeast(200f)
+
+                    val tableHeaderHeight = when {
+                        totalStudents > 50 -> 22f
+                        totalStudents > 38 -> 25f
+                        else -> 28f
+                    }
+                    val availableBodyHeight = (availableTableHeight - tableHeaderHeight).coerceAtLeast(100f)
+
+                    // Distribute row height across the available vertical space on the A4 sheet:
+                    // - For small sections (e.g. 10-22 students), rows expand up to 31pt (~11mm) so the table is generous, clear, and well-proportioned.
+                    // - For medium/standard sections (25-40 students), rows fill nearly the entire A4 sheet height.
+                    // - For large sections (45-65+ students), rows scale down smoothly so every student strictly stays on Page 1.
+                    val rawRowHeight = availableBodyHeight / totalStudents.toFloat()
+                    val rowHeight = rawRowHeight.coerceIn(9.0f, 31.0f)
+
+                    // Verify total height never exceeds availableTableHeight (strict single-page guarantee)
+                    val finalRowHeight = if (tableHeaderHeight + rowHeight * totalStudents > availableTableHeight) {
+                        (availableTableHeight - tableHeaderHeight) / totalStudents.toFloat()
+                    } else {
+                        rowHeight
+                    }
+
+                    // Choose a clear, readable font size proportional to the row height
+                    val bodyFontSize = (finalRowHeight * 0.54f).coerceIn(8.0f, 14.5f)
+                    val tableHeaderFontSize = (bodyFontSize + 0.8f).coerceIn(9.5f, 14.5f)
+
+                    // RTL Table Column Geometry:
+                    // Right column ("ت"): 12% of width (from columnDividerX to contentRight)
+                    // Left column ("اسم الطالب"): 88% of width (from contentLeft to columnDividerX)
+                    val seqColWidth = (contentWidth * 0.12f).coerceIn(48f, 68f)
+                    val columnDividerX = contentRight - seqColWidth
+
+                    // 3. Draw Table Header Row ("ت" | "اسم الطالب")
+                    val thBgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.FILL
+                        color = android.graphics.Color.parseColor("#0F172A")
+                    }
+                    val gridBorderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 1.0f
+                        color = android.graphics.Color.parseColor("#1E293B")
+                    }
+                    val outerTableBorderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 1.4f
+                        color = android.graphics.Color.parseColor("#0F172A")
+                    }
+
+                    val thRect = android.graphics.RectF(contentLeft, tableTop, contentRight, tableTop + tableHeaderHeight)
+                    canvas.drawRect(thRect, thBgPaint)
+                    canvas.drawRect(thRect, gridBorderPaint)
+
+                    val thTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = tableHeaderFontSize
+                        color = android.graphics.Color.WHITE
+                    }
+                    val thCenterY = tableTop + tableHeaderHeight / 2f
+                    val thBaselineY = thCenterY - (thTextPaint.fontMetrics.ascent + thTextPaint.fontMetrics.descent) / 2f
+
+                    // "ت" centered in right column
+                    thTextPaint.textAlign = android.graphics.Paint.Align.CENTER
+                    canvas.drawText("ت", (columnDividerX + contentRight) / 2f, thBaselineY, thTextPaint)
+
+                    // "اسم الطالب" right-aligned in name column
+                    thTextPaint.textAlign = android.graphics.Paint.Align.RIGHT
+                    canvas.drawText("اسم الطالب", columnDividerX - 10f, thBaselineY, thTextPaint)
+
+                    // Header vertical divider
+                    val headerDividerPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = 1.0f
+                        color = android.graphics.Color.parseColor("#475569")
+                    }
+                    canvas.drawLine(columnDividerX, tableTop, columnDividerX, tableTop + tableHeaderHeight, headerDividerPaint)
+
+                    // 4. Draw Student Rows (1..N)
+                    val evenRowBgPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.FILL
+                        color = android.graphics.Color.parseColor("#F8FAFC")
+                    }
+                    val seqTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = bodyFontSize
+                        color = android.graphics.Color.parseColor("#0F172A")
+                        textAlign = android.graphics.Paint.Align.CENTER
+                    }
+                    val nameTextPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        typeface = boldTypeface
+                        textSize = bodyFontSize
+                        color = android.graphics.Color.parseColor("#0F172A")
+                        textAlign = android.graphics.Paint.Align.RIGHT
+                    }
+
+                    val maxNameAvailableWidth = (columnDividerX - contentLeft) - 20f
+
+                    cleanNames.forEachIndexed { index, studentName ->
+                        val rowTop = tableTop + tableHeaderHeight + (index * finalRowHeight)
+                        val rowBottom = rowTop + finalRowHeight
+
+                        if (index % 2 == 1) {
+                            canvas.drawRect(contentLeft, rowTop, contentRight, rowBottom, evenRowBgPaint)
                         }
-                    }
-                </script>
-            </head>
-            <body>
-                <div id="single-page-sheet">
-                    <div class="roster-header">
-                        <div class="header-right">
-                            <span>المدرسة:</span>
-                            <span class="school-blank-line"></span>
-                        </div>
-                        <div class="header-center">
-                            <span>أسماء الطلبة للعام الدراسي</span>
-                            <span class="year-blank-space">&nbsp;</span>
-                        </div>
-                        <div class="header-left">
-                            <span>الصف: ${escapeHtmlText(className)} / شعبة: ${escapeHtmlText(sectionName)}</span>
-                        </div>
-                    </div>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th class="seq-col">ت</th>
-                                <th class="name-col">اسم الطالب</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            $rowsHtml
-                        </tbody>
-                    </table>
-                </div>
-            </body>
-            </html>
-        """.trimIndent()
 
-        val webView = android.webkit.WebView(context)
-        webView.settings.javaScriptEnabled = true
-        webView.webViewClient = object : android.webkit.WebViewClient() {
-            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                val targetWebView = view ?: webView
-                targetWebView.evaluateJavascript("fitRosterStrictlyOnSingleA4Page();") {
-                    val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as? android.print.PrintManager
-                    if (printManager == null) {
-                        onError("خدمة الطباعة غير متوفرة على هذا الجهاز")
-                        return@evaluateJavascript
+                        // Row horizontal border
+                        canvas.drawLine(contentLeft, rowBottom, contentRight, rowBottom, gridBorderPaint)
+
+                        val rowCenterY = (rowTop + rowBottom) / 2f
+
+                        // Draw Sequence Number ("ت")
+                        val seqBaselineY = rowCenterY - (seqTextPaint.fontMetrics.ascent + seqTextPaint.fontMetrics.descent) / 2f
+                        canvas.drawText(
+                            (index + 1).toString(),
+                            (columnDividerX + contentRight) / 2f,
+                            seqBaselineY,
+                            seqTextPaint
+                        )
+
+                        // Draw Full Student Name (auto-fit font size only if an unusually long name exceeds column width, never truncating)
+                        nameTextPaint.textSize = bodyFontSize
+                        while (nameTextPaint.measureText(studentName) > maxNameAvailableWidth && nameTextPaint.textSize > 7.5f) {
+                            nameTextPaint.textSize -= 0.5f
+                        }
+                        val nameBaselineY = rowCenterY - (nameTextPaint.fontMetrics.ascent + nameTextPaint.fontMetrics.descent) / 2f
+                        canvas.drawText(
+                            studentName,
+                            columnDividerX - 10f,
+                            nameBaselineY,
+                            nameTextPaint
+                        )
                     }
-                    val jobName = "سجل_أسماء_الطلبة_${className}_شعبة_${sectionName}"
-                    val printAdapter = targetWebView.createPrintDocumentAdapter(jobName)
-                    val printAttributes = android.print.PrintAttributes.Builder()
-                        .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
-                        .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
-                        .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
-                        .build()
-                    printManager.print(jobName, printAdapter, printAttributes)
+
+                    val finalTableBottom = tableTop + tableHeaderHeight + (cleanNames.size * finalRowHeight)
+
+                    // Vertical column divider through all body rows
+                    canvas.drawLine(columnDividerX, tableTop + tableHeaderHeight, columnDividerX, finalTableBottom, gridBorderPaint)
+
+                    // Crisp outer border around the entire table
+                    canvas.drawRect(contentLeft, tableTop, contentRight, finalTableBottom, outerTableBorderPaint)
+
+                    pdfDocument.finishPage(page)
+
+                    java.io.FileOutputStream(destination.fileDescriptor).use { outStream ->
+                        pdfDocument.writeTo(outStream)
+                    }
+                    callback.onWriteFinished(arrayOf(android.print.PageRange.ALL_PAGES))
+                } catch (e: Exception) {
+                    callback.onWriteFailed(e.message ?: "خطأ في إنشاء ملف الطباعة")
+                } finally {
+                    pdfDocument.close()
                 }
             }
         }
-        webView.loadDataWithBaseURL(null, htmlDocument, "text/html", "UTF-8", null)
+
+        val printAttributes = android.print.PrintAttributes.Builder()
+            .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
+            .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
+            .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
+            .build()
+
+        printManager.print(jobName, printAdapter, printAttributes)
     }.onFailure { e ->
         onError("تعذر بدء طباعة سجل الأسماء: ${e.message ?: "خطأ غير معروف"}")
     }
