@@ -4921,27 +4921,54 @@ fun AveragesTableScreen(
                         )
                     }
 
-                    Button(
-                        enabled = reports.isNotEmpty() && currentClass != null && currentSection != null,
-                        onClick = {
-                            if (currentClass != null && currentSection != null) {
-                                printAveragesReportA4Portrait(
-                                    context = context,
-                                    className = currentClass.className,
-                                    sectionName = currentSection.sectionName,
-                                    academicYearName = activeAcademicYear.yearName,
-                                    reports = reports,
-                                    onError = onShowMessage
-                                )
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Emerald700),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Print, contentDescription = "طباعة", modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("طباعة", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        Button(
+                            enabled = reports.isNotEmpty() && currentClass != null && currentSection != null,
+                            onClick = {
+                                if (currentClass != null && currentSection != null) {
+                                    printStudentNamesRosterSinglePageA4Portrait(
+                                        context = context,
+                                        className = currentClass.className,
+                                        sectionName = currentSection.sectionName,
+                                        studentNames = reports.map { it.studentName },
+                                        onError = onShowMessage
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Teal700),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Print, contentDescription = "طباعة سجل أسماء الطلبة", modifier = Modifier.size(17.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("طباعة سجل أسماء الطلبة", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                        }
+
+                        Button(
+                            enabled = reports.isNotEmpty() && currentClass != null && currentSection != null,
+                            onClick = {
+                                if (currentClass != null && currentSection != null) {
+                                    printAveragesReportA4Portrait(
+                                        context = context,
+                                        className = currentClass.className,
+                                        sectionName = currentSection.sectionName,
+                                        academicYearName = activeAcademicYear.yearName,
+                                        reports = reports,
+                                        onError = onShowMessage
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Emerald700),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Print, contentDescription = "طباعة", modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("طباعة", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
                     }
                 }
 
@@ -5514,6 +5541,307 @@ private fun printAveragesReportA4Portrait(
         webView.loadDataWithBaseURL(null, htmlDocument, "text/html", "UTF-8", null)
     }.onFailure { e ->
         onError("تعذر بدء الطباعة: ${e.message ?: "خطأ غير معروف"}")
+    }
+}
+
+/**
+ * Prints a formal student names roster ("طباعة سجل أسماء الطلبة") in A4 Portrait RTL format.
+ * Strictly fits all students of the selected class/section onto a single A4 Portrait sheet without creating a second page:
+ * 1. Top-Right: Blank space for writing the school name manually.
+ * 2. Top-Center: Title "أسماء الطلبة للعام الدراسي" with a blank space for writing the academic year manually.
+ * 3. Top-Left: Currently selected Class and Section clearly displayed.
+ * 4. Two-column table ("ت" and "اسم الطالب") numbered 1..N in the exact current order.
+ * 5. Programmatically calculates and verifies the exact single-page layout height before invoking the Android PrintManager.
+ */
+private fun printStudentNamesRosterSinglePageA4Portrait(
+    context: android.content.Context,
+    className: String,
+    sectionName: String,
+    studentNames: List<String>,
+    onError: (String) -> Unit
+) {
+    runCatching {
+        val totalStudents = studentNames.size.coerceAtLeast(1)
+
+        // A4 Portrait total height = 297mm (~1122.5px at 96 DPI).
+        // We use a safe printable height budget of 1045px (with 6mm top/bottom @page margins)
+        // and pre-calculate header + table header + N rows so total height is strictly <= 1045px.
+        val pageMarginMm = when {
+            totalStudents > 55 -> "4mm 7mm"
+            totalStudents > 40 -> "5mm 8mm"
+            else -> "7mm 10mm"
+        }
+        val safePrintableHeightPx = when {
+            totalStudents > 55 -> 1068.0
+            totalStudents > 40 -> 1054.0
+            else -> 1030.0
+        }
+        val headerBoxHeightPx = when {
+            totalStudents > 55 -> 44.0
+            totalStudents > 40 -> 50.0
+            else -> 58.0
+        }
+        val headerMarginBottomPx = when {
+            totalStudents > 45 -> 4.0
+            else -> 6.0
+        }
+        val tableHeaderHeightPx = when {
+            totalStudents > 55 -> 20.0
+            totalStudents > 40 -> 23.0
+            else -> 27.0
+        }
+
+        val availableRowsHeightPx = (safePrintableHeightPx - headerBoxHeightPx - headerMarginBottomPx - tableHeaderHeightPx)
+            .coerceAtLeast(totalStudents * 10.0)
+        val computedRowHeightPx = (availableRowsHeightPx / totalStudents)
+            .coerceIn(10.5, 28.0)
+        val computedFontSizePx = (computedRowHeightPx * 0.56)
+            .coerceIn(8.5, 14.0)
+        val computedHeaderFontSizePx = (computedFontSizePx + 0.5)
+            .coerceIn(9.5, 13.5)
+
+        val rowsHtml = StringBuilder()
+        studentNames.forEachIndexed { index, fullName ->
+            val seq = index + 1
+            rowsHtml.append(
+                """
+                <tr>
+                    <td class="seq-cell">$seq</td>
+                    <td class="name-cell">${escapeHtmlText(fullName)}</td>
+                </tr>
+                """.trimIndent()
+            )
+        }
+
+        val htmlDocument = """
+            <!DOCTYPE html>
+            <html lang="ar" dir="rtl">
+            <head>
+                <meta charset="UTF-8" />
+                <title>سجل أسماء الطلبة - ${escapeHtmlText(className)} - شعبة ${escapeHtmlText(sectionName)}</title>
+                <style>
+                    @page {
+                        size: A4 portrait;
+                        margin: $pageMarginMm;
+                    }
+                    * {
+                        box-sizing: border-box;
+                        -webkit-print-color-adjust: exact !important;
+                        print-color-adjust: exact !important;
+                    }
+                    html, body {
+                        width: 100%;
+                        margin: 0;
+                        padding: 0;
+                        font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                        direction: rtl;
+                        text-align: right;
+                        color: #0F172A;
+                        background-color: #FFFFFF;
+                    }
+                    #single-page-sheet {
+                        width: 100%;
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
+                        page-break-after: avoid !important;
+                        break-after: avoid !important;
+                        transform-origin: top center;
+                    }
+                    .roster-header {
+                        display: flex;
+                        flex-direction: row;
+                        justify-content: space-between;
+                        align-items: center;
+                        border: 1.5px solid #0F172A;
+                        border-radius: 6px;
+                        padding: 4px 10px;
+                        height: ${String.format(java.util.Locale.US, "%.1f", headerBoxHeightPx)}px;
+                        margin-bottom: ${String.format(java.util.Locale.US, "%.1f", headerMarginBottomPx)}px;
+                        background-color: #F8FAFC;
+                    }
+                    .header-right {
+                        width: 30%;
+                        text-align: right;
+                        font-size: ${String.format(java.util.Locale.US, "%.1f", computedHeaderFontSizePx)}px;
+                        font-weight: 800;
+                        color: #0F172A;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                    }
+                    .school-blank-line {
+                        flex: 1;
+                        border-bottom: 1.5px dotted #334155;
+                        height: 18px;
+                        display: inline-block;
+                    }
+                    .header-center {
+                        width: 42%;
+                        text-align: center;
+                        font-size: ${String.format(java.util.Locale.US, "%.1f", (computedHeaderFontSizePx + 1.5).coerceAtMost(15.5))}px;
+                        font-weight: 800;
+                        color: #0F172A;
+                        white-space: nowrap;
+                    }
+                    .year-blank-space {
+                        display: inline-block;
+                        min-width: 95px;
+                        border-bottom: 1.5px dotted #334155;
+                        margin-right: 4px;
+                    }
+                    .header-left {
+                        width: 28%;
+                        text-align: left;
+                        font-size: ${String.format(java.util.Locale.US, "%.1f", computedHeaderFontSizePx)}px;
+                        font-weight: 800;
+                        color: #0F172A;
+                        white-space: nowrap;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        table-layout: fixed;
+                        direction: rtl;
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
+                    }
+                    tr {
+                        height: ${String.format(java.util.Locale.US, "%.2f", computedRowHeightPx)}px;
+                        page-break-inside: avoid !important;
+                        break-inside: avoid !important;
+                    }
+                    thead tr {
+                        height: ${String.format(java.util.Locale.US, "%.1f", tableHeaderHeightPx)}px;
+                    }
+                    th, td {
+                        border: 1px solid #1E293B;
+                        padding: 0 8px;
+                        font-size: ${String.format(java.util.Locale.US, "%.2f", computedFontSizePx)}px;
+                        line-height: 1.1;
+                        vertical-align: middle;
+                    }
+                    th {
+                        background-color: #0F172A;
+                        color: #FFFFFF;
+                        font-weight: 800;
+                        text-align: center;
+                    }
+                    th.seq-col, td.seq-cell {
+                        width: 11%;
+                        text-align: center;
+                        font-weight: 800;
+                    }
+                    th.name-col {
+                        width: 89%;
+                        text-align: right;
+                        padding-right: 10px;
+                    }
+                    td.name-cell {
+                        width: 89%;
+                        text-align: right;
+                        padding-right: 10px;
+                        font-weight: 800;
+                        white-space: normal;
+                        word-wrap: break-word;
+                        overflow-wrap: break-word;
+                    }
+                    tbody tr:nth-child(even) td {
+                        background-color: #F8FAFC;
+                    }
+                </style>
+                <script>
+                    function fitRosterStrictlyOnSingleA4Page() {
+                        try {
+                            var sheet = document.getElementById('single-page-sheet');
+                            if (!sheet) return 'OK';
+                            var maxSinglePageHeightPx = ${String.format(java.util.Locale.US, "%.1f", safePrintableHeightPx)};
+                            var rows = document.querySelectorAll('tbody tr');
+                            var cells = document.querySelectorAll('tbody td');
+                            var currentRowH = ${String.format(java.util.Locale.US, "%.2f", computedRowHeightPx)};
+                            var currentFont = ${String.format(java.util.Locale.US, "%.2f", computedFontSizePx)};
+
+                            var guard = 0;
+                            while (sheet.scrollHeight > maxSinglePageHeightPx && guard < 25) {
+                                var ratio = maxSinglePageHeightPx / sheet.scrollHeight;
+                                currentRowH = Math.max(8.0, currentRowH * ratio * 0.97);
+                                currentFont = Math.max(7.0, currentFont * ratio * 0.97);
+                                for (var i = 0; i < rows.length; i++) {
+                                    rows[i].style.height = currentRowH + 'px';
+                                }
+                                for (var j = 0; j < cells.length; j++) {
+                                    cells[j].style.fontSize = currentFont + 'px';
+                                    cells[j].style.lineHeight = '1.05';
+                                }
+                                guard++;
+                            }
+
+                            if (sheet.scrollHeight > maxSinglePageHeightPx) {
+                                var scale = maxSinglePageHeightPx / sheet.scrollHeight;
+                                sheet.style.zoom = scale;
+                            }
+                            return 'FITTED:' + sheet.scrollHeight;
+                        } catch (e) {
+                            return 'ERR:' + e.message;
+                        }
+                    }
+                </script>
+            </head>
+            <body>
+                <div id="single-page-sheet">
+                    <div class="roster-header">
+                        <div class="header-right">
+                            <span>المدرسة:</span>
+                            <span class="school-blank-line"></span>
+                        </div>
+                        <div class="header-center">
+                            <span>أسماء الطلبة للعام الدراسي</span>
+                            <span class="year-blank-space">&nbsp;</span>
+                        </div>
+                        <div class="header-left">
+                            <span>الصف: ${escapeHtmlText(className)} / شعبة: ${escapeHtmlText(sectionName)}</span>
+                        </div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th class="seq-col">ت</th>
+                                <th class="name-col">اسم الطالب</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            $rowsHtml
+                        </tbody>
+                    </table>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        val webView = android.webkit.WebView(context)
+        webView.settings.javaScriptEnabled = true
+        webView.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                val targetWebView = view ?: webView
+                targetWebView.evaluateJavascript("fitRosterStrictlyOnSingleA4Page();") {
+                    val printManager = context.getSystemService(android.content.Context.PRINT_SERVICE) as? android.print.PrintManager
+                    if (printManager == null) {
+                        onError("خدمة الطباعة غير متوفرة على هذا الجهاز")
+                        return@evaluateJavascript
+                    }
+                    val jobName = "سجل_أسماء_الطلبة_${className}_شعبة_${sectionName}"
+                    val printAdapter = targetWebView.createPrintDocumentAdapter(jobName)
+                    val printAttributes = android.print.PrintAttributes.Builder()
+                        .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
+                        .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
+                        .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
+                        .build()
+                    printManager.print(jobName, printAdapter, printAttributes)
+                }
+            }
+        }
+        webView.loadDataWithBaseURL(null, htmlDocument, "text/html", "UTF-8", null)
+    }.onFailure { e ->
+        onError("تعذر بدء طباعة سجل الأسماء: ${e.message ?: "خطأ غير معروف"}")
     }
 }
 
