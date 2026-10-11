@@ -669,6 +669,7 @@ fun StudentsScreen(
     onShowMessage: (String) -> Unit
 ) {
     var newStudentName by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
     var showInactive by remember { mutableStateOf(false) }
     var editingStudent by remember { mutableStateOf<StudentEntity?>(null) }
     var editingStudentName by remember { mutableStateOf("") }
@@ -677,6 +678,22 @@ fun StudentsScreen(
 
     val students = remember(refreshTick, selectedClassId, selectedSectionId, showInactive, classes, sections) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = showInactive)
+    }
+    val filteredStudents = remember(students, searchQuery) {
+        val q = TrackerRepository.normalizeStudentName(searchQuery)
+        if (q.isEmpty()) {
+            students
+        } else {
+            val qKey = TrackerRepository.canonicalArabicComparisonKey(q)
+            val qTokens = qKey.split(" ").filter { it.isNotEmpty() }
+            students.filter { st ->
+                val stNormalized = TrackerRepository.normalizeStudentName(st.studentName)
+                val stKey = TrackerRepository.canonicalArabicComparisonKey(st.studentName)
+                stNormalized.contains(q, ignoreCase = true) ||
+                    stKey.contains(qKey) ||
+                    (qTokens.isNotEmpty() && qTokens.all { tok -> stKey.contains(tok) })
+            }
+        }
     }
     val gradesMap = remember(refreshTick, selectedClassId, selectedSectionId, students) {
         GradingService.calculateGradesForClass(
@@ -705,6 +722,35 @@ fun StudentsScreen(
                 onSelectClass = onSelectClass,
                 onSelectSection = onSelectSection
             )
+        }
+
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = { Text("ابحث عن اسم الطالب...") },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = "بحث", tint = Teal700)
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "مسح البحث")
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
         }
 
         item {
@@ -783,16 +829,44 @@ fun StudentsScreen(
             }
         }
 
-        items(students, key = { it.id }) { st ->
-            val grade = gradesMap[st.id]
-            val behaviorZeroCount = behaviorZeroCounts[st.id] ?: 0
-            val hasFrequentBehaviorZero = behaviorZeroCount >= 6
-            Surface(
-                color = if (st.isActive) Color.White else Slate100,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Slate200),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+        if (filteredStudents.isEmpty()) {
+            item {
+                Surface(
+                    color = Color.White,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (TrackerRepository.normalizeStudentName(searchQuery).isNotEmpty()) {
+                                "لا توجد أسماء مطابقة للبحث"
+                            } else {
+                                "لا يوجد طلاب في هذا الصف والشعبة حالياً"
+                            },
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = Slate600
+                        )
+                    }
+                }
+            }
+        } else {
+            items(filteredStudents, key = { it.id }) { st ->
+                val grade = gradesMap[st.id]
+                val behaviorZeroCount = behaviorZeroCounts[st.id] ?: 0
+                val hasFrequentBehaviorZero = behaviorZeroCount >= 6
+                Surface(
+                    color = if (st.isActive) Color.White else Slate100,
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Slate200),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -879,6 +953,7 @@ fun StudentsScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

@@ -24,6 +24,7 @@ import {
   formatDisplayDate,
   formatScore,
 } from '../services/gradingService';
+import { TrackerRepository } from '../repositories/trackerRepository';
 
 interface StudentsViewProps {
   classes: ClassEntity[];
@@ -94,13 +95,25 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const currentSection =
     classSections.find((s) => s.id === selectedSectionId) || classSections[0];
 
+  const normalizedQuery = TrackerRepository.normalizeStudentName(searchQuery);
+  const queryCanonicalKey =
+    TrackerRepository.canonicalArabicComparisonKey(normalizedQuery);
+  const queryTokens = queryCanonicalKey.split(' ').filter(Boolean);
+
   const sectionStudents = students.filter((s) => {
     const inSection =
       s.classId === currentClass?.id && s.sectionId === currentSection?.id;
     if (!inSection) return false;
     if (!showInactive && !s.isActive) return false;
-    if (searchQuery.trim() && !s.studentName.includes(searchQuery.trim())) {
-      return false;
+    if (normalizedQuery) {
+      const stNormalized = TrackerRepository.normalizeStudentName(s.studentName);
+      const stKey = TrackerRepository.canonicalArabicComparisonKey(s.studentName);
+      const matches =
+        stNormalized.includes(normalizedQuery) ||
+        stKey.includes(queryCanonicalKey) ||
+        (queryTokens.length > 0 &&
+          queryTokens.every((tok) => stKey.includes(tok)));
+      if (!matches) return false;
     }
     return true;
   });
@@ -225,10 +238,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث عن طالب بالاسم أو جزء من الاسم..."
-              className="w-full min-h-[42px] pr-9 pl-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+              placeholder="ابحث عن اسم الطالب..."
+              className="w-full min-h-[42px] pr-9 pl-9 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
             />
             <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+            {searchQuery.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                aria-label="مسح البحث"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 rounded-md"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer shrink-0">
@@ -287,7 +310,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           <div className="bg-white rounded-2xl p-8 text-center border border-slate-200/80">
             <UserPlus className="w-8 h-8 text-slate-400 mx-auto mb-2" />
             <p className="text-sm font-bold text-slate-700">
-              لا يوجد طلاب مطابقون في هذه الشعبة حالياً
+              {normalizedQuery
+                ? 'لا توجد أسماء مطابقة للبحث'
+                : 'لا يوجد طلاب في هذا الصف والشعبة حالياً'}
             </p>
           </div>
         ) : (
