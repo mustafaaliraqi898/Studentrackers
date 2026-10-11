@@ -804,3 +804,120 @@ val Icons.Filled.Print: ImageVector
             close()
         }
     }.also { _print = it }
+
+private var _eventNote: ImageVector? = null
+val Icons.Filled.EventNote: ImageVector
+    get() = _eventNote ?: materialIcon(name = "Filled.EventNote") {
+        materialPath {
+            moveTo(17.0f, 10.0f)
+            horizontalLineTo(7.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineToRelative(10.0f)
+            verticalLineToRelative(-2.0f)
+            close()
+            moveTo(19.0f, 3.0f)
+            horizontalLineToRelative(-1.0f)
+            verticalLineTo(1.0f)
+            horizontalLineToRelative(-2.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineTo(8.0f)
+            verticalLineTo(1.0f)
+            horizontalLineTo(6.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineTo(5.0f)
+            curveToRelative(-1.11f, 0.0f, -1.99f, 0.9f, -1.99f, 2.0f)
+            lineTo(3.0f, 19.0f)
+            curveToRelative(0.0f, 1.1f, 0.89f, 2.0f, 2.0f, 2.0f)
+            horizontalLineToRelative(14.0f)
+            curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
+            verticalLineTo(5.0f)
+            curveToRelative(0.0f, -1.1f, -0.9f, -2.0f, -2.0f, -2.0f)
+            close()
+            moveTo(19.0f, 19.0f)
+            horizontalLineTo(5.0f)
+            verticalLineTo(8.0f)
+            horizontalLineToRelative(14.0f)
+            verticalLineToRelative(11.0f)
+            close()
+            moveTo(14.0f, 14.0f)
+            horizontalLineTo(7.0f)
+            verticalLineToRelative(2.0f)
+            horizontalLineToRelative(7.0f)
+            verticalLineToRelative(-2.0f)
+            close()
+        }
+    }.also { _eventNote = it }
+
+private var _notificationsActive: ImageVector? = null
+val Icons.Filled.NotificationsActive: ImageVector
+    get() = _notificationsActive ?: materialIcon(name = "Filled.NotificationsActive") {
+        materialPath {
+            moveTo(7.58f, 4.08f)
+            lineTo(6.15f, 2.65f)
+            curveTo(3.75f, 4.48f, 2.17f, 7.3f, 2.03f, 10.5f)
+            horizontalLineToRelative(2.0f)
+            curveToRelative(0.15f, -2.65f, 1.51f, -4.97f, 3.55f, -6.42f)
+            close()
+            moveTo(19.97f, 10.5f)
+            horizontalLineToRelative(2.0f)
+            curveToRelative(-0.15f, -3.2f, -1.73f, -6.02f, -4.12f, -7.85f)
+            lineToRelative(-1.42f, 1.43f)
+            curveToRelative(2.02f, 1.45f, 3.39f, 3.77f, 3.54f, 6.42f)
+            close()
+            moveTo(18.0f, 11.0f)
+            curveToRelative(0.0f, -3.07f, -1.64f, -5.64f, -4.5f, -6.32f)
+            verticalLineTo(4.0f)
+            curveToRelative(0.0f, -0.83f, -0.67f, -1.5f, -1.5f, -1.5f)
+            reflectiveCurveToRelative(-1.5f, 0.67f, -1.5f, 1.5f)
+            verticalLineToRelative(0.68f)
+            curveTo(7.63f, 5.36f, 6.0f, 7.92f, 6.0f, 11.0f)
+            verticalLineToRelative(5.0f)
+            lineToRelative(-2.0f, 2.0f)
+            verticalLineToRelative(1.0f)
+            horizontalLineToRelative(16.0f)
+            verticalLineToRelative(-1.0f)
+            lineToRelative(-2.0f, -2.0f)
+            verticalLineToRelative(-5.0f)
+            close()
+            moveTo(12.0f, 22.0f)
+            curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
+            horizontalLineToRelative(-4.0f)
+            curveToRelative(0.0f, 1.1f, 0.89f, 2.0f, 2.0f, 2.0f)
+            close()
+        }
+    }.also { _notificationsActive = it }
+
+private var _notificationsNone: ImageVector? = null
+val Icons.Filled.NotificationsNone: ImageVector
+    get() = _notificationsNone ?: materialIcon(name = "Filled.NotificationsNone") {
+        materialPath {
+            moveTo(12.0f, 22.0f)
+            curveToRelative(1.1f, 0.0f, 2.0f, -0.9f, 2.0f, -2.0f)
+            horizontalLineToRelative(-4.0f)
+            curveToRelative(0.0f, 1.1f, 0.9f, 2.0f, 2.0f, 2.0f)
+            close()
+            moveTo(18.0f, 16.0f)
+            verticalLineToRelative(-5.0f)
+            curveToRelative(0.0f, -3.07f, -1.63f, -5.64f, -4.5f, -6.32f)
+            verticalLineTo(4.0f)
+            curveToRelative(0.0f, -0.83f, -0.67f, -1.5f, -1.5f, -1.5f)
+            reflectiveCurveToRelative(-1.5f, 0.67f, -1.5f, 1.5f)
+            verticalLineToRelative(0.68f)
+            curveTo(7.64f, 5.36f, 6.0f, 7.92f, 6.0f, 11.0f)
+            verticalLineToRelative(5.0f)
+            lineToRelative(-2.0f, 2.0f)
+            verticalLineToRelative(1.0f)
+            horizontalLineToRelative(16.0f)
+            verticalLineToRelative(-1.0f)
+            lineToRelative(-2.0f, -2.0f)
+            close()
+            moveTo(16.0f, 17.0f)
+            horizontalLineTo(8.0f)
+            verticalLineToRelative(-6.0f)
+            curveToRelative(0.0f, -2.48f, 1.51f, -4.5f, 4.0f, -4.5f)
+            reflectiveCurveToRelative(4.0f, 2.02f, 4.0f, 4.5f)
+            verticalLineToRelative(6.0f)
+            close()
+        }
+    }.also { _notificationsNone = it }
+
