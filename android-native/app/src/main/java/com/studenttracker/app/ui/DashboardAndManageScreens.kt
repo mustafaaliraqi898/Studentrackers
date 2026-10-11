@@ -1561,6 +1561,14 @@ private val WEEK_DAYS_ORDER = listOf(
     "السبت"
 )
 
+private val WORKING_DAYS_ORDER = listOf(
+    "الأحد",
+    "الاثنين",
+    "الثلاثاء",
+    "الأربعاء",
+    "الخميس"
+)
+
 private fun getArabicLessonLabel(lessonNum: Int): String {
     return when (lessonNum) {
         1 -> "الدرس الأول"
@@ -1648,9 +1656,23 @@ fun DailyScheduleScreen(
     var startTime by remember { mutableStateOf("08:00") }
     var endTime by remember { mutableStateOf("08:45") }
 
-    // Day Filter State ("ALL", "TODAY", or specific Arabic day name)
-    var selectedDayFilter by remember { mutableStateOf("ALL") }
-    val todayNameAr = remember { ScheduleReminderManager.getArabicTodayName() }
+    // Day Filter State ("ALL" or specific Arabic day name; defaults to current local day on screen open)
+    var todayNameAr by remember { mutableStateOf(ScheduleReminderManager.getArabicTodayName()) }
+    var selectedDayFilter by remember { mutableStateOf(todayNameAr) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            val latestToday = ScheduleReminderManager.getArabicTodayName()
+            if (latestToday != todayNameAr) {
+                val wasOnPreviousToday = (selectedDayFilter == todayNameAr)
+                todayNameAr = latestToday
+                if (wasOnPreviousToday) {
+                    selectedDayFilter = latestToday
+                }
+            }
+        }
+    }
 
     // Global Lesson Reminder Settings State
     val initialReminderSettings = remember { ScheduleReminderManager.getSettings(context) }
@@ -1838,24 +1860,27 @@ fun DailyScheduleScreen(
         ).show()
     }
 
-    val filteredScheduleItems = remember(scheduleItems, selectedDayFilter, todayNameAr) {
+    val filteredScheduleItems = remember(scheduleItems, selectedDayFilter) {
         when (selectedDayFilter) {
-            "ALL" -> scheduleItems
-            "TODAY" -> scheduleItems.filter { it.dayOfWeek == todayNameAr }
+            "ALL" -> scheduleItems.filter { it.dayOfWeek in WORKING_DAYS_ORDER }
             else -> scheduleItems.filter { it.dayOfWeek == selectedDayFilter }
         }
     }
 
-    val groupedByDay = remember(filteredScheduleItems, selectedDayFilter, todayNameAr) {
+    val groupedByDay = remember(filteredScheduleItems, selectedDayFilter) {
         val daysToConsider = when (selectedDayFilter) {
-            "ALL" -> WEEK_DAYS_ORDER
-            "TODAY" -> listOf(todayNameAr)
+            "ALL" -> WORKING_DAYS_ORDER
             else -> listOf(selectedDayFilter)
         }
         daysToConsider.mapNotNull { day ->
             val dayEntries = filteredScheduleItems
                 .filter { it.dayOfWeek == day }
-                .sortedWith(compareBy<DailyScheduleEntity> { it.lessonNumber }.thenBy { it.startTime }.thenBy { it.id })
+                .sortedWith(
+                    compareBy<DailyScheduleEntity> { parseTimeMinutes(it.startTime) ?: Int.MAX_VALUE }
+                        .thenBy { it.startTime }
+                        .thenBy { it.lessonNumber }
+                        .thenBy { it.id }
+                )
             if (dayEntries.isEmpty()) null else day to dayEntries
         }
     }
@@ -2487,10 +2512,8 @@ fun DailyScheduleScreen(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val filterItems = listOf(
-                            "ALL" to "كل الأيام",
-                            "TODAY" to "اليوم الحالي ($todayNameAr)"
-                        ) + WEEK_DAYS_ORDER.map { it to it }
+                        val filterItems = listOf("ALL" to "كل الأيام") +
+                            WORKING_DAYS_ORDER.map { it to it }
 
                         filterItems.forEach { (key, label) ->
                             val isSel = selectedDayFilter == key
@@ -2535,9 +2558,9 @@ fun DailyScheduleScreen(
                             tint = Slate500,
                             modifier = Modifier.size(28.dp)
                         )
-                        val emptyTitle = when (selectedDayFilter) {
-                            "ALL" -> "لا توجد حصص مسجلة في الجدول اليومي حالياً"
-                            "TODAY" -> "لا توجد حصص مسجلة لليوم الحالي ($todayNameAr)"
+                        val emptyTitle = when {
+                            selectedDayFilter == "ALL" -> "لا توجد حصص مسجلة لأيام الدوام (الأحد - الخميس) حالياً"
+                            selectedDayFilter == todayNameAr -> "لا توجد حصص مسجلة لليوم الحالي ($todayNameAr)"
                             else -> "لا توجد حصص مسجلة ليوم $selectedDayFilter"
                         }
                         Text(
@@ -2550,7 +2573,7 @@ fun DailyScheduleScreen(
                             text = if (selectedDayFilter == "ALL") {
                                 "استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت"
                             } else {
-                                "يمكنك اختيار «كل الأيام» لعرض جميع الحصص المسجلة أو إضافة حصة جديدة لهذا اليوم"
+                                "يمكنك اختيار «كل الأيام» لعرض جميع حصص أيام الدوام أو إضافة حصة جديدة لهذا اليوم"
                             },
                             fontSize = 11.sp,
                             color = Slate600

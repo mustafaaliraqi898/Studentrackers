@@ -33,6 +33,14 @@ const WEEK_DAYS_ORDER = [
   'السبت',
 ];
 
+const WORKING_DAYS_ORDER = [
+  'الأحد',
+  'الاثنين',
+  'الثلاثاء',
+  'الأربعاء',
+  'الخميس',
+];
+
 const GLOBAL_REMINDER_ENABLED_KEY = 'student_tracker_global_schedule_reminder_enabled';
 const GLOBAL_REMINDER_MINUTES_KEY = 'student_tracker_global_schedule_reminder_minutes';
 
@@ -150,9 +158,27 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   const [startTime, setStartTime] = useState<string>('08:00');
   const [endTime, setEndTime] = useState<string>('08:45');
 
-  // Day filter state ("ALL", "TODAY", or specific Arabic day name)
-  const [selectedDayFilter, setSelectedDayFilter] = useState<string>('ALL');
-  const todayNameAr = useMemo(() => getArabicTodayName(), []);
+  // Day filter state ("ALL" or specific Arabic day name; defaults to current local day on open)
+  const [todayNameAr, setTodayNameAr] = useState<string>(() => getArabicTodayName());
+  const [selectedDayFilter, setSelectedDayFilter] = useState<string>(() =>
+    getArabicTodayName()
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const latestToday = getArabicTodayName();
+      setTodayNameAr((prevToday) => {
+        if (latestToday !== prevToday) {
+          setSelectedDayFilter((prevFilter) =>
+            prevFilter === prevToday ? latestToday : prevFilter
+          );
+          return latestToday;
+        }
+        return prevToday;
+      });
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Global reminder settings state (persisted in localStorage, no forced default)
   const [globalReminderMinutes, setGlobalReminderMinutes] = useState<number | null>(() => {
@@ -390,10 +416,8 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
   const groupedByDay = useMemo(() => {
     const daysToConsider =
       selectedDayFilter === 'ALL'
-        ? WEEK_DAYS_ORDER
-        : selectedDayFilter === 'TODAY'
-          ? [todayNameAr]
-          : [selectedDayFilter];
+        ? WORKING_DAYS_ORDER
+        : [selectedDayFilter];
 
     return daysToConsider
       .map((day) => ({
@@ -401,25 +425,29 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
         lessons: scheduleItems
           .filter((item) => item.dayOfWeek === day)
           .sort((a, b) => {
-            if (a.lessonNumber !== b.lessonNumber) {
-              return a.lessonNumber - b.lessonNumber;
+            const startA = parseTimeMinutes(a.startTime) ?? Number.MAX_SAFE_INTEGER;
+            const startB = parseTimeMinutes(b.startTime) ?? Number.MAX_SAFE_INTEGER;
+            if (startA !== startB) {
+              return startA - startB;
             }
             if (a.startTime !== b.startTime) {
               return a.startTime.localeCompare(b.startTime);
+            }
+            if (a.lessonNumber !== b.lessonNumber) {
+              return a.lessonNumber - b.lessonNumber;
             }
             return a.id - b.id;
           }),
       }))
       .filter((g) => g.lessons.length > 0);
-  }, [scheduleItems, selectedDayFilter, todayNameAr]);
+  }, [scheduleItems, selectedDayFilter]);
 
   const dayFilterOptions = useMemo(
     () => [
       { key: 'ALL', label: 'كل الأيام' },
-      { key: 'TODAY', label: `اليوم الحالي (${todayNameAr})` },
-      ...WEEK_DAYS_ORDER.map((d) => ({ key: d, label: d })),
+      ...WORKING_DAYS_ORDER.map((d) => ({ key: d, label: d })),
     ],
-    [todayNameAr]
+    []
   );
 
   return (
@@ -827,15 +855,15 @@ export const DailyScheduleView: React.FC<DailyScheduleViewProps> = ({
           <Clock className="w-7 h-7 text-slate-400 mx-auto" />
           <p className="text-xs font-extrabold text-slate-800">
             {selectedDayFilter === 'ALL'
-              ? 'لا توجد حصص مسجلة في الجدول اليومي حالياً'
-              : selectedDayFilter === 'TODAY'
+              ? 'لا توجد حصص مسجلة لأيام الدوام (الأحد - الخميس) حالياً'
+              : selectedDayFilter === todayNameAr
                 ? `لا توجد حصص مسجلة لليوم الحالي (${todayNameAr})`
                 : `لا توجد حصص مسجلة ليوم ${selectedDayFilter}`}
           </p>
           <p className="text-[11px] text-slate-500">
             {selectedDayFilter === 'ALL'
               ? 'استخدم النموذج في الأعلى لإضافة حصصك الأسبوعية حسب اليوم والصف والشعبة والوقت'
-              : 'يمكنك اختيار «كل الأيام» لعرض جميع الحصص المسجلة أو إضافة حصة جديدة لهذا اليوم'}
+              : 'يمكنك اختيار «كل الأيام» لعرض جميع حصص أيام الدوام أو إضافة حصة جديدة لهذا اليوم'}
           </p>
         </div>
       ) : (
