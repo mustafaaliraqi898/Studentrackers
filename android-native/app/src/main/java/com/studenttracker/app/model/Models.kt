@@ -108,7 +108,8 @@ data class StudentCalculatedGrade(
     val dailyTests: List<RatedDateItem>,
     val quizScore: Double, // out of 5
     val totalScore: Double, // out of 100
-    val attendanceHistory: List<Pair<String, AttendanceStatus>> = emptyList()
+    val attendanceHistory: List<Pair<String, AttendanceStatus>> = emptyList(),
+    val missingComponents: List<String> = emptyList()
 )
 
 data class ExcelRowError(
