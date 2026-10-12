@@ -351,21 +351,42 @@ object GradingService {
                 }
             }
 
-            // Daily grade weights: attendance 10, participation 30, notebook 10, homework 15, behavior 15, daily test 20.
-            var presentDays = 0
-            var absentDays = 0
-            for ((_, status) in attMap) {
-                if (status == AttendanceStatus.PRESENT) presentDays++ else absentDays++
+            // Build the actual working-day calendar for the selected month/period.
+            // Missing attendance rows count as PRESENT; only explicit ABSENT rows reduce the score.
+            val observedDates = (attMap.keys + evalMap.keys + testMap.keys).filter { isWithinDateFilter(it) }
+            var calendarStart = effectiveStart?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            var calendarEnd = effectiveEnd?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+            if (calendarStart == null && !effectiveMonth.isNullOrBlank() && effectiveMonth != "ALL") {
+                runCatching { LocalDate.parse("${effectiveMonth}-01") }.getOrNull()?.let {
+                    calendarStart = it
+                    calendarEnd = it.withDayOfMonth(it.lengthOfMonth())
+                }
             }
-            val totalWorkingDays = presentDays + absentDays
+            if (calendarStart == null || calendarEnd == null) {
+                val observed = observedDates.mapNotNull { runCatching { LocalDate.parse(it) }.getOrNull() }.sorted()
+                if (calendarStart == null) calendarStart = observed.firstOrNull()
+                if (calendarEnd == null) calendarEnd = observed.lastOrNull()
+            }
+            val workingDates = mutableListOf<String>()
+            if (calendarStart != null && calendarEnd != null && !calendarEnd!!.isBefore(calendarStart)) {
+                var day = calendarStart!!
+                while (!day.isAfter(calendarEnd!!)) {
+                    val date = day.toString()
+                    if (!isWeekendDay(date) && date !in holidaysSet) workingDates.add(date)
+                    day = day.plusDays(1)
+                }
+            }
+            val absentDates = attMap.filterValues { it == AttendanceStatus.ABSENT }.keys
+            val totalWorkingDays = workingDates.size
+            val absentDays = workingDates.count { it in absentDates }
+            val presentDays = (totalWorkingDays - absentDays).coerceAtLeast(0)
             val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 0.0
-            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 10.0) else 0.0
+            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 10.0) else 10.0
 
             val partList = mutableListOf<RatedDateItem>()
             val noteList = mutableListOf<RatedDateItem>()
             val hwList = mutableListOf<RatedDateItem>()
             val behList = mutableListOf<RatedDateItem>()
-
             for ((d, ev) in evalMap.toSortedMap()) {
                 if (ev.part != null) partList.add(RatedDateItem(d, ev.part))
                 if (ev.note != null) noteList.add(RatedDateItem(d, ev.note))
@@ -378,23 +399,28 @@ object GradingService {
                 val avg = items.sumOf { it.value } / items.size.toDouble()
                 return round2(avg * maxScore)
             }
-
             val partScore = calcWeighted(partList, 30.0)
             val noteScore = calcWeighted(noteList, 10.0)
             val hwScore = calcWeighted(hwList, 15.0)
-            val behScore = calcWeighted(behList, 15.0)
 
-            val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s) }
+            // Behavior is full by default; only explicitly saved zero ratings reduce it.
+            val behaviorZeroDates = behList.filter { it.value == 0.0 }.map { it.date }.toSet()
+            val behaviorScore = if (totalWorkingDays > 0) {
+                round2(((totalWorkingDays - workingDates.count { it in behaviorZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * 15.0)
+            } else 15.0
+            val behScore = behaviorScore
+
+            val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s.coerceIn(0.0, 20.0)) }
             val quizScore = if (testList.isEmpty()) 0.0 else round2(testList.sumOf { it.value } / testList.size.toDouble())
             val missingComponents = buildList {
-                if (attMap.isEmpty()) add("الحضور")
+                if (totalWorkingDays == 0) add("الحضور")
                 if (partList.isEmpty()) add("المشاركة")
                 if (noteList.isEmpty()) add("الدفتر")
                 if (hwList.isEmpty()) add("الواجب")
                 if (behList.isEmpty()) add("السلوك")
                 if (testList.isEmpty()) add("الامتحان اليومي")
             }
-            // Partial subtotal is kept for compatibility, but callers can identify incomplete grades.
+            // Unrecorded categories are omitted from the subtotal; saved zero ratings remain genuine zeros.
             val total = round2(attScore + partScore + noteScore + hwScore + behScore + quizScore)
 
             StudentCalculatedGrade(
