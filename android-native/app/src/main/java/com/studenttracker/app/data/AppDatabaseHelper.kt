@@ -583,9 +583,9 @@ class AppDatabaseHelper(private val context: Context) :
                 ID INTEGER PRIMARY KEY AUTOINCREMENT,
                 StudentID INTEGER NOT NULL,
                 RecordDate TEXT NOT NULL,
-                Participation REAL NULL CHECK(Participation IN (1, 0.5, 0) OR Participation IS NULL),
-                Notebook REAL NULL CHECK(Notebook IN (1, 0.5, 0) OR Notebook IS NULL),
-                Homework REAL NULL CHECK(Homework IN (1, 0.5, 0) OR Homework IS NULL),
+                Participation REAL NULL CHECK(Participation IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Participation IS NULL),
+                Notebook REAL NULL CHECK(Notebook IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Notebook IS NULL),
+                Homework REAL NULL CHECK(Homework IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Homework IS NULL),
                 Behavior REAL NULL CHECK(Behavior IN (1, 0.5, 0) OR Behavior IS NULL),
                 FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
                 UNIQUE(StudentID, RecordDate)
