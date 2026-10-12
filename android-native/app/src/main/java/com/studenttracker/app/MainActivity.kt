@@ -227,7 +227,7 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
                     Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
                     Triple(AppScreen.REPORTS, "النتائج", Icons.Default.Assessment),
-                    Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Tune)
+                    Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Settings)
                 )
                 navItems.forEach { (screen, label, icon) ->
                     NavigationBarItem(
