@@ -412,16 +412,35 @@ fun DailyTrackingScreen(
         dialog.show()
     }
 
+    val dailyWeights = remember(selectedClassId, refreshTick) {
+        val result = mutableListOf(10.0, 30.0, 10.0, 15.0, 15.0, 20.0)
+        dbHelper.readableDatabase.rawQuery(
+            "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
+            arrayOf(selectedClassId.toString())
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                for (i in 0 until 6) result[i] = cursor.getDouble(i)
+            }
+        }
+        result
+    }
+    val attendanceMax = dailyWeights[0]
+    val participationMax = dailyWeights[1]
+    val notebookMax = dailyWeights[2]
+    val homeworkMax = dailyWeights[3]
+    val behaviorMax = dailyWeights[4]
+    val dailyTestMax = dailyWeights[5]
+
     val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved && (periodsInYear.isNotEmpty())
 
     // Live daily grade weights: attendance 10, participation 30, notebook 10, homework 15, behavior 15, daily test 20.
     fun calculateSingleDayScoreOutOf100(entry: StudentDailyEntry): Double {
-        val att = if (entry.attendance == AttendanceStatus.PRESENT) 10.0 else 0.0
-        val part = (entry.participation ?: 0.0) * 30.0
-        val note = (entry.notebook ?: 0.0) * 10.0
-        val hw = (entry.homework ?: 0.0) * 15.0
-        val beh = (entry.behavior ?: 0.0) * 15.0
-        val quiz = (entry.dailyTestScore ?: 0.0).coerceIn(0.0, 20.0)
+        val att = if (entry.attendance == AttendanceStatus.PRESENT) attendanceMax else 0.0
+        val part = (entry.participation ?: 0.0) * participationMax
+        val note = (entry.notebook ?: 0.0) * notebookMax
+        val hw = (entry.homework ?: 0.0) * homeworkMax
+        val beh = (entry.behavior ?: 0.0) * behaviorMax
+        val quiz = (entry.dailyTestScore ?: 0.0).coerceIn(0.0, dailyTestMax)
         return GradingService.round2(att + part + note + hw + beh + quiz)
     }
 
@@ -1196,7 +1215,7 @@ fun DailyTrackingScreen(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.participation?.let { "(${GradingService.formatScore(it * 30.0)} / 30)" } ?: "غير مسجل",
+                                scorePreviewText = entry.participation?.let { "(${GradingService.formatScore(it * participationMax)} / ${GradingService.formatScore(participationMax)})" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1210,7 +1229,7 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.notebook?.let { "(${GradingService.formatScore(it * 10.0)} / 10)" } ?: "غير مسجل",
+                                scorePreviewText = entry.notebook?.let { "(${GradingService.formatScore(it * notebookMax)} / ${GradingService.formatScore(notebookMax)})" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1224,7 +1243,7 @@ fun DailyTrackingScreen(
                                 label = "الواجب",
                                 currentValue = entry.homework,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.homework?.let { "(${GradingService.formatScore(it * 15.0)} / 15)" } ?: "غير مسجل",
+                                scorePreviewText = entry.homework?.let { "(${GradingService.formatScore(it * homeworkMax)} / ${GradingService.formatScore(homeworkMax)})" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1238,7 +1257,7 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.behavior?.let { "(${GradingService.formatScore(it * 15.0)} / 15)" } ?: "غير مسجل",
+                                scorePreviewText = entry.behavior?.let { "(${GradingService.formatScore(it * behaviorMax)} / ${GradingService.formatScore(behaviorMax)})" } ?: "غير مسجل",
                                 ratingType = "behavior",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1257,7 +1276,7 @@ fun DailyTrackingScreen(
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = "الامتحان اليومي (من 20)",
+                                    text = "الامتحان اليومي (من " + GradingService.formatScore(dailyTestMax) + ")",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp,
                                     color = Slate800
@@ -1267,7 +1286,7 @@ fun DailyTrackingScreen(
                                     onValueChange = { raw ->
                                         val clean = raw.trim()
                                         val parsed = if (clean.isEmpty()) null else clean.toDoubleOrNull()
-                                        if (clean.isEmpty() || (parsed != null && parsed in 0.0..20.0)) {
+                                        if (clean.isEmpty() || (parsed != null && parsed in 0.0..dailyTestMax)) {
                                             isEditingSaved = true
                                             entriesMap = entriesMap.toMutableMap().apply {
                                                 put(st.id, entry.copy(dailyTestScore = parsed))
@@ -1277,7 +1296,7 @@ fun DailyTrackingScreen(
                                     },
                                     enabled = evalEnabled,
                                     singleLine = true,
-                                    label = { Text("أدخل درجة من 0 إلى 20") },
+                                    label = { Text("أدخل درجة من 0 إلى " + GradingService.formatScore(dailyTestMax)) },
                                     placeholder = { Text("غير مسجل") },
                                     supportingText = {
                                         Text(
