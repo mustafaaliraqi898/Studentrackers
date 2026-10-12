@@ -2869,7 +2869,7 @@ private fun DailyEvaluationBadgeCell(
     val valueText = if (ratingValue == null) {
         "غير مسجل"
     } else if (isTest) {
-        "${GradingService.formatScore(ratingValue)} / 5"
+        "${GradingService.formatScore(ratingValue)} / 20"
     } else {
         GradingService.getRatingLabel(ratingValue)
     }
@@ -3320,7 +3320,7 @@ fun ReportsScreen(
                     }
 
                     Text(
-                        text = "الحضور: ${GradingService.formatScore(g.attendanceScore)}/19 | المشاركة: ${GradingService.formatScore(g.participationScore)}/19 | الدفتر: ${GradingService.formatScore(g.notebookScore)}/19 | الواجب: ${GradingService.formatScore(g.homeworkScore)}/19 | السلوك: ${GradingService.formatScore(g.behaviorScore)}/19 | الاختبار: ${GradingService.formatScore(g.quizScore)}/5",
+                        text = "الحضور: ${GradingService.formatScore(g.attendanceScore)}/10 | المشاركة: ${GradingService.formatScore(g.participationScore)}/30 | الدفتر: ${GradingService.formatScore(g.notebookScore)}/10 | الواجب: ${GradingService.formatScore(g.homeworkScore)}/15 | السلوك: ${GradingService.formatScore(g.behaviorScore)}/15 | الاختبار: ${GradingService.formatScore(g.quizScore)}/20",
                         fontSize = 11.sp,
                         color = Slate600
                     )
