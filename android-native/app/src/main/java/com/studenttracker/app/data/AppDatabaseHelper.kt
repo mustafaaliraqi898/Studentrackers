@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 12
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -44,6 +44,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     override fun onCreate(db: SQLiteDatabase) {
         createAllTables(db)
+        createEvaluationSettingsTable(db)
         seedInitialDemoData(db)
     }
 
@@ -90,6 +91,25 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 11) {
             migrateDailyScheduleReminderColumns(db)
         }
+        if (oldVersion < 12) {
+            createEvaluationSettingsTable(db)
+        }
+    }
+
+    private fun createEvaluationSettingsTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS EvaluationSettings (
+                ClassID INTEGER PRIMARY KEY,
+                AttendanceMax REAL NOT NULL DEFAULT 10,
+                ParticipationMax REAL NOT NULL DEFAULT 30,
+                NotebookMax REAL NOT NULL DEFAULT 10,
+                HomeworkMax REAL NOT NULL DEFAULT 15,
+                BehaviorMax REAL NOT NULL DEFAULT 15,
+                DailyTestMax REAL NOT NULL DEFAULT 20,
+                UpdatedAt TEXT NOT NULL,
+                FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+            );
+        """.trimIndent())
     }
 
     private fun migrateDailyScheduleReminderColumns(db: SQLiteDatabase) {
