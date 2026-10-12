@@ -68,7 +68,8 @@ enum class AppScreen(val titleAr: String) {
     PERIOD_COMPARISON("مقارنة نتائج الفترات"),
     REPORTS("التقارير والنتائج"),
     HOLIDAYS("العطل والمناسبات"),
-    EXCEL_BACKUP("Excel والنسخ الاحتياطي")
+    EXCEL_BACKUP("Excel والنسخ الاحتياطي"),
+    EVALUATION_SETTINGS("إعدادات التقييم")
 }
 
 private val AppColorScheme = lightColorScheme(
