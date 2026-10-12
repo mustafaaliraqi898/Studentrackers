@@ -1173,10 +1173,17 @@ fun DailyTrackingScreen(
                                                     color = Teal700
                                                 )
                                                 Text(
-                                                    text = "معدل الفترة",
+                                                    text = if (grade.missingComponents.isEmpty()) "الدرجة مكتملة" else "غير مكتملة",
                                                     fontSize = 9.sp,
-                                                    color = Teal700
+                                                    color = if (grade.missingComponents.isEmpty()) Teal700 else Amber700
                                                 )
+                                                if (grade.missingComponents.isNotEmpty()) {
+                                                    Text(
+                                                        text = "ناقص: ${grade.missingComponents.joinToString("، ")}",
+                                                        fontSize = 9.sp,
+                                                        color = Amber700
+                                                    )
+                                                }
                                             }
                                         }
                                     }
