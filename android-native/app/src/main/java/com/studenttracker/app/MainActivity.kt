@@ -226,7 +226,8 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.DAILY_TRACKING, "اليومي", Icons.Default.FactCheck),
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
                     Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
-                    Triple(AppScreen.REPORTS, "النتائج", Icons.Default.Assessment)
+                    Triple(AppScreen.REPORTS, "النتائج", Icons.Default.Assessment),
+                    Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Tune)
                 )
                 navItems.forEach { (screen, label, icon) ->
                     NavigationBarItem(
@@ -511,6 +512,12 @@ fun StudentTrackerMainApp(
                     holidays = holidays,
                     repository = repository,
                     onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
+                AppScreen.EVALUATION_SETTINGS -> EvaluationSettingsScreen(
+                    classes = classes,
+                    dbHelper = dbHelper,
                     onShowMessage = ::showToastMessage
                 )
 
