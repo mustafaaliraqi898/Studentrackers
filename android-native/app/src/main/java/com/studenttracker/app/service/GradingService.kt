@@ -36,7 +36,7 @@ object GradingService {
         val dailyTest: Double = 20.0
     )
 
-    private fun getEvaluationWeights(dbHelper: AppDatabaseHelper, classId: Long): EvaluationWeights {
+    fun getEvaluationWeights(dbHelper: AppDatabaseHelper, classId: Long): EvaluationWeights {
         dbHelper.readableDatabase.rawQuery(
             "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
             arrayOf(classId.toString())
@@ -427,14 +427,18 @@ object GradingService {
                 return round2(avg * maxScore)
             }
             val partScore = calcWeighted(partList, weights.participation)
-            val noteScore = calcWeighted(noteList, weights.notebook)
+            val noteScore = notebookScore
             val hwScore = calcWeighted(hwList, weights.homework)
 
-            // Behavior is full by default; only explicitly saved zero ratings reduce it.
+            // Behavior and notebook are full by default; only explicitly saved zero ratings reduce them.
             val behaviorZeroDates = behList.filter { it.value == 0.0 }.map { it.date }.toSet()
+            val notebookZeroDates = noteList.filter { it.value == 0.0 }.map { it.date }.toSet()
             val behaviorScore = if (totalWorkingDays > 0) {
                 round2(((totalWorkingDays - workingDates.count { it in behaviorZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.behavior)
-            } else 15.0
+            } else weights.behavior
+            val notebookScore = if (totalWorkingDays > 0) {
+                round2(((totalWorkingDays - workingDates.count { it in notebookZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.notebook)
+            } else weights.notebook
             val behScore = behaviorScore
 
             val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s.coerceIn(0.0, weights.dailyTest)) }
@@ -442,7 +446,6 @@ object GradingService {
             val missingComponents = buildList {
                 if (totalWorkingDays == 0) add("الحضور")
                 if (partList.isEmpty()) add("المشاركة")
-                if (noteList.isEmpty()) add("الدفتر")
                 if (hwList.isEmpty()) add("الواجب")
                 if (testList.isEmpty()) add("الامتحان اليومي")
             }
