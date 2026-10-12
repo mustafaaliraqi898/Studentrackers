@@ -414,15 +414,14 @@ fun DailyTrackingScreen(
 
     val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved && (periodsInYear.isNotEmpty())
 
-    // Calculate live daily score (out of 100) for a single day's entry according to the 100-point daily formula:
-    // Attendance (19) + Participation (19) + Notebook (19) + Homework (19) + Behavior (19) + DailyQuiz (5) = 100
+    // Live daily grade weights: attendance 10, participation 30, notebook 10, homework 15, behavior 15, daily test 20.
     fun calculateSingleDayScoreOutOf100(entry: StudentDailyEntry): Double {
-        val att = if (entry.attendance == AttendanceStatus.PRESENT) 19.0 else 0.0
-        val part = (entry.participation ?: 1.0) * 19.0
-        val note = (entry.notebook ?: 1.0) * 19.0
-        val hw = (entry.homework ?: 1.0) * 19.0
-        val beh = (entry.behavior ?: 1.0) * 19.0
-        val quiz = (entry.dailyTestScore ?: 5.0).coerceIn(0.0, 5.0)
+        val att = if (entry.attendance == AttendanceStatus.PRESENT) 10.0 else 0.0
+        val part = (entry.participation ?: 0.0) * 30.0
+        val note = (entry.notebook ?: 0.0) * 10.0
+        val hw = (entry.homework ?: 0.0) * 15.0
+        val beh = (entry.behavior ?: 0.0) * 15.0
+        val quiz = (entry.dailyTestScore ?: 0.0).coerceIn(0.0, 20.0)
         return GradingService.round2(att + part + note + hw + beh + quiz)
     }
 
@@ -1121,12 +1120,12 @@ fun DailyTrackingScreen(
                                         fontSize = 16.sp,
                                         color = Slate900
                                     )
-                                    val attDayScore = if (isPresent) "19" else "0"
-                                    val partDayScore = GradingService.formatScore((entry.participation ?: 1.0) * 19.0)
-                                    val noteDayScore = GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)
-                                    val hwDayScore = GradingService.formatScore((entry.homework ?: 1.0) * 19.0)
-                                    val behDayScore = GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)
-                                    val quizDayScore = GradingService.formatScore((entry.dailyTestScore ?: 5.0).coerceIn(0.0, 5.0))
+                                    val attDayScore = if (isPresent) "10" else "0"
+                                    val partDayScore = GradingService.formatScore((entry.participation ?: 0.0) * 30.0)
+                                    val noteDayScore = GradingService.formatScore((entry.notebook ?: 0.0) * 10.0)
+                                    val hwDayScore = GradingService.formatScore((entry.homework ?: 0.0) * 15.0)
+                                    val behDayScore = GradingService.formatScore((entry.behavior ?: 0.0) * 15.0)
+                                    val quizDayScore = GradingService.formatScore((entry.dailyTestScore ?: 0.0).coerceIn(0.0, 20.0))
                                     Text(
                                         text = "درجة اليوم: حضور $attDayScore | مشاركة $partDayScore | دفتر $noteDayScore | واجب $hwDayScore | سلوك $behDayScore | اختبار $quizDayScore",
                                         fontSize = 11.sp,
@@ -1304,7 +1303,7 @@ fun DailyTrackingScreen(
                                 }
                             )
 
-                            // Daily Test Score (0 to 5)
+                            // Daily Test Score (0 to 20)
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -2436,12 +2435,12 @@ fun StudentProfileScreen(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تفصيل عناصر الدرجة اليومية (من 100)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, 19)
-                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore, 19)
-                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore, 19)
-                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore, 19)
-                        ProfileScoreRow("5. السلوك (${grade.behaviorRatings.size} تقييم مسجل)", grade.behaviorScore, 19)
-                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore, 5)
+                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, 10)
+                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore, 30)
+                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore, 10)
+                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore, 15)
+                        ProfileScoreRow("5. السلوك (${grade.behaviorRatings.size} تقييم مسجل)", grade.behaviorScore, 15)
+                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore, 20)
                     }
                 }
             }
