@@ -433,7 +433,7 @@ fun DailyTrackingScreen(
 
     val canEdit = !dayStatus.isNonWorkingDay && isEditingSaved && (periodsInYear.isNotEmpty())
 
-    // Live daily grade weights: attendance 10, participation 30, notebook 10, homework 15, behavior 15, daily test 20.
+    // Live daily grade uses the saved weight distribution for the selected class.
     fun calculateSingleDayScoreOutOf100(entry: StudentDailyEntry): Double {
         val att = if (entry.attendance == AttendanceStatus.PRESENT) attendanceMax else 0.0
         val part = (entry.participation ?: 0.0) * participationMax
@@ -1200,7 +1200,7 @@ fun DailyTrackingScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = "الطالب غائب اليوم (الحضور = 0/19) — تبقى باقي العناصر على قيمها الافتراضية ويمكنك تعديل أي عنصر يدوياً لهذا اليوم:",
+                                        text = "الطالب غائب اليوم (الحضور = 0/" + GradingService.formatScore(attendanceMax) + ") — تبقى باقي العناصر على قيمها الافتراضية ويمكنك تعديل أي عنصر يدوياً لهذا اليوم:",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Red700,
@@ -1268,7 +1268,7 @@ fun DailyTrackingScreen(
                                 }
                             )
 
-                            // Daily Test Score (0 to 20), blank means unrecorded.
+                            // Daily Test Score uses the configured class maximum; blank means unrecorded.
                             Column(
                                 modifier = Modifier.fillMaxWidth()
                                     .background(Slate50, RoundedCornerShape(10.dp))
