@@ -1320,16 +1320,16 @@ fun DailyTrackingScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        text = "الاختبار اليومي (من 5)",
+                                        text = "الامتحان اليومي (من 20)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = Slate800
                                     )
                                     Text(
                                         text = if (entry.dailyTestScore != null) {
-                                            "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 5"
+                                            "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 20"
                                         } else {
-                                            "الافتراضي: 5 / 5 (لم يسجل استثناء)"
+                                            "غير مسجل"
                                         },
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
@@ -1340,7 +1340,7 @@ fun DailyTrackingScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    listOf(5.0, 4.5, 4.0, 3.0, 2.0, 1.0, 0.0).forEach { sc ->
+                                    (0..20).map { it.toDouble() }.forEach { sc ->
                                         val isSel = entry.dailyTestScore == sc
                                         Surface(
                                             color = if (isSel) Teal700 else Color.White,
