@@ -2359,11 +2359,11 @@ fun StudentProfileScreen(
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تفصيل عناصر الدرجة اليومية (من 100)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
                         ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, 10)
-                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore, 30)
-                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore, 10)
-                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore, 15)
-                        ProfileScoreRow("5. السلوك (${grade.behaviorRatings.size} تقييم مسجل)", grade.behaviorScore, 15)
-                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore, 20)
+                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore.takeIf { grade.participationRatings.isNotEmpty() }, 30)
+                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore.takeIf { grade.notebookRatings.isNotEmpty() }, 10)
+                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore.takeIf { grade.homeworkRatings.isNotEmpty() }, 15)
+                        ProfileScoreRow("5. السلوك (كامل افتراضياً، ويُخصم فقط عند تسجيل صفر)", grade.behaviorScore, 15)
+                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore.takeIf { grade.dailyTests.isNotEmpty() }, 20)
                     }
                 }
             }
@@ -2562,7 +2562,7 @@ fun StudentProfileScreen(
 }
 
 @Composable
-private fun ProfileScoreRow(title: String, score: Double, maxScore: Int) {
+private fun ProfileScoreRow(title: String, score: Double?, maxScore: Int) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2573,10 +2573,10 @@ private fun ProfileScoreRow(title: String, score: Double, maxScore: Int) {
     ) {
         Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate800, modifier = Modifier.weight(1f))
         Text(
-            text = "${GradingService.formatScore(score)} / $maxScore",
+            text = score?.let { "${GradingService.formatScore(it)} / $maxScore" } ?: "غير مسجل",
             fontSize = 13.sp,
             fontWeight = FontWeight.ExtraBold,
-            color = Teal700
+            color = if (score == null) Slate500 else Teal700
         )
     }
 }
