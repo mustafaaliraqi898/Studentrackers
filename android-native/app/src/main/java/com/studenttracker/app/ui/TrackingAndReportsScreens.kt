@@ -1307,67 +1307,44 @@ fun DailyTrackingScreen(
                                 }
                             )
 
-                            // Daily Test Score (0 to 20)
+                            // Daily Test Score (0 to 20), blank means unrecorded.
                             Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth()
                                     .background(Slate50, RoundedCornerShape(10.dp))
                                     .padding(10.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "الامتحان اليومي (من 20)",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 13.sp,
-                                        color = Slate800
-                                    )
-                                    Text(
-                                        text = if (entry.dailyTestScore != null) {
-                                            "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 20"
-                                        } else {
-                                            "غير مسجل"
-                                        },
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (entry.dailyTestScore != null) Teal700 else Slate500
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    (0..20).map { it.toDouble() }.forEach { sc ->
-                                        val isSel = entry.dailyTestScore == sc
-                                        Surface(
-                                            color = if (isSel) Teal700 else Color.White,
-                                            contentColor = if (isSel) Color.White else Slate800,
-                                            shape = RoundedCornerShape(8.dp),
-                                            border = BorderStroke(1.dp, if (isSel) Teal700 else Slate200),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable(enabled = evalEnabled) {
-                                                    isEditingSaved = true
-                                                    val nextVal = if (isSel) null else sc
-                                                    entriesMap = entriesMap.toMutableMap().apply {
-                                                        put(st.id, entry.copy(dailyTestScore = nextVal))
-                                                    }
-                                                    onDirtyChange(true)
-                                                }
-                                        ) {
-                                            Text(
-                                                text = GradingService.formatScore(sc),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.padding(vertical = 6.dp),
-                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                            )
+                                Text(
+                                    text = "الامتحان اليومي (من 20)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Slate800
+                                )
+                                OutlinedTextField(
+                                    value = entry.dailyTestScore?.let { GradingService.formatScore(it) } ?: "",
+                                    onValueChange = { raw ->
+                                        val clean = raw.trim()
+                                        val parsed = if (clean.isEmpty()) null else clean.toDoubleOrNull()
+                                        if (clean.isEmpty() || (parsed != null && parsed in 0.0..20.0)) {
+                                            isEditingSaved = true
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                put(st.id, entry.copy(dailyTestScore = parsed))
+                                            }
+                                            onDirtyChange(true)
                                         }
-                                    }
-                                }
+                                    },
+                                    enabled = evalEnabled,
+                                    singleLine = true,
+                                    label = { Text("أدخل درجة من 0 إلى 20") },
+                                    placeholder = { Text("غير مسجل") },
+                                    supportingText = {
+                                        Text(
+                                            if (entry.dailyTestScore == null) "غير مسجل — لا يدخل في المتوسط"
+                                            else "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 20"
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
                     }
