@@ -1861,6 +1861,10 @@ fun StudentProfileScreen(
         )
     }
     val grade = allGrades.find { it.studentId == studentId }
+    val profileWeights = remember(grade?.classId, refreshTick, localTick) {
+        grade?.let { GradingService.getEvaluationWeights(dbHelper, it.classId) }
+            ?: GradingService.EvaluationWeights()
+    }
 
     val comprehensiveReport = remember(refreshTick, localTick, studentId, selectedFilter) {
         GradingService.calculateComprehensiveStudentReports(
@@ -2377,12 +2381,12 @@ fun StudentProfileScreen(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تفصيل عناصر الدرجة اليومية (من 100)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, 10)
-                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore.takeIf { grade.participationRatings.isNotEmpty() }, 30)
-                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore.takeIf { grade.notebookRatings.isNotEmpty() }, 10)
-                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore.takeIf { grade.homeworkRatings.isNotEmpty() }, 15)
-                        ProfileScoreRow("5. السلوك (كامل افتراضياً، ويُخصم فقط عند تسجيل صفر)", grade.behaviorScore, 15)
-                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore.takeIf { grade.dailyTests.isNotEmpty() }, 20)
+                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, profileWeights.attendance)
+                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore.takeIf { grade.participationRatings.isNotEmpty() }, profileWeights.participation)
+                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.count { it.value == 0.0 }} يوم بدرجة صفر)", grade.notebookScore, profileWeights.notebook)
+                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore.takeIf { grade.homeworkRatings.isNotEmpty() }, profileWeights.homework)
+                        ProfileScoreRow("5. السلوك (كامل افتراضياً، ويُخصم فقط عند تسجيل صفر)", grade.behaviorScore, profileWeights.behavior)
+                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore.takeIf { grade.dailyTests.isNotEmpty() }, profileWeights.dailyTest)
                     }
                 }
             }
@@ -2581,7 +2585,7 @@ fun StudentProfileScreen(
 }
 
 @Composable
-private fun ProfileScoreRow(title: String, score: Double?, maxScore: Int) {
+private fun ProfileScoreRow(title: String, score: Double?, maxScore: Double) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2592,7 +2596,7 @@ private fun ProfileScoreRow(title: String, score: Double?, maxScore: Int) {
     ) {
         Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate800, modifier = Modifier.weight(1f))
         Text(
-            text = score?.let { "${GradingService.formatScore(it)} / $maxScore" } ?: "غير مسجل",
+            text = score?.let { "${GradingService.formatScore(it)} / ${GradingService.formatScore(maxScore)}" } ?: "غير مسجل",
             fontSize = 13.sp,
             fontWeight = FontWeight.ExtraBold,
             color = if (score == null) Slate500 else Teal700
