@@ -437,9 +437,9 @@ fun DailyTrackingScreen(
     fun calculateSingleDayScoreOutOf100(entry: StudentDailyEntry): Double {
         val att = if (entry.attendance == AttendanceStatus.PRESENT) attendanceMax else 0.0
         val part = (entry.participation ?: 0.0) * participationMax
-        val note = (entry.notebook ?: 0.0) * notebookMax
+        val note = (entry.notebook ?: 1.0) * notebookMax
         val hw = (entry.homework ?: 0.0) * homeworkMax
-        val beh = (entry.behavior ?: 0.0) * behaviorMax
+        val beh = (entry.behavior ?: 1.0) * behaviorMax
         val quiz = (entry.dailyTestScore ?: 0.0).coerceIn(0.0, dailyTestMax)
         return GradingService.round2(att + part + note + hw + beh + quiz)
     }
@@ -1229,7 +1229,7 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.notebook?.let { "(${GradingService.formatScore(it * notebookMax)} / ${GradingService.formatScore(notebookMax)})" } ?: "غير مسجل",
+                                scorePreviewText = entry.notebook?.let { "(${GradingService.formatScore(it * notebookMax)} / ${GradingService.formatScore(notebookMax)})" } ?: "كامل افتراضياً",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1257,7 +1257,7 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = entry.behavior?.let { "(${GradingService.formatScore(it * behaviorMax)} / ${GradingService.formatScore(behaviorMax)})" } ?: "غير مسجل",
+                                scorePreviewText = entry.behavior?.let { "(${GradingService.formatScore(it * behaviorMax)} / ${GradingService.formatScore(behaviorMax)})" } ?: "كامل افتراضياً",
                                 ratingType = "behavior",
                                 onValueChange = { v ->
                                     isEditingSaved = true
