@@ -3416,8 +3416,11 @@ fun ReportsScreen(
                         }
                     }
 
+                    val reportWeights = remember(refreshTick, localTick, rep.classId) {
+                        GradingService.getEvaluationWeights(dbHelper, rep.classId)
+                    }
                     Text(
-                        text = "الحضور: ${GradingService.formatScore(g.attendanceScore)}/10 | المشاركة: ${GradingService.formatScore(g.participationScore)}/30 | الدفتر: ${GradingService.formatScore(g.notebookScore)}/10 | الواجب: ${GradingService.formatScore(g.homeworkScore)}/15 | السلوك: ${GradingService.formatScore(g.behaviorScore)}/15 | الاختبار: ${GradingService.formatScore(g.quizScore)}/20",
+                        text = "الحضور: ${GradingService.formatScore(g.attendanceScore)}/${GradingService.formatScore(reportWeights.attendance)} | المشاركة: ${GradingService.formatScore(g.participationScore)}/${GradingService.formatScore(reportWeights.participation)} | الدفتر: ${GradingService.formatScore(g.notebookScore)}/${GradingService.formatScore(reportWeights.notebook)} | الواجب: ${GradingService.formatScore(g.homeworkScore)}/${GradingService.formatScore(reportWeights.homework)} | السلوك: ${GradingService.formatScore(g.behaviorScore)}/${GradingService.formatScore(reportWeights.behavior)} | الاختبار: ${GradingService.formatScore(g.quizScore)}/${GradingService.formatScore(reportWeights.dailyTest)}",
                         fontSize = 11.sp,
                         color = Slate600
                     )
