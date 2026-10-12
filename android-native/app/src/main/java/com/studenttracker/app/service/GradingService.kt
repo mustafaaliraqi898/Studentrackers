@@ -386,6 +386,15 @@ object GradingService {
 
             val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s) }
             val quizScore = if (testList.isEmpty()) 0.0 else round2(testList.sumOf { it.value } / testList.size.toDouble())
+            val missingComponents = buildList {
+                if (attMap.isEmpty()) add("الحضور")
+                if (partList.isEmpty()) add("المشاركة")
+                if (noteList.isEmpty()) add("الدفتر")
+                if (hwList.isEmpty()) add("الواجب")
+                if (behList.isEmpty()) add("السلوك")
+                if (testList.isEmpty()) add("الامتحان اليومي")
+            }
+            // Partial subtotal is kept for compatibility, but callers can identify incomplete grades.
             val total = round2(attScore + partScore + noteScore + hwScore + behScore + quizScore)
 
             StudentCalculatedGrade(
@@ -411,7 +420,8 @@ object GradingService {
                 dailyTests = testList,
                 quizScore = quizScore,
                 totalScore = total,
-                attendanceHistory = attMap.toSortedMap().map { (d, stStatus) -> d to stStatus }
+                attendanceHistory = attMap.toSortedMap().map { (d, stStatus) -> d to stStatus },
+                missingComponents = missingComponents
             )
         }
     }
