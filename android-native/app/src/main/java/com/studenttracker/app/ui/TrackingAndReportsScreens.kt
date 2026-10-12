@@ -1063,6 +1063,80 @@ fun DailyTrackingScreen(
                                 )
                             }
 
+                            // Quick actions: initialize the selected daily evaluation for every student.
+                            // These intentionally replace current values; this workflow starts with a fresh evaluation.
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                students.forEach { student ->
+                                                    val current = this[student.id] ?: StudentDailyEntry(studentId = student.id)
+                                                    put(student.id, current.copy(homework = 1.0))
+                                                }
+                                            }
+                                            isEditingSaved = true
+                                            onDirtyChange(true)
+                                            showTopNotification("تم تعيين الواجب ممتازاً لجميع الطلبة")
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("الواجب: ممتاز للجميع", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+
+                                    Button(
+                                        onClick = {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                students.forEach { student ->
+                                                    val current = this[student.id] ?: StudentDailyEntry(studentId = student.id)
+                                                    put(student.id, current.copy(notebook = 1.0))
+                                                }
+                                            }
+                                            isEditingSaved = true
+                                            onDirtyChange(true)
+                                            showTopNotification("تم تعيين الدفتر ممتازاً لجميع الطلبة")
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("الدفتر: ممتاز للجميع", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                students.forEach { student ->
+                                                    val current = this[student.id] ?: StudentDailyEntry(studentId = student.id)
+                                                    put(student.id, current.copy(attendance = AttendanceStatus.PRESENT))
+                                                }
+                                            }
+                                            isEditingSaved = true
+                                            onDirtyChange(true)
+                                            showTopNotification("تم تعيين الحضور لجميع الطلبة")
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Emerald700)
+                                    ) { Text("حاضر للجميع", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+
+                                    Button(
+                                        onClick = {
+                                            entriesMap = entriesMap.toMutableMap().apply {
+                                                students.forEach { student ->
+                                                    val current = this[student.id] ?: StudentDailyEntry(studentId = student.id)
+                                                    put(student.id, current.copy(behavior = 1.0))
+                                                }
+                                            }
+                                            isEditingSaved = true
+                                            onDirtyChange(true)
+                                            showTopNotification("تم تعيين السلوك ممتازاً لجميع الطلبة")
+                                        },
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text("السلوك: ممتاز للجميع", fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+                                }
+                            }
+
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
