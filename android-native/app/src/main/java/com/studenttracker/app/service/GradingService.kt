@@ -344,24 +344,23 @@ object GradingService {
                         draft.behavior
                     )
                     if (draft.dailyTestScore != null) {
-                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, 5.0)
+                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, 20.0)
                     } else {
                         testMap.remove(liveOverrideDate)
                     }
                 }
             }
 
-            // 1. Attendance out of 19
+            // Daily grade weights: attendance 10, participation 30, notebook 10, homework 15, behavior 15, daily test 20.
             var presentDays = 0
             var absentDays = 0
             for ((_, status) in attMap) {
                 if (status == AttendanceStatus.PRESENT) presentDays++ else absentDays++
             }
             val totalWorkingDays = presentDays + absentDays
-            val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 100.0
-            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 19.0) else 19.0
+            val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 0.0
+            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 10.0) else 0.0
 
-            // 2. Evaluations out of 19 each
             val partList = mutableListOf<RatedDateItem>()
             val noteList = mutableListOf<RatedDateItem>()
             val hwList = mutableListOf<RatedDateItem>()
@@ -374,25 +373,19 @@ object GradingService {
                 if (ev.beh != null) behList.add(RatedDateItem(d, ev.beh))
             }
 
-            fun calc19(items: List<RatedDateItem>): Double {
-                if (items.isEmpty()) return 19.0 // Not penalized as zero if unrecorded
+            fun calcWeighted(items: List<RatedDateItem>, maxScore: Double): Double {
+                if (items.isEmpty()) return 0.0
                 val avg = items.sumOf { it.value } / items.size.toDouble()
-                return round2(avg * 19.0)
+                return round2(avg * maxScore)
             }
 
-            val partScore = calc19(partList)
-            val noteScore = calc19(noteList)
-            val hwScore = calc19(hwList)
-            val behScore = calc19(behList)
+            val partScore = calcWeighted(partList, 30.0)
+            val noteScore = calcWeighted(noteList, 10.0)
+            val hwScore = calcWeighted(hwList, 15.0)
+            val behScore = calcWeighted(behList, 15.0)
 
-            // 3. Daily Tests out of 5
             val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s) }
-            val quizScore = if (testList.isEmpty()) {
-                5.0
-            } else {
-                round2(testList.sumOf { it.value } / testList.size.toDouble())
-            }
-
+            val quizScore = if (testList.isEmpty()) 0.0 else round2(testList.sumOf { it.value } / testList.size.toDouble())
             val total = round2(attScore + partScore + noteScore + hwScore + behScore + quizScore)
 
             StudentCalculatedGrade(
