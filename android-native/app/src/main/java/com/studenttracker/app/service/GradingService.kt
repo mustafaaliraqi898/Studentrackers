@@ -27,6 +27,32 @@ object GradingService {
         return roundHalfUpInt(value).toString()
     }
 
+    data class EvaluationWeights(
+        val attendance: Double = 10.0,
+        val participation: Double = 30.0,
+        val notebook: Double = 10.0,
+        val homework: Double = 15.0,
+        val behavior: Double = 15.0,
+        val dailyTest: Double = 20.0
+    )
+
+    private fun getEvaluationWeights(dbHelper: AppDatabaseHelper, classId: Long): EvaluationWeights {
+        dbHelper.readableDatabase.rawQuery(
+            "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
+            arrayOf(classId.toString())
+        ).use { c ->
+            if (c.moveToFirst()) return EvaluationWeights(
+                attendance = c.getDouble(0),
+                participation = c.getDouble(1),
+                notebook = c.getDouble(2),
+                homework = c.getDouble(3),
+                behavior = c.getDouble(4),
+                dailyTest = c.getDouble(5)
+            )
+        }
+        return EvaluationWeights()
+    }
+
     fun formatScore(value: Double): String {
         val r = round2(value)
         return if (r % 1.0 == 0.0) {
@@ -377,11 +403,12 @@ object GradingService {
                 }
             }
             val absentDates = attMap.filterValues { it == AttendanceStatus.ABSENT }.keys
+            val weights = getEvaluationWeights(dbHelper, st.classId)
             val totalWorkingDays = workingDates.size
             val absentDays = workingDates.count { it in absentDates }
             val presentDays = (totalWorkingDays - absentDays).coerceAtLeast(0)
             val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 0.0
-            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 10.0) else 10.0
+            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * weights.attendance) else 10.0
 
             val partList = mutableListOf<RatedDateItem>()
             val noteList = mutableListOf<RatedDateItem>()
@@ -399,18 +426,18 @@ object GradingService {
                 val avg = items.sumOf { it.value } / items.size.toDouble()
                 return round2(avg * maxScore)
             }
-            val partScore = calcWeighted(partList, 30.0)
-            val noteScore = calcWeighted(noteList, 10.0)
-            val hwScore = calcWeighted(hwList, 15.0)
+            val partScore = calcWeighted(partList, weights.participation)
+            val noteScore = calcWeighted(noteList, weights.notebook)
+            val hwScore = calcWeighted(hwList, weights.homework)
 
             // Behavior is full by default; only explicitly saved zero ratings reduce it.
             val behaviorZeroDates = behList.filter { it.value == 0.0 }.map { it.date }.toSet()
             val behaviorScore = if (totalWorkingDays > 0) {
-                round2(((totalWorkingDays - workingDates.count { it in behaviorZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * 15.0)
+                round2(((totalWorkingDays - workingDates.count { it in behaviorZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.behavior)
             } else 15.0
             val behScore = behaviorScore
 
-            val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s.coerceIn(0.0, 20.0)) }
+            val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s.coerceIn(0.0, weights.dailyTest)) }
             val quizScore = if (testList.isEmpty()) 0.0 else round2(testList.sumOf { it.value } / testList.size.toDouble())
             val missingComponents = buildList {
                 if (totalWorkingDays == 0) add("الحضور")
