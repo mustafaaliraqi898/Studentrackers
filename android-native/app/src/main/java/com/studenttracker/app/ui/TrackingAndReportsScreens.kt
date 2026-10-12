@@ -1254,7 +1254,8 @@ fun DailyTrackingScreen(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 0.0) * 30.0)} / 30)",
+                                ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1267,7 +1268,8 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 0.0) * 10.0)} / 10)",
+                                ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1280,7 +1282,8 @@ fun DailyTrackingScreen(
                                 label = "الواجب",
                                 currentValue = entry.homework,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 0.0) * 15.0)} / 15)",
+                                ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1293,7 +1296,8 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 0.0) * 15.0)} / 15)",
+                                ratingType = "behavior",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
