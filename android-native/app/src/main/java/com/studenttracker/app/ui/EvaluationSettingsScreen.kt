@@ -85,22 +85,12 @@ fun EvaluationSettingsScreen(
                     }
                 }
             }
-            @Composable
-            fun gradeField(label: String, value: String, onChange: (String) -> Unit) {
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { if (it.isEmpty() || it.matches(Regex("\\d{0,3}(\\.\\d{0,2})?"))) onChange(it) },
-                    label = { Text(label + " — الدرجة القصوى") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            gradeField("الحضور", attendance) { attendance = it }
-            gradeField("المشاركة", participation) { participation = it }
-            gradeField("الدفتر", notebook) { notebook = it }
-            gradeField("الواجب", homework) { homework = it }
-            gradeField("السلوك", behavior) { behavior = it }
-            gradeField("الامتحان اليومي", dailyTest) { dailyTest = it }
+            GradeWeightField("الحضور", attendance) { attendance = it }
+            GradeWeightField("المشاركة", participation) { participation = it }
+            GradeWeightField("الدفتر", notebook) { notebook = it }
+            GradeWeightField("الواجب", homework) { homework = it }
+            GradeWeightField("السلوك", behavior) { behavior = it }
+            GradeWeightField("الامتحان اليومي", dailyTest) { dailyTest = it }
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
@@ -136,4 +126,15 @@ fun EvaluationSettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun GradeWeightField(label: String, value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { if (it.isEmpty() || it.matches(Regex("\\d{0,3}(\\.\\d{0,2})?"))) onChange(it) },
+        label = { Text(label + " — الدرجة القصوى") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
