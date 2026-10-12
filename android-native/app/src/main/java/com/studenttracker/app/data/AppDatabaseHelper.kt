@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 12
+        const val DATABASE_VERSION = 13
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -94,6 +94,32 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 12) {
             createEvaluationSettingsTable(db)
         }
+        if (oldVersion < 13) {
+            migrateEvaluationRatingScale(db)
+        }
+    }
+
+    private fun migrateEvaluationRatingScale(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE Evaluations_new (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                StudentID INTEGER NOT NULL,
+                RecordDate TEXT NOT NULL,
+                Participation REAL NULL CHECK(Participation IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Participation IS NULL),
+                Notebook REAL NULL CHECK(Notebook IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Notebook IS NULL),
+                Homework REAL NULL CHECK(Homework IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Homework IS NULL),
+                Behavior REAL NULL CHECK(Behavior IN (1, 0.5, 0) OR Behavior IS NULL),
+                FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+                UNIQUE(StudentID, RecordDate)
+            );
+        """.trimIndent())
+        db.execSQL("""
+            INSERT INTO Evaluations_new (ID, StudentID, RecordDate, Participation, Notebook, Homework, Behavior)
+            SELECT ID, StudentID, RecordDate, Participation, Notebook, Homework, Behavior
+            FROM Evaluations;
+        """.trimIndent())
+        db.execSQL("DROP TABLE Evaluations;")
+        db.execSQL("ALTER TABLE Evaluations_new RENAME TO Evaluations;")
     }
 
     private fun createEvaluationSettingsTable(db: SQLiteDatabase) {
