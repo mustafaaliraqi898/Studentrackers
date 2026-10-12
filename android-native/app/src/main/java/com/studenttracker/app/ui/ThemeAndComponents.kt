@@ -175,100 +175,65 @@ fun ClassSectionFilterBar(
 @Composable
 fun ThreeStateRatingRow(
     label: String,
-    currentValue: Double?, // 1.0, 0.5, 0.0, or null
+    currentValue: Double?,
     enabled: Boolean,
     scorePreviewText: String,
-    onValueChange: (Double?) -> Unit
+    onValueChange: (Double?) -> Unit,
+    ratingType: String = "five"
 ) {
+    val options = when (ratingType) {
+        "behavior" -> listOf(
+            Triple(1.0, "كامل", Triple(Emerald600, Emerald50, Emerald700)),
+            Triple(0.0, "صفر", Triple(Red600, Red50, Red700))
+        )
+        "attendance" -> listOf(
+            Triple(1.0, "حاضر", Triple(Emerald600, Emerald50, Emerald700)),
+            Triple(0.0, "غائب", Triple(Red600, Red50, Red700))
+        )
+        else -> listOf(
+            Triple(1.0, "ممتاز", Triple(Emerald600, Emerald50, Emerald700)),
+            Triple(0.8, "جيد جداً", Triple(Teal600, Teal50, Teal700)),
+            Triple(0.6, "جيد", Triple(Amber600, Amber50, Amber700)),
+            Triple(0.4, "مقبول", Triple(Slate600, Slate100, Slate700)),
+            Triple(0.0, "ضعيف", Triple(Red600, Red50, Red700))
+        )
+    }
+    val selectedLabel = options.firstOrNull { it.first == currentValue }?.second
+        ?: if (currentValue == null) "غير مسجل" else "قيمة قديمة"
+    val selectedColor = when {
+        currentValue == null -> Slate500
+        currentValue == 0.0 -> Red700
+        currentValue == 1.0 -> Emerald700
+        else -> Teal700
+    }
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Slate50, RoundedCornerShape(10.dp))
+        modifier = Modifier.fillMaxWidth().background(Slate50, RoundedCornerShape(10.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = label,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Slate800
-                )
-                Text(
-                    text = scorePreviewText,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Slate500
-                )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = label, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Slate800)
+                Text(text = scorePreviewText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Slate500)
             }
-            Text(
-                text = when (currentValue) {
-                    1.0 -> "كامل (1)"
-                    0.5 -> "نصف (½)"
-                    0.0 -> "صفر (0)"
-                    else -> "غير مسجل"
-                },
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = when (currentValue) {
-                    1.0 -> Emerald700
-                    0.5 -> Amber700
-                    0.0 -> Red700
-                    else -> Slate500
-                }
-            )
+            Text(text = selectedLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = selectedColor)
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            val options = listOf(
-                Triple(1.0, "كامل", Triple(Emerald600, Emerald50, Emerald700)),
-                Triple(0.5, "نصف", Triple(Amber600, Amber50, Amber700)),
-                Triple(0.0, "صفر", Triple(Red600, Red50, Red700))
-            )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             options.forEach { (optVal, optLabel, colors) ->
                 val isSelected = currentValue == optVal
                 val (activeBg, inactiveBg, inactiveText) = colors
                 Surface(
-                    color = when {
-                        !enabled -> Slate100
-                        isSelected -> activeBg
-                        else -> inactiveBg
-                    },
-                    contentColor = when {
-                        !enabled -> Slate500
-                        isSelected -> Color.White
-                        else -> inactiveText
-                    },
+                    color = when { !enabled -> Slate100; isSelected -> activeBg; else -> inactiveBg },
+                    contentColor = when { !enabled -> Slate500; isSelected -> Color.White; else -> inactiveText },
                     shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(
-                        1.dp,
-                        if (isSelected && enabled) activeBg else Slate200
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = enabled) {
-                            // Tapping an already selected option clears it back to null (unrecorded)
-                            onValueChange(if (isSelected) null else optVal)
-                        }
+                    border = BorderStroke(1.dp, if (isSelected && enabled) activeBg else Slate200),
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable(enabled = enabled) {
+                        onValueChange(if (isSelected) null else optVal)
+                    }
                 ) {
-                    Text(
-                        text = optLabel,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
+                    Text(text = optLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center, modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp))
                 }
             }
         }
