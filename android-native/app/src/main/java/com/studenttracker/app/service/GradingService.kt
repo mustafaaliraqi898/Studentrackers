@@ -408,7 +408,7 @@ object GradingService {
             val absentDays = workingDates.count { it in absentDates }
             val presentDays = (totalWorkingDays - absentDays).coerceAtLeast(0)
             val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 0.0
-            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * weights.attendance) else 10.0
+            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * weights.attendance) else weights.attendance
 
             val partList = mutableListOf<RatedDateItem>()
             val noteList = mutableListOf<RatedDateItem>()
