@@ -26,6 +26,21 @@ export function getRatingLabel(val: RatingValue): string {
   return 'غير مسجل';
 }
 
+export function getNotebookRatingLabel(val: RatingValue | number | null | undefined): string {
+  if (val === 1 || val === 10) return 'ممتاز';
+  if (val === 0.8 || val === 8) return 'جيد جداً';
+  if (val === 0.6 || val === 6) return 'جيد';
+  if (val === 0.4 || val === 4) return 'مقبول';
+  if (val === 0.2 || val === 2 || val === 0) return 'ضعيف';
+  if (val === 0.5 || val === 5) return 'متوسط';
+  return 'غير مسجل';
+}
+
+export function calcNotebookScore(val: RatingValue | number | null | undefined): number {
+  if (val === null || val === undefined) return 10;
+  return val <= 1 ? round2(val * 10) : round2(val);
+}
+
 export function formatAbsenceDaysLabel(days: number): string {
   return days >= 3 && days <= 10 ? `${days} أيام` : `${days} يوم`;
 }
@@ -196,14 +211,14 @@ export class GradingService {
             behavior: draft.behavior,
           });
           if (draft.dailyTestScore !== null && draft.dailyTestScore !== undefined) {
-            testMap.set(d, Math.min(5, Math.max(0, Number(draft.dailyTestScore))));
+            testMap.set(d, Math.min(20, Math.max(0, Number(draft.dailyTestScore))));
           } else {
             testMap.delete(d);
           }
         }
       }
 
-      // 1. Attendance Calculation (out of 19)
+      // 1. Attendance Calculation (out of 10)
       let presentDays = 0;
       let absentDays = 0;
       const attendanceHistory: { date: string; status: AttendanceStatus }[] = [];
@@ -222,14 +237,18 @@ export class GradingService {
         ? (presentDays / totalWorkingDays) * 100
         : 100;
       const attendanceScore = hasAttendanceData
-        ? round2((presentDays / totalWorkingDays) * 19)
-        : 19;
+        ? round2((presentDays / totalWorkingDays) * 10)
+        : 10;
 
-      // 2. Evaluations Calculation (4 elements × 19 points each)
-      const participationRatings: { date: string; value: 1 | 0.5 | 0 }[] = [];
-      const notebookRatings: { date: string; value: 1 | 0.5 | 0 }[] = [];
-      const homeworkRatings: { date: string; value: 1 | 0.5 | 0 }[] = [];
-      const behaviorRatings: { date: string; value: 1 | 0.5 | 0 }[] = [];
+      // 2. Evaluations Calculation:
+      // Participation: 30 points
+      // Notebook: 10 points (5 options: ممتاز 10, جيد جداً 8, جيد 6, مقبول 4, ضعيف 2)
+      // Homework: 15 points
+      // Behavior: 15 points
+      const participationRatings: { date: string; value: number }[] = [];
+      const notebookRatings: { date: string; value: number }[] = [];
+      const homeworkRatings: { date: string; value: number }[] = [];
+      const behaviorRatings: { date: string; value: number }[] = [];
 
       const sortedEvalDates = Array.from(evalMap.keys()).sort();
       for (const d of sortedEvalDates) {
@@ -248,26 +267,41 @@ export class GradingService {
         }
       }
 
-      const calc19Element = (list: { date: string; value: 1 | 0.5 | 0 }[]) => {
-        // Rule: "إذا لم يتم تسجيل أي تقييم لذلك العنصر خلال الشهر، لا يعتبر صفراً."
+      const calcElementWithMax = (list: { date: string; value: number }[], maxScore: number) => {
         if (list.length === 0) {
-          return { hasData: false, average: null, score: 19 };
+          return { hasData: false, average: null, score: maxScore };
         }
         const sum = list.reduce((acc, item) => acc + item.value, 0);
         const avg = sum / list.length;
         return {
           hasData: true,
           average: round2(avg),
-          score: round2(avg * 19),
+          score: round2(avg * maxScore),
         };
       };
 
-      const partCalc = calc19Element(participationRatings);
-      const noteCalc = calc19Element(notebookRatings);
-      const hwCalc = calc19Element(homeworkRatings);
-      const behCalc = calc19Element(behaviorRatings);
+      const calcNotebookElement = (list: { date: string; value: number }[]) => {
+        if (list.length === 0) {
+          return { hasData: false, average: null, score: 10 };
+        }
+        const sum = list.reduce(
+          (acc, item) => acc + (item.value <= 1 ? item.value * 10 : item.value),
+          0
+        );
+        const avg = sum / list.length;
+        return {
+          hasData: true,
+          average: round2(avg / 10),
+          score: round2(avg),
+        };
+      };
 
-      // 3. Daily Tests Calculation (out of 5)
+      const partCalc = calcElementWithMax(participationRatings, 30);
+      const noteCalc = calcNotebookElement(notebookRatings);
+      const hwCalc = calcElementWithMax(homeworkRatings, 15);
+      const behCalc = calcElementWithMax(behaviorRatings, 15);
+
+      // 3. Daily Tests Calculation (out of 20)
       const dailyTests: { date: string; score: number }[] = [];
       const sortedTestDates = Array.from(testMap.keys()).sort();
       for (const d of sortedTestDates) {
@@ -278,7 +312,7 @@ export class GradingService {
       const quizAverage = hasQuizData
         ? round2(dailyTests.reduce((s, t) => s + t.score, 0) / dailyTests.length)
         : null;
-      const quizScore = hasQuizData ? quizAverage! : 5;
+      const quizScore = hasQuizData ? quizAverage! : 20;
 
       // 4. Total Daily Score out of 100
       const totalScore = round2(

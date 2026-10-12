@@ -421,42 +421,42 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                   <span className="text-slate-500 block">الحضور</span>
                   <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
                     {formatScore(g.attendanceScore)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">/ 19</span>
+                    <span className="text-[10px] text-slate-400 font-normal">/ 10</span>
                   </span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                   <span className="text-slate-500 block">المشاركة</span>
                   <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
                     {formatScore(g.participationScore)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">/ 19</span>
+                    <span className="text-[10px] text-slate-400 font-normal">/ 30</span>
                   </span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                   <span className="text-slate-500 block">الدفتر</span>
                   <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
                     {formatScore(g.notebookScore)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">/ 19</span>
+                    <span className="text-[10px] text-slate-400 font-normal">/ 10</span>
                   </span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                   <span className="text-slate-500 block">الواجب</span>
                   <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
                     {formatScore(g.homeworkScore)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">/ 19</span>
+                    <span className="text-[10px] text-slate-400 font-normal">/ 15</span>
                   </span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
                   <span className="text-slate-500 block">السلوك</span>
                   <span className="font-mono-num font-extrabold text-slate-900 mt-0.5 block">
                     {formatScore(g.behaviorScore)}{' '}
-                    <span className="text-[10px] text-slate-400 font-normal">/ 19</span>
+                    <span className="text-[10px] text-slate-400 font-normal">/ 15</span>
                   </span>
                 </div>
                 <div className="bg-emerald-50/70 p-2.5 rounded-xl border border-emerald-200/70">
-                  <span className="text-emerald-800 block">الاختبار</span>
+                  <span className="text-emerald-800 block">الامتحان</span>
                   <span className="font-mono-num font-extrabold text-emerald-700 mt-0.5 block">
                     {formatScore(g.quizScore)}{' '}
-                    <span className="text-[10px] text-emerald-600 font-normal">/ 5</span>
+                    <span className="text-[10px] text-emerald-600 font-normal">/ 20</span>
                   </span>
                 </div>
               </div>

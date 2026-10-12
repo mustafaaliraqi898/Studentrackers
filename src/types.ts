@@ -1,4 +1,4 @@
-export type RatingValue = 1 | 0.5 | 0 | null;
+export type RatingValue = 1 | 0.8 | 0.6 | 0.5 | 0.4 | 0.2 | 0 | null;
 
 export type AttendanceStatus = 'present' | 'absent';
 
@@ -41,7 +41,7 @@ export interface StudentDailyEntry {
   notebook: RatingValue;
   homework: RatingValue;
   behavior: RatingValue;
-  dailyTestScore: number | null; // 0 to 5 (allows decimals e.g. 3.5)
+  dailyTestScore: number | null; // 0 to 20 (allows decimals e.g. 17.5)
 }
 
 export interface SavedSessionSummary {
@@ -66,43 +66,43 @@ export interface StudentCalculatedGrade {
   sectionId: number;
   sectionName: string;
 
-  // Attendance (excludes Fridays, Saturdays, and registered Holidays)
+  // Attendance (10) (excludes Fridays, Saturdays, and registered Holidays)
   presentDays: number;
   absentDays: number;
   totalWorkingDays: number;
   attendancePercentage: number;
-  attendanceScore: number; // out of 19
+  attendanceScore: number; // out of 10
   hasAttendanceData: boolean;
   attendanceHistory: { date: string; status: AttendanceStatus }[];
 
-  // Participation (19)
-  participationRatings: { date: string; value: 1 | 0.5 | 0 }[];
+  // Participation (30)
+  participationRatings: { date: string; value: number }[];
   participationAverage: number | null;
-  participationScore: number; // out of 19
+  participationScore: number; // out of 30
   hasParticipationData: boolean;
 
-  // Notebook (19)
-  notebookRatings: { date: string; value: 1 | 0.5 | 0 }[];
+  // Notebook (10) - 5 options: ممتاز (10), جيد جداً (8), جيد (6), مقبول (4), ضعيف (2)
+  notebookRatings: { date: string; value: number }[];
   notebookAverage: number | null;
-  notebookScore: number; // out of 19
+  notebookScore: number; // out of 10
   hasNotebookData: boolean;
 
-  // Homework (19)
-  homeworkRatings: { date: string; value: 1 | 0.5 | 0 }[];
+  // Homework (15)
+  homeworkRatings: { date: string; value: number }[];
   homeworkAverage: number | null;
-  homeworkScore: number; // out of 19
+  homeworkScore: number; // out of 15
   hasHomeworkData: boolean;
 
-  // Behavior (19)
-  behaviorRatings: { date: string; value: 1 | 0.5 | 0 }[];
+  // Behavior (15)
+  behaviorRatings: { date: string; value: number }[];
   behaviorAverage: number | null;
-  behaviorScore: number; // out of 19
+  behaviorScore: number; // out of 15
   hasBehaviorData: boolean;
 
-  // Daily Tests (5)
+  // Daily Tests (20)
   dailyTests: { date: string; score: number }[];
   quizAverage: number | null;
-  quizScore: number; // out of 5
+  quizScore: number; // out of 20
   hasQuizData: boolean;
 
   // Final Daily Grade out of 100

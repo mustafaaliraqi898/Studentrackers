@@ -26,6 +26,7 @@ import {
   formatScore,
   getArabicDayName,
   getRatingLabel,
+  getNotebookRatingLabel,
   round2,
 } from '../services/gradingService';
 import { TrackerRepository } from '../repositories/trackerRepository';
@@ -239,37 +240,37 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
             <span className="text-xs text-slate-300 block">الحضور</span>
             <span className="text-base font-extrabold text-white font-mono-num mt-1 block">
-              {formatScore(grade.attendanceScore)} / 19
+              {formatScore(grade.attendanceScore)} / 10
             </span>
           </div>
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
             <span className="text-xs text-slate-300 block">المشاركة</span>
             <span className="text-base font-extrabold text-white font-mono-num mt-1 block">
-              {formatScore(grade.participationScore)} / 19
+              {formatScore(grade.participationScore)} / 30
             </span>
           </div>
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
             <span className="text-xs text-slate-300 block">الدفتر</span>
             <span className="text-base font-extrabold text-white font-mono-num mt-1 block">
-              {formatScore(grade.notebookScore)} / 19
+              {formatScore(grade.notebookScore)} / 10
             </span>
           </div>
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
             <span className="text-xs text-slate-300 block">الواجب</span>
             <span className="text-base font-extrabold text-white font-mono-num mt-1 block">
-              {formatScore(grade.homeworkScore)} / 19
+              {formatScore(grade.homeworkScore)} / 15
             </span>
           </div>
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
             <span className="text-xs text-slate-300 block">السلوك</span>
             <span className="text-base font-extrabold text-white font-mono-num mt-1 block">
-              {formatScore(grade.behaviorScore)} / 19
+              {formatScore(grade.behaviorScore)} / 15
             </span>
           </div>
           <div className="bg-slate-800/90 p-3 rounded-xl border border-slate-700/70">
-            <span className="text-xs text-slate-300 block">الاختبار</span>
+            <span className="text-xs text-slate-300 block">الامتحان اليومي</span>
             <span className="text-base font-extrabold text-emerald-400 font-mono-num mt-1 block">
-              {formatScore(grade.quizScore)} / 5
+              {formatScore(grade.quizScore)} / 20
             </span>
           </div>
         </div>
@@ -557,14 +558,26 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
             );
           }
 
-          const renderRatingPill = (label: string, val: RatingValue | undefined) => {
-            const text = val !== undefined && val !== null ? getRatingLabel(val) : 'غير مسجل';
+          const renderRatingPill = (label: string, val: RatingValue | number | undefined) => {
+            const isNotebook = label === 'الدفتر';
+            const text =
+              val !== undefined && val !== null
+                ? isNotebook
+                  ? getNotebookRatingLabel(val)
+                  : getRatingLabel(val as RatingValue)
+                : 'غير مسجل';
             const colorClass =
-              val === 1
+              val === 1 || val === 10
                 ? 'text-emerald-700 font-extrabold'
-                : val === 0.5
+                : val === 0.8 || val === 8
+                ? 'text-teal-700 font-extrabold'
+                : val === 0.6 || val === 6
+                ? 'text-sky-700 font-extrabold'
+                : val === 0.4 || val === 4
                 ? 'text-amber-600 font-extrabold'
-                : val === 0
+                : val === 0.5 || val === 5
+                ? 'text-amber-600 font-extrabold'
+                : val === 0.2 || val === 2 || val === 0
                 ? 'text-rose-600 font-extrabold'
                 : 'text-slate-400 font-bold';
             return (
@@ -650,7 +663,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                       {renderRatingPill('السلوك', beh)}
                       <div className="bg-white rounded-lg p-2 border border-slate-200 text-center col-span-2 sm:col-span-1">
                         <span className="text-[11px] text-slate-500 font-bold block">
-                          الاختبار اليومي
+                          الامتحان اليومي
                         </span>
                         <span
                           className={`text-xs mt-0.5 block font-mono-num ${
@@ -659,7 +672,7 @@ export const StudentProfileView: React.FC<StudentProfileViewProps> = ({
                               : 'text-slate-400 font-bold'
                           }`}
                         >
-                          {test !== undefined ? `${formatScore(test)} / 5` : 'غير مسجل'}
+                          {test !== undefined ? `${formatScore(test)} / 20` : 'غير مسجل'}
                         </span>
                       </div>
                     </div>

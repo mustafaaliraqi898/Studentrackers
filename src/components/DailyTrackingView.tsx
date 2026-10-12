@@ -31,7 +31,7 @@ import {
   getArabicDayName,
 } from '../services/gradingService';
 import { TrackerRepository } from '../repositories/trackerRepository';
-import { RatingButtons } from './RatingButtons';
+import { RatingButtons, NotebookRatingButtons } from './RatingButtons';
 
 interface DailyTrackingViewProps {
   classes: ClassEntity[];
@@ -389,7 +389,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
     }
 
     const num = Number(rawVal);
-    if (!Number.isNaN(num) && num >= 0 && num <= 5) {
+    if (!Number.isNaN(num) && num >= 0 && num <= 20) {
       setDraftQuizStrings((prev) => ({ ...prev, [studentId]: rawVal }));
       setDraftEntries((prev) => ({
         ...prev,
@@ -744,7 +744,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                   {/* Attendance Buttons (Always enabled on working days & saved immediately to SQLite) */}
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-slate-500 ml-1">
-                      الحضور (19):
+                      الحضور (10):
                     </span>
                     <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/70 w-full sm:w-auto min-w-[190px]">
                       <button
@@ -758,7 +758,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         } active:scale-[0.98]`}
                       >
                         <UserCheck className="w-4 h-4" />
-                        <span>حاضر</span>
+                        <span>حاضر (10/10)</span>
                       </button>
 
                       <button
@@ -772,56 +772,56 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         } active:scale-[0.98]`}
                       >
                         <UserX className="w-4 h-4" />
-                        <span>غائب</span>
+                        <span>غائب (0/10)</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* 4 Evaluation Elements: المشاركة، الدفتر، الواجب، السلوك */}
+                {/* 4 Evaluation Elements: المشاركة (30)، الدفتر (10)، الواجب (15)، السلوك (15) */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 py-4 border-b border-slate-100">
                   <RatingButtons
-                    label="المشاركة (19)"
+                    label="المشاركة (30)"
                     value={entry.participation}
                     onChange={(val) => updateRating(student.id, 'participation', val)}
                     disabled={isLocked}
                     calculatedScoreText={
-                      liveGrade ? `${formatScore(liveGrade.participationScore)} / 19` : undefined
+                      liveGrade ? `${formatScore(liveGrade.participationScore)} / 30` : undefined
                     }
                   />
 
-                  <RatingButtons
-                    label="الدفتر (19)"
+                  <NotebookRatingButtons
+                    label="الدفتر (10)"
                     value={entry.notebook}
                     onChange={(val) => updateRating(student.id, 'notebook', val)}
                     disabled={isLocked}
                     calculatedScoreText={
-                      liveGrade ? `${formatScore(liveGrade.notebookScore)} / 19` : undefined
+                      liveGrade ? `${formatScore(liveGrade.notebookScore)} / 10` : undefined
                     }
                   />
 
                   <RatingButtons
-                    label="الواجب (19)"
+                    label="الواجب (15)"
                     value={entry.homework}
                     onChange={(val) => updateRating(student.id, 'homework', val)}
                     disabled={isLocked}
                     calculatedScoreText={
-                      liveGrade ? `${formatScore(liveGrade.homeworkScore)} / 19` : undefined
+                      liveGrade ? `${formatScore(liveGrade.homeworkScore)} / 15` : undefined
                     }
                   />
 
                   <RatingButtons
-                    label="السلوك (19)"
+                    label="السلوك (15)"
                     value={entry.behavior}
                     onChange={(val) => updateRating(student.id, 'behavior', val)}
                     disabled={isLocked}
                     calculatedScoreText={
-                      liveGrade ? `${formatScore(liveGrade.behaviorScore)} / 19` : undefined
+                      liveGrade ? `${formatScore(liveGrade.behaviorScore)} / 15` : undefined
                     }
                   />
                 </div>
 
-                {/* Daily Test (0 to 5, decimals allowed) + Live Calculated Grade Breakdown */}
+                {/* Daily Test (0 to 20, decimals allowed) + Live Calculated Grade Breakdown */}
                 <div className="pt-4 grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
                   <div className="lg:col-span-4 flex items-center justify-between sm:justify-start gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/70">
                     <div>
@@ -829,10 +829,10 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         htmlFor={`quiz-${student.id}`}
                         className="block text-xs font-bold text-slate-800"
                       >
-                        الاختبار اليومي (من 5)
+                        الامتحان اليومي (من 20)
                       </label>
                       <span className="text-[11px] text-slate-500">
-                        يقبل الكسور مثل 3.5 أو 4.5
+                        يقبل الدرجات حتى 20 والكسور مثل 17.5
                       </span>
                     </div>
 
@@ -841,7 +841,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         id={`quiz-${student.id}`}
                         type="number"
                         min={0}
-                        max={5}
+                        max={20}
                         step={0.5}
                         disabled={isLocked}
                         value={rawQuizStr}
@@ -850,7 +850,7 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         className="w-16 min-h-[42px] px-2 py-1 text-center font-mono-num text-base font-extrabold bg-white border border-slate-300 rounded-lg text-slate-900 focus:outline-none focus:border-emerald-600 disabled:bg-slate-100"
                       />
                       <span className="text-sm font-bold text-slate-500 font-mono-num">
-                        / 5
+                        / 20
                       </span>
                     </div>
                   </div>
@@ -870,37 +870,37 @@ export const DailyTrackingView: React.FC<DailyTrackingViewProps> = ({
                         <div>
                           <span className="text-slate-400 block">الحضور</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.attendanceScore)} / 19
+                            {formatScore(liveGrade.attendanceScore)} / 10
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-400 block">المشاركة</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.participationScore)} / 19
+                            {formatScore(liveGrade.participationScore)} / 30
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-400 block">الدفتر</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.notebookScore)} / 19
+                            {formatScore(liveGrade.notebookScore)} / 10
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-400 block">الواجب</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.homeworkScore)} / 19
+                            {formatScore(liveGrade.homeworkScore)} / 15
                           </span>
                         </div>
                         <div>
                           <span className="text-slate-400 block">السلوك</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.behaviorScore)} / 19
+                            {formatScore(liveGrade.behaviorScore)} / 15
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-400 block">الاختبار</span>
+                          <span className="text-slate-400 block">الامتحان</span>
                           <span className="font-mono-num font-bold text-white">
-                            {formatScore(liveGrade.quizScore)} / 5
+                            {formatScore(liveGrade.quizScore)} / 20
                           </span>
                         </div>
                       </div>
