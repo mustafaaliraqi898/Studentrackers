@@ -1120,74 +1120,9 @@ fun DailyTrackingScreen(
                                         fontSize = 16.sp,
                                         color = Slate900
                                     )
-                                    val attDayScore = if (isPresent) "10" else "0"
-                                    val partDayScore = GradingService.formatScore((entry.participation ?: 0.0) * 30.0)
-                                    val noteDayScore = GradingService.formatScore((entry.notebook ?: 0.0) * 10.0)
-                                    val hwDayScore = GradingService.formatScore((entry.homework ?: 0.0) * 15.0)
-                                    val behDayScore = GradingService.formatScore((entry.behavior ?: 0.0) * 15.0)
-                                    val quizDayScore = GradingService.formatScore((entry.dailyTestScore ?: 0.0).coerceIn(0.0, 20.0))
-                                    Text(
-                                        text = "درجة اليوم: حضور $attDayScore | مشاركة $partDayScore | دفتر $noteDayScore | واجب $hwDayScore | سلوك $behDayScore | اختبار $quizDayScore",
-                                        fontSize = 11.sp,
-                                        color = Slate600
-                                    )
+
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Surface(
-                                        color = if (isPresent) Emerald50 else Red50,
-                                        shape = RoundedCornerShape(10.dp),
-                                        border = BorderStroke(1.dp, if (isPresent) Emerald600 else Red600)
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Text(
-                                                text = "${GradingService.formatScore(todaySingleScore)} / 100",
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontSize = 13.sp,
-                                                color = if (isPresent) Emerald700 else Red700
-                                            )
-                                            Text(
-                                                text = "درجة هذا اليوم",
-                                                fontSize = 9.sp,
-                                                color = if (isPresent) Emerald700 else Red700
-                                            )
-                                        }
-                                    }
-                                    if (grade != null) {
-                                        Surface(
-                                            color = Teal50,
-                                            shape = RoundedCornerShape(10.dp),
-                                            border = BorderStroke(1.dp, Teal600),
-                                            modifier = Modifier.clickable { onOpenStudentProfile(st.id) }
-                                        ) {
-                                            Column(
-                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                                horizontalAlignment = Alignment.CenterHorizontally
-                                            ) {
-                                                Text(
-                                                    text = "${GradingService.formatScore(grade.totalScore)} / 100",
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    fontSize = 13.sp,
-                                                    color = Teal700
-                                                )
-                                                Text(
-                                                    text = if (grade.missingComponents.isEmpty()) "الدرجة مكتملة" else "غير مكتملة",
-                                                    fontSize = 9.sp,
-                                                    color = if (grade.missingComponents.isEmpty()) Teal700 else Amber700
-                                                )
-                                                if (grade.missingComponents.isNotEmpty()) {
-                                                    Text(
-                                                        text = "ناقص: ${grade.missingComponents.joinToString("، ")}",
-                                                        fontSize = 9.sp,
-                                                        color = Amber700
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+
                             }
 
                             // Attendance Present / Absent Toggle (Always enabled on working days & saves immediately to SQLite)
@@ -1261,7 +1196,7 @@ fun DailyTrackingScreen(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 0.0) * 30.0)} / 30)",
+                                scorePreviewText = entry.participation?.let { "(${GradingService.formatScore(it * 30.0)} / 30)" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1275,7 +1210,7 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 0.0) * 10.0)} / 10)",
+                                scorePreviewText = entry.notebook?.let { "(${GradingService.formatScore(it * 10.0)} / 10)" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1289,7 +1224,7 @@ fun DailyTrackingScreen(
                                 label = "الواجب",
                                 currentValue = entry.homework,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 0.0) * 15.0)} / 15)",
+                                scorePreviewText = entry.homework?.let { "(${GradingService.formatScore(it * 15.0)} / 15)" } ?: "غير مسجل",
                                 ratingType = "five",
                                 onValueChange = { v ->
                                     isEditingSaved = true
@@ -1303,7 +1238,7 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 0.0) * 15.0)} / 15)",
+                                scorePreviewText = entry.behavior?.let { "(${GradingService.formatScore(it * 15.0)} / 15)" } ?: "غير مسجل",
                                 ratingType = "behavior",
                                 onValueChange = { v ->
                                     isEditingSaved = true
