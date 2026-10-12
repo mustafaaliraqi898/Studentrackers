@@ -427,7 +427,6 @@ object GradingService {
                 return round2(avg * maxScore)
             }
             val partScore = calcWeighted(partList, weights.participation)
-            val noteScore = notebookScore
             val hwScore = calcWeighted(hwList, weights.homework)
 
             // Behavior and notebook are full by default; only explicitly saved zero ratings reduce them.
@@ -439,6 +438,7 @@ object GradingService {
             val notebookScore = if (totalWorkingDays > 0) {
                 round2(((totalWorkingDays - workingDates.count { it in notebookZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.notebook)
             } else weights.notebook
+            val noteScore = notebookScore
             val behScore = behaviorScore
 
             val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s.coerceIn(0.0, weights.dailyTest)) }
