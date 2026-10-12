@@ -417,7 +417,6 @@ object GradingService {
                 if (partList.isEmpty()) add("المشاركة")
                 if (noteList.isEmpty()) add("الدفتر")
                 if (hwList.isEmpty()) add("الواجب")
-                if (behList.isEmpty()) add("السلوك")
                 if (testList.isEmpty()) add("الامتحان اليومي")
             }
             // Unrecorded categories are omitted from the subtotal; saved zero ratings remain genuine zeros.
