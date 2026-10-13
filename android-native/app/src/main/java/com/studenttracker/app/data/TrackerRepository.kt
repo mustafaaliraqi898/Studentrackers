@@ -44,6 +44,44 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         }
     }
 
+    /**
+     * Returns how many non-null participation ratings each student has received
+     * during the selected study period, scoped to the selected class and section.
+     * Students without a saved rating are omitted and treated as zero by callers.
+     */
+    fun getParticipationEvaluationCounts(
+        classId: Long,
+        sectionId: Long,
+        startDate: String,
+        endDate: String?
+    ): Map<Long, Int> {
+        val counts = mutableMapOf<Long, Int>()
+        val args = mutableListOf(classId.toString(), sectionId.toString(), startDate)
+        val endClause = if (endDate.isNullOrBlank()) "" else {
+            args.add(endDate)
+            " AND e.RecordDate <= ?"
+        }
+        val sql = """
+            SELECT e.StudentID, COUNT(*)
+            FROM Evaluations e
+            JOIN Students st ON st.ID = e.StudentID
+            WHERE st.ClassID = ?
+              AND st.SectionID = ?
+              AND st.IsActive = 1
+              AND e.RecordDate >= ?
+              $endClause
+              AND e.Participation IS NOT NULL
+            GROUP BY e.StudentID
+        """.trimIndent()
+        val cursor = dbHelper.readableDatabase.rawQuery(sql, args.toTypedArray())
+        cursor.use {
+            while (it.moveToNext()) {
+                counts[it.getLong(0)] = it.getInt(1)
+            }
+        }
+        return counts
+    }
+
     // ---------------- CLASSES ----------------
     fun getClasses(): List<ClassEntity> {
         val db = dbHelper.readableDatabase
