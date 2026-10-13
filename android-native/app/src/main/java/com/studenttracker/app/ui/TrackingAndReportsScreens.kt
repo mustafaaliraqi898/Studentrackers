@@ -1137,6 +1137,37 @@ fun DailyTrackingScreen(
                                 }
                             }
 
+                            Button(
+                                onClick = {
+                                    val period = selectedPeriod
+                                    if (period == null) {
+                                        showTopNotification("يرجى اختيار الفترة الدراسية أولاً", isWarning = true)
+                                    } else if (students.isEmpty()) {
+                                        showTopNotification("لا يوجد طلاب للاختيار", isWarning = true)
+                                    } else {
+                                        val counts = repository.getParticipationEvaluationCounts(
+                                            selectedClassId,
+                                            selectedSectionId,
+                                            period.startDate,
+                                            period.endDate
+                                        )
+                                        val minimumCount = students.minOf { counts[it.id] ?: 0 }
+                                        val candidates = students.filter { (counts[it.id] ?: 0) == minimumCount }
+                                        val chosen = candidates.random()
+                                        searchQuery = chosen.studentName
+                                        showTopNotification(
+                                            "🎲 الطالب المختار للمشاركة: ${chosen.studentName} — عدد تقييماته السابقة: $minimumCount"
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = Teal700)
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("سحب طالب عشوائي للمشاركة", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
