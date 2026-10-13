@@ -1163,8 +1163,6 @@ fun DailyTrackingScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = Teal700)
                             ) {
-                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Text("سحب طالب عشوائي للمشاركة", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             }
 
