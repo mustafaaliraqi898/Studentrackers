@@ -370,7 +370,7 @@ object GradingService {
                         draft.behavior
                     )
                     if (draft.dailyTestScore != null) {
-                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, 20.0)
+                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, getEvaluationWeights(dbHelper, st.classId).dailyTest)
                     } else {
                         testMap.remove(liveOverrideDate)
                     }
