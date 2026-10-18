@@ -747,10 +747,16 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                     evalArgs
                 )
 
-                // 4. Upsert or delete DailyTests
+                // 4. Upsert or delete DailyTests using this class's configured maximum.
                 val testScore = entry.dailyTestScore
                 if (testScore != null) {
-                    val clamped = testScore.coerceIn(0.0, 5.0)
+                    val dailyTestMax = db.rawQuery(
+                        "SELECT DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
+                        arrayOf(classId.toString())
+                    ).use { cursor ->
+                        if (cursor.moveToFirst()) cursor.getDouble(0) else 20.0
+                    }
+                    val clamped = testScore.coerceIn(0.0, dailyTestMax)
                     db.execSQL(
                         """
                         INSERT INTO DailyTests (StudentID, RecordDate, Score, TestValue)
