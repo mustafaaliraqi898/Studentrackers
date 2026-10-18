@@ -1404,7 +1404,7 @@ fun DailyTrackingScreen(
                                     supportingText = {
                                         Text(
                                             if (entry.dailyTestScore == null) "غير مسجل — لا يدخل في المتوسط"
-                                            else "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / 20"
+                                            else "الدرجة المسجلة: ${GradingService.formatScore(entry.dailyTestScore)} / ${GradingService.formatScore(dailyTestMax)}"
                                         )
                                     },
                                     modifier = Modifier.fillMaxWidth()
