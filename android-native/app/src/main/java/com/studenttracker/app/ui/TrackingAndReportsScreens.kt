@@ -1857,12 +1857,30 @@ fun SavedRecordsScreen(
                                 )
                             }
                             if (s.lessonTopic.isNotBlank()) {
-                                Text(
-                                    text = "موضوع الدرس: ${s.lessonTopic}",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Slate800
-                                )
+                                Surface(
+                                    color = Teal50,
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text(
+                                            text = "الموضوع:",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Teal700
+                                        )
+                                        Spacer(modifier = Modifier.width(5.dp))
+                                        Text(
+                                            text = s.lessonTopic,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Slate800
+                                        )
+                                    }
+                                }
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
