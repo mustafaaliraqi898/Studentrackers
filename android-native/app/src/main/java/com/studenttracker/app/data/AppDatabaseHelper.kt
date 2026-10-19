@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 13
+        const val DATABASE_VERSION = 14
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -97,6 +97,35 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 13) {
             migrateEvaluationRatingScale(db)
         }
+        if (oldVersion < 14) {
+            migrateDailyTestsScoreRange(db)
+        }
+    }
+
+    /**
+     * Daily test maximum is configurable per class. Older schemas hard-coded a maximum of 5,
+     * which caused SQLite constraint failures when teachers entered scores above 5.
+     * Rebuild the table without the obsolete constraint while preserving existing scores.
+     */
+    private fun migrateDailyTestsScoreRange(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE DailyTests_new (
+                ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                StudentID INTEGER NOT NULL,
+                RecordDate TEXT NOT NULL,
+                Score REAL NOT NULL CHECK(Score >= 0 AND Score <= 100),
+                TestValue REAL NOT NULL DEFAULT 0 CHECK(TestValue >= 0 AND TestValue <= 100),
+                FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+                UNIQUE(StudentID, RecordDate)
+            );
+        """.trimIndent())
+        db.execSQL("""
+            INSERT INTO DailyTests_new (ID, StudentID, RecordDate, Score, TestValue)
+            SELECT ID, StudentID, RecordDate, Score, TestValue FROM DailyTests;
+        """.trimIndent())
+        db.execSQL("DROP TABLE DailyTests;")
+        db.execSQL("ALTER TABLE DailyTests_new RENAME TO DailyTests;")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailytests_student_date ON DailyTests(StudentID, RecordDate);")
     }
 
     private fun migrateEvaluationRatingScale(db: SQLiteDatabase) {
@@ -599,8 +628,8 @@ class AppDatabaseHelper(private val context: Context) :
                 ID INTEGER PRIMARY KEY AUTOINCREMENT,
                 StudentID INTEGER NOT NULL,
                 RecordDate TEXT NOT NULL,
-                Score REAL NOT NULL CHECK(Score >= 0 AND Score <= 5),
-                TestValue REAL NOT NULL DEFAULT 0 CHECK(TestValue >= 0 AND TestValue <= 5),
+                Score REAL NOT NULL CHECK(Score >= 0 AND Score <= 100),
+                TestValue REAL NOT NULL DEFAULT 0 CHECK(TestValue >= 0 AND TestValue <= 100),
                 FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
                 UNIQUE(StudentID, RecordDate)
             );
