@@ -2406,7 +2406,7 @@ fun StudentProfileScreen(
                                                     modifier = Modifier.padding(8.dp),
                                                     horizontalAlignment = Alignment.CenterHorizontally
                                                 ) {
-                                                    Text("الدرجة اليومية", fontSize = 11.sp, color = Slate600, fontWeight = FontWeight.Bold)
+                                                    Text(if (grade.missingComponents.isNotEmpty()) "الدرجة اليومية (مؤقتة)" else "الدرجة اليومية", fontSize = 11.sp, color = Slate600, fontWeight = FontWeight.Bold)
                                                     Text(
                                                         text = "${GradingService.formatScore(bd.dailyGrade)} / 100",
                                                         fontSize = 14.sp,
@@ -2484,6 +2484,14 @@ fun StudentProfileScreen(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تفصيل عناصر الدرجة اليومية (من 100)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                        if (grade.missingComponents.isNotEmpty()) {
+                            Text(
+                                text = "الدرجة الحالية مؤقتة؛ توجد عناصر لم تُسجّل بعد: ${grade.missingComponents.joinToString("، ")}. العناصر غير المسجلة لا تُعدّ صفراً فعلياً.",
+                                fontSize = 12.sp,
+                                color = Amber600,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                         ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, profileWeights.attendance)
                         ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore.takeIf { grade.participationRatings.isNotEmpty() }, profileWeights.participation)
                         ProfileScoreRow("3. الدفتر (${grade.notebookRatings.count { it.value == 0.0 }} يوم بدرجة صفر)", grade.notebookScore, profileWeights.notebook)
