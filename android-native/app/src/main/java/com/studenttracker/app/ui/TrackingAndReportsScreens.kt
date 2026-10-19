@@ -1856,6 +1856,14 @@ fun SavedRecordsScreen(
                                     color = Teal700
                                 )
                             }
+                            if (s.lessonTopic.isNotBlank()) {
+                                Text(
+                                    text = "موضوع الدرس: ${s.lessonTopic}",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Slate800
+                                )
+                            }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(
