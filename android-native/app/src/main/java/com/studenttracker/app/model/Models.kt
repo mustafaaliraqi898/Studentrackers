@@ -68,7 +68,8 @@ data class SavedSessionSummary(
     val academicYearName: String? = null,
     val periodId: Long? = null,
     val periodName: String? = null,
-    val stageType: AcademicStage? = null
+    val stageType: AcademicStage? = null,
+    val lessonTopic: String = ""
 )
 
 data class PeriodWeekWindow(
