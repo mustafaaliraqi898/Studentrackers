@@ -858,7 +858,8 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                     COUNT(dt.Score) as TestsCount,
                     MAX(dr.UpdatedAt) as LastUpdated,
                     MAX(dr.AcademicYearID) as AcademicYearID,
-                    MAX(dr.PeriodID) as PeriodID
+                    MAX(dr.PeriodID) as PeriodID,
+                    COALESCE((SELECT dp.LessonTopic FROM DailyPlans dp WHERE dp.PlanDate = dr.RecordDate AND dp.ClassID = dr.ClassID ORDER BY dp.ID DESC LIMIT 1), '') as LessonTopic
                 FROM DailyRecords dr
                 LEFT JOIN Classes c ON c.ID = dr.ClassID
                 LEFT JOIN Sections s ON s.ID = dr.SectionID
@@ -907,7 +908,8 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                             academicYearName = effectiveYearName,
                             periodId = matchedPeriod?.id,
                             periodName = matchedPeriod?.periodName,
-                            stageType = matchedPeriod?.stageType
+                            stageType = matchedPeriod?.stageType,
+                            lessonTopic = if (it.isNull(13)) "" else (it.getString(13) ?: "")
                         )
                     )
                 }
