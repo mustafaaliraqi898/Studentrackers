@@ -1320,6 +1320,30 @@ export class TrackerRepository {
   }
 
   // ---------------- DAILY PLANS ("الخطة اليومية") ----------------
+  static async getDailyPlanTopicForClassSectionDate(
+    planDate: string,
+    classId: number,
+    sectionId: number
+  ): Promise<string | null> {
+    const db = await getDatabase();
+    const res = db.exec(
+      `SELECT dp.LessonTopic
+       FROM DailyPlans dp
+       WHERE dp.PlanDate = ?
+         AND dp.ClassID = ?
+         AND EXISTS (
+           SELECT 1 FROM DailyPlanSections dps
+           WHERE dps.PlanID = dp.ID AND dps.SectionID = ?
+         )
+       ORDER BY dp.ID DESC
+       LIMIT 1;`,
+      [planDate, classId, sectionId]
+    );
+    if (res.length === 0 || res[0].values.length === 0) return null;
+    const topic = String(res[0].values[0][0] || '').trim();
+    return topic || null;
+  }
+
   static async getDailyPlans(filters?: {
     planDate?: string;
     classId?: number;
