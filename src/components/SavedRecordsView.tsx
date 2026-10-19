@@ -39,12 +39,29 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
   const [filterClassId, setFilterClassId] = useState<number | 'ALL'>(selectedClassId);
   const [filterSectionId, setFilterSectionId] = useState<number | 'ALL'>('ALL');
   const [sessions, setSessions] = useState<SavedSessionSummary[]>([]);
+  const [lessonTopicsBySession, setLessonTopicsBySession] = useState<Record<string, string | null>>({});
 
   const loadSessions = async () => {
     const clsParam = filterClassId === 'ALL' ? undefined : filterClassId;
     const secParam = filterSectionId === 'ALL' ? undefined : filterSectionId;
     const list = await TrackerRepository.getSavedSessionsSummary(clsParam, secParam);
     setSessions(list);
+    const topics = await Promise.all(
+      list.map(async (session) => {
+        const key = `${session.recordDate}-${session.classId}-${session.sectionId}`;
+        try {
+          const topic = await TrackerRepository.getDailyPlanTopicForClassSectionDate(
+            session.recordDate,
+            session.classId,
+            session.sectionId
+          );
+          return [key, topic] as const;
+        } catch {
+          return [key, null] as const;
+        }
+      })
+    );
+    setLessonTopicsBySession(Object.fromEntries(topics));
   };
 
   useEffect(() => {
@@ -183,6 +200,9 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
                     {s.className} — الشعبة {s.sectionName} —{' '}
                     <span className="text-emerald-700">محفوظ</span>
                   </h3>
+                  <p className="mt-1.5 text-sm font-bold text-indigo-700">
+                    موضوع الدرس: {lessonTopicsBySession[`${s.recordDate}-${s.classId}-${s.sectionId}`] || 'لا يوجد موضوع محفوظ لهذا اليوم'}
+                  </p>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1 font-mono-num">
                     <span>حاضر: {s.presentCount}</span>
                     <span aria-hidden="true">·</span>
