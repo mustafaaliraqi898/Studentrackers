@@ -1081,6 +1081,26 @@ object ExcelAndBackupService {
         }
     }
 
+    /**
+     * Refuse backups created by a newer app schema before touching the live database.
+     * SQLiteOpenHelper can upgrade older schemas, but it must never downgrade newer ones.
+     */
+    private fun validateBackupDatabaseVersion(backupFile: File) {
+        val backupVersion = SQLiteDatabase.openDatabase(
+            backupFile.absolutePath,
+            null,
+            SQLiteDatabase.OPEN_READONLY
+        ).use { it.version }
+
+        require(backupVersion in 1..AppDatabaseHelper.DATABASE_VERSION) {
+            if (backupVersion > AppDatabaseHelper.DATABASE_VERSION) {
+                "نسخة قاعدة البيانات أحدث من إصدار التطبيق (النسخة ${backupVersion}، التطبيق ${AppDatabaseHelper.DATABASE_VERSION}). حدّث التطبيق قبل الاستعادة؛ لم يتم تغيير بياناتك."
+            } else {
+                "إصدار قاعدة البيانات داخل الملف غير صالح (${backupVersion})"
+            }
+        }
+    }
+
     fun restoreBackup(
         context: Context,
         dbHelper: AppDatabaseHelper,
@@ -1106,6 +1126,9 @@ object ExcelAndBackupService {
             require(backupSourceFile.exists() && backupSourceFile.length() > 100) {
                 "ملف النسخة الاحتياطية غير موجود أو تالف"
             }
+
+            // Validate schema compatibility before creating backups or touching the live database.
+            validateBackupDatabaseVersion(backupSourceFile)
 
             // Inspect backup file before restoring to know exact expected counts
             val expectedBackupCounts = dbHelper.inspectDatabaseFileCounts(backupSourceFile)
@@ -1214,6 +1237,9 @@ object ExcelAndBackupService {
         tempFile.inputStream().use { it.read(header) }
         val headerStr = String(header, Charsets.US_ASCII)
         require(headerStr.startsWith("SQLite format 3")) { "الملف المختار ليس قاعدة بيانات SQLite صالحة" }
+
+        // Validate compatibility before the safety backup or replacing the active database.
+        validateBackupDatabaseVersion(tempFile)
 
         val expectedCounts = dbHelper.inspectDatabaseFileCounts(tempFile)
         val expectedStudents = expectedCounts["students"] ?: 0
