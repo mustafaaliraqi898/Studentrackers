@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 14
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -44,6 +44,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     override fun onCreate(db: SQLiteDatabase) {
         createAllTables(db)
+        createEvaluationSettingsTable(db)
         seedInitialDemoData(db)
     }
 
@@ -90,7 +91,76 @@ class AppDatabaseHelper(private val context: Context) :
         if (oldVersion < 11) {
             migrateDailyScheduleReminderColumns(db)
         }
+        if (oldVersion < 12) {
+            createEvaluationSettingsTable(db)
+        }
+        if (oldVersion < 13) {
+            migrateEvaluationRatingScale(db)
+        }
+        if (oldVersion < 14) {
+            migrateDailyTestsScoreRange(db)
+        }
     }
+
+    private fun createEvaluationSettingsTable(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS EvaluationSettings (
+                    ClassID INTEGER PRIMARY KEY,
+                    AttendanceMax REAL NOT NULL DEFAULT 10,
+                    ParticipationMax REAL NOT NULL DEFAULT 30,
+                    NotebookMax REAL NOT NULL DEFAULT 10,
+                    HomeworkMax REAL NOT NULL DEFAULT 15,
+                    BehaviorMax REAL NOT NULL DEFAULT 15,
+                    DailyTestMax REAL NOT NULL DEFAULT 20,
+                    UpdatedAt TEXT NOT NULL,
+                    FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+                );
+            """.trimIndent())
+        }
+    
+    private fun migrateEvaluationRatingScale(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE Evaluations_new (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    StudentID INTEGER NOT NULL,
+                    RecordDate TEXT NOT NULL,
+                    Participation REAL NULL CHECK(Participation IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Participation IS NULL),
+                    Notebook REAL NULL CHECK(Notebook IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Notebook IS NULL),
+                    Homework REAL NULL CHECK(Homework IN (1, 0.8, 0.6, 0.5, 0.4, 0) OR Homework IS NULL),
+                    Behavior REAL NULL CHECK(Behavior IN (1, 0.5, 0) OR Behavior IS NULL),
+                    FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+                    UNIQUE(StudentID, RecordDate)
+                );
+            """.trimIndent())
+            db.execSQL("""
+                INSERT INTO Evaluations_new (ID, StudentID, RecordDate, Participation, Notebook, Homework, Behavior)
+                SELECT ID, StudentID, RecordDate, Participation, Notebook, Homework, Behavior
+                FROM Evaluations;
+            """.trimIndent())
+            db.execSQL("DROP TABLE Evaluations;")
+            db.execSQL("ALTER TABLE Evaluations_new RENAME TO Evaluations;")
+        }
+    
+    private fun migrateDailyTestsScoreRange(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE DailyTests_new (
+                    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+                    StudentID INTEGER NOT NULL,
+                    RecordDate TEXT NOT NULL,
+                    Score REAL NOT NULL CHECK(Score >= 0 AND Score <= 100),
+                    TestValue REAL NOT NULL DEFAULT 0 CHECK(TestValue >= 0 AND TestValue <= 100),
+                    FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
+                    UNIQUE(StudentID, RecordDate)
+                );
+            """.trimIndent())
+            db.execSQL("""
+                INSERT INTO DailyTests_new (ID, StudentID, RecordDate, Score, TestValue)
+                SELECT ID, StudentID, RecordDate, Score, TestValue FROM DailyTests;
+            """.trimIndent())
+            db.execSQL("DROP TABLE DailyTests;")
+            db.execSQL("ALTER TABLE DailyTests_new RENAME TO DailyTests;")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_dailytests_student_date ON DailyTests(StudentID, RecordDate);")
+        }
 
     private fun migrateDailyScheduleReminderColumns(db: SQLiteDatabase) {
         runCatching {
