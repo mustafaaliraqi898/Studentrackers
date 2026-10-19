@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   FolderOpen,
   PlusCircle,
+  Search,
   Trash2,
 } from 'lucide-react';
 import {
@@ -40,6 +41,7 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
   const [filterSectionId, setFilterSectionId] = useState<number | 'ALL'>('ALL');
   const [sessions, setSessions] = useState<SavedSessionSummary[]>([]);
   const [lessonTopicsBySession, setLessonTopicsBySession] = useState<Record<string, string | null>>({});
+  const [topicSearch, setTopicSearch] = useState('');
 
   const loadSessions = async () => {
     const clsParam = filterClassId === 'ALL' ? undefined : filterClassId;
@@ -67,6 +69,17 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
   useEffect(() => {
     loadSessions();
   }, [filterClassId, filterSectionId]);
+
+  const normalizeSearchText = (value: string) =>
+    value.toLocaleLowerCase('ar').trim().replace(/[إأآ]/g, 'ا').replace(/ى/g, 'ي');
+
+  const filteredSessions = sessions.filter((session) => {
+    const query = normalizeSearchText(topicSearch);
+    if (!query) return true;
+    const key = `${session.recordDate}-${session.classId}-${session.sectionId}`;
+    const topic = lessonTopicsBySession[key] || '';
+    return normalizeSearchText(topic).includes(query);
+  });
 
   const availableSections =
     filterClassId === 'ALL'
@@ -159,13 +172,26 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
         </div>
       </div>
 
+      {/* Search saved records by lesson topic */}
+      <div className="relative">
+        <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+        <input
+          type="search"
+          value={topicSearch}
+          onChange={(e) => setTopicSearch(e.target.value)}
+          placeholder="ابحث باسم موضوع الدرس في السجلات المحفوظة..."
+          aria-label="البحث باسم موضوع الدرس في السجلات المحفوظة"
+          className="w-full min-h-[46px] pr-11 pl-4 py-2.5 bg-white border border-slate-200 rounded-2xl text-sm font-bold text-right placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+        />
+      </div>
+
       {/* Saved Sessions Cards */}
       <div className="space-y-3">
-        {sessions.length === 0 ? (
+        {filteredSessions.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-slate-200/80">
             <FolderOpen className="w-8 h-8 text-slate-400 mx-auto mb-2" />
             <p className="text-sm font-bold text-slate-800">
-              لا توجد سجلات محفوظة مطابقة للفلتر الحالي
+              {topicSearch.trim() ? 'لا توجد سجلات محفوظة تطابق موضوع الدرس الذي بحثت عنه' : 'لا توجد سجلات محفوظة مطابقة للفلتر الحالي'}
             </p>
             <button
               type="button"
@@ -177,7 +203,7 @@ export const SavedRecordsView: React.FC<SavedRecordsViewProps> = ({
             </button>
           </div>
         ) : (
-          sessions.map((s) => (
+          filteredSessions.map((s) => (
             <div
               key={`${s.recordDate}-${s.classId}-${s.sectionId}`}
               onClick={() => onOpenRecord(s.classId, s.sectionId, s.recordDate)}
