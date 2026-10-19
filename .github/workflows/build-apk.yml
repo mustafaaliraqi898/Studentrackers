@@ -5,6 +5,9 @@ on:
   push:
     paths:
       - 'android-native/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/build-apk.yml'
 
 jobs:
