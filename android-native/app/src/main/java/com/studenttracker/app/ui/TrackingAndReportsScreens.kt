@@ -1269,7 +1269,7 @@ fun DailyTrackingScreen(
                                     ) {
                                         Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("حاضر (19/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("حاضر (${GradingService.formatScore(attendanceMax)}/${GradingService.formatScore(attendanceMax)})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     }
                                 }
 
@@ -1290,7 +1290,7 @@ fun DailyTrackingScreen(
                                     ) {
                                         Icon(Icons.Default.Cancel, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("غائب (0/19)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        Text("غائب (0/${GradingService.formatScore(attendanceMax)})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     }
                                 }
                             }
@@ -1315,7 +1315,14 @@ fun DailyTrackingScreen(
                             // Evaluations & Daily Quiz remain visible and editable even when the student is ABSENT or when searching
                             val evalEnabled = !dayStatus.isNonWorkingDay && (isEditingSaved || searchQuery.trim().isNotEmpty())
                             ThreeStateRatingRow(
-                                label = "المشاركة",
+                                label = "المشاركة (عدد مرات التقييم: ${selectedPeriod?.let { period ->
+                                    repository.getParticipationEvaluationCounts(
+                                        selectedClassId,
+                                        selectedSectionId,
+                                        period.startDate,
+                                        period.endDate
+                                    )[st.id] ?: 0
+                                } ?: 0})",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
                                 scorePreviewText = entry.participation?.let { "(${GradingService.formatScore(it * participationMax)} / ${GradingService.formatScore(participationMax)})" } ?: "غير مسجل",
