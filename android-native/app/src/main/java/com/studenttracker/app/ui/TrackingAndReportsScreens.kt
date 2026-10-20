@@ -1853,12 +1853,6 @@ fun SavedRecordsScreen(
                             color = Amber600,
                             fontWeight = FontWeight.Bold
                         )
-                    } else if (filterClassId == null) {
-                        Text(
-                            text = "اختر الصف، ويمكنك تحديد الشعبة أيضاً لتضييق القائمة.",
-                            fontSize = 12.sp,
-                            color = Slate600
-                        )
                     } else if (studentsWithoutParticipation.isEmpty()) {
                         Text(
                             text = "جميع الطلبة ضمن التصفية لديهم تقييم مشاركة واحد على الأقل.",
