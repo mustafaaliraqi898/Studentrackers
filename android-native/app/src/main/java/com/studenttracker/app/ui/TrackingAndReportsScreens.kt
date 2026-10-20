@@ -1795,6 +1795,109 @@ fun SavedRecordsScreen(
             }
         }
 
+        // Students who have not received any participation rating in the selected study period.
+        val selectedParticipationPeriod = periodsForFilter.firstOrNull { it.id == filterPeriodId }
+        val studentsWithoutParticipation = remember(
+            refreshTick, filterYearId, filterPeriodId, filterClassId, filterSectionId,
+            selectedParticipationPeriod, classes, sections
+        ) {
+            if (repository == null || selectedParticipationPeriod == null) {
+                emptyList()
+            } else {
+                val candidates = repository.getStudents(
+                    classId = filterClassId,
+                    sectionId = filterSectionId,
+                    includeInactive = false
+                )
+                val countsByGroup = mutableMapOf<Pair<Long, Long>, Map<Long, Int>>()
+                candidates.groupBy { Pair(it.classId, it.sectionId) }.forEach { (group, groupStudents) ->
+                    countsByGroup[group] = repository.getParticipationEvaluationCounts(
+                        group.first,
+                        group.second,
+                        selectedParticipationPeriod.startDate,
+                        selectedParticipationPeriod.endDate
+                    )
+                }
+                candidates.filter { student ->
+                    (countsByGroup[Pair(student.classId, student.sectionId)]?.get(student.id) ?: 0) == 0
+                }
+            }
+        }
+
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "الطلبة غير المشاركين (${if (selectedParticipationPeriod == null) "—" else studentsWithoutParticipation.size})",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Slate900
+                    )
+                    Text(
+                        text = "الطلبة الذين لم تُسجّل لهم أي درجة مشاركة ضمن الفترة الدراسية المحددة.",
+                        fontSize = 12.sp,
+                        color = Slate600
+                    )
+                    if (selectedParticipationPeriod == null) {
+                        Text(
+                            text = "اختر الفترة الدراسية من عوامل التصفية لعرض الطلبة.",
+                            fontSize = 12.sp,
+                            color = Amber600,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else if (filterClassId == null) {
+                        Text(
+                            text = "اختر الصف، ويمكنك تحديد الشعبة أيضاً لتضييق القائمة.",
+                            fontSize = 12.sp,
+                            color = Slate600
+                        )
+                    } else if (studentsWithoutParticipation.isEmpty()) {
+                        Text(
+                            text = "جميع الطلبة ضمن التصفية لديهم تقييم مشاركة واحد على الأقل.",
+                            fontSize = 12.sp,
+                            color = Emerald700,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        studentsWithoutParticipation.forEach { student ->
+                            Surface(
+                                color = Slate50,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = student.studentName,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Slate900,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        text = "${student.className} — شعبة ${student.sectionName}",
+                                        fontSize = 10.sp,
+                                        color = Slate600
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if (filtered.isEmpty()) {
             item {
                 Surface(
