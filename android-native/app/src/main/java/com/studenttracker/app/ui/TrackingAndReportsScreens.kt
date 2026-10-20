@@ -1863,30 +1863,28 @@ fun SavedRecordsScreen(
                                     color = Teal700
                                 )
                             }
-                            if (s.lessonTopic.isNotBlank()) {
-                                Surface(
-                                    color = Teal50,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.fillMaxWidth()
+                            Surface(
+                                color = Teal50,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        Text(
-                                            text = "الموضوع:",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                            color = Teal700
-                                        )
-                                        Spacer(modifier = Modifier.width(5.dp))
-                                        Text(
-                                            text = s.lessonTopic,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Slate800
-                                        )
-                                    }
+                                    Text(
+                                        text = "الموضوع:",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = Teal700
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = s.lessonTopic.ifBlank { "غير مسجل في الخطة اليومية" },
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (s.lessonTopic.isBlank()) Slate600 else Slate800
+                                    )
                                 }
                             }
                         }
