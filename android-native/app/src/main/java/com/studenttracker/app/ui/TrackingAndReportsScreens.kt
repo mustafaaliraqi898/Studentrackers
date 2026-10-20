@@ -1602,6 +1602,35 @@ fun SavedRecordsScreen(
         }.distinctBy { "${it.recordDate}_${it.classId}_${it.sectionId}" }
     }
 
+    // Compute this in the composable scope, not inside LazyListScope.
+    val selectedParticipationPeriod = periodsForFilter.firstOrNull { it.id == filterPeriodId }
+    val studentsWithoutParticipation = remember(
+        refreshTick, filterYearId, filterPeriodId, filterClassId, filterSectionId,
+        selectedParticipationPeriod, classes, sections
+    ) {
+        if (repository == null || selectedParticipationPeriod == null) {
+            emptyList()
+        } else {
+            val candidates = repository.getStudents(
+                classId = filterClassId,
+                sectionId = filterSectionId,
+                includeInactive = false
+            )
+            val countsByGroup = mutableMapOf<Pair<Long, Long>, Map<Long, Int>>()
+            candidates.groupBy { Pair(it.classId, it.sectionId) }.forEach { (group, _) ->
+                countsByGroup[group] = repository.getParticipationEvaluationCounts(
+                    group.first,
+                    group.second,
+                    selectedParticipationPeriod.startDate,
+                    selectedParticipationPeriod.endDate
+                )
+            }
+            candidates.filter { student ->
+                (countsByGroup[Pair(student.classId, student.sectionId)]?.get(student.id) ?: 0) == 0
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -1791,35 +1820,6 @@ fun SavedRecordsScreen(
                             }
                         }
                     }
-                }
-            }
-        }
-
-        // Students who have not received any participation rating in the selected study period.
-        val selectedParticipationPeriod = periodsForFilter.firstOrNull { it.id == filterPeriodId }
-        val studentsWithoutParticipation = remember(
-            refreshTick, filterYearId, filterPeriodId, filterClassId, filterSectionId,
-            selectedParticipationPeriod, classes, sections
-        ) {
-            if (repository == null || selectedParticipationPeriod == null) {
-                emptyList()
-            } else {
-                val candidates = repository.getStudents(
-                    classId = filterClassId,
-                    sectionId = filterSectionId,
-                    includeInactive = false
-                )
-                val countsByGroup = mutableMapOf<Pair<Long, Long>, Map<Long, Int>>()
-                candidates.groupBy { Pair(it.classId, it.sectionId) }.forEach { (group, groupStudents) ->
-                    countsByGroup[group] = repository.getParticipationEvaluationCounts(
-                        group.first,
-                        group.second,
-                        selectedParticipationPeriod.startDate,
-                        selectedParticipationPeriod.endDate
-                    )
-                }
-                candidates.filter { student ->
-                    (countsByGroup[Pair(student.classId, student.sectionId)]?.get(student.id) ?: 0) == 0
                 }
             }
         }
