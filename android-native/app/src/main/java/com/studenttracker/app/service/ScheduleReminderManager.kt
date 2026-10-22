@@ -47,6 +47,10 @@ object ScheduleReminderManager {
     const val EXTRA_START_TIME = "extra_start_time"
     const val EXTRA_END_TIME = "extra_end_time"
     const val EXTRA_MINUTES_BEFORE = "extra_minutes_before"
+    const val EXTRA_REMINDER_TYPE = "extra_reminder_type"
+    private const val REMINDER_BEFORE = "before"
+    private const val REMINDER_AFTER_START = "after_start"
+    private const val AFTER_START_MINUTES = 30
 
     fun parsePositiveMinutes(rawInput: String): Int? {
         val normalized = buildString {
@@ -184,6 +188,21 @@ object ScheduleReminderManager {
                 triggerAtMillis = triggerMillis
             )
             activeIds.add(lesson.id.toString())
+            val afterStartMillis = computeNextTriggerMillisAfterStart(
+                dayOfWeekAr = lesson.dayOfWeek,
+                startTime24 = lesson.startTime,
+                minutesAfterStart = AFTER_START_MINUTES
+            )
+            if (afterStartMillis != null) {
+                scheduleSingleLessonAlarm(
+                    context = appCtx,
+                    alarmManager = alarmManager,
+                    lesson = lesson,
+                    minutesBefore = 0,
+                    triggerAtMillis = afterStartMillis,
+                    reminderType = REMINDER_AFTER_START
+                )
+            }
         }
 
         prefs.edit().putStringSet(KEY_KNOWN_LESSON_IDS, activeIds).apply()
@@ -197,16 +216,18 @@ object ScheduleReminderManager {
         val intent = Intent(context, ScheduleReminderReceiver::class.java).apply {
             action = ACTION_LESSON_REMINDER
         }
-        val requestCode = (lessonId.hashCode() and 0x7FFFFFFF)
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        )
-        if (pendingIntent != null) {
-            alarmManager.cancel(pendingIntent)
-            pendingIntent.cancel()
+        val baseCode = (lessonId.hashCode() and 0x3FFFFFFF) * 2
+        listOf(baseCode, baseCode + 1).forEach { requestCode ->
+            val pendingIntent = PendingIntent.getBroadcast(
+                context,
+                requestCode,
+                intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pendingIntent != null) {
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
         }
     }
 
@@ -215,7 +236,8 @@ object ScheduleReminderManager {
         alarmManager: AlarmManager,
         lesson: DailyScheduleEntity,
         minutesBefore: Int,
-        triggerAtMillis: Long
+        triggerAtMillis: Long,
+        reminderType: String = REMINDER_BEFORE
     ) {
         val intent = Intent(context, ScheduleReminderReceiver::class.java).apply {
             action = ACTION_LESSON_REMINDER
@@ -227,8 +249,10 @@ object ScheduleReminderManager {
             putExtra(EXTRA_START_TIME, lesson.startTime)
             putExtra(EXTRA_END_TIME, lesson.endTime)
             putExtra(EXTRA_MINUTES_BEFORE, minutesBefore)
+            putExtra(EXTRA_REMINDER_TYPE, reminderType)
         }
-        val requestCode = (lesson.id.hashCode() and 0x7FFFFFFF)
+        val baseCode = (lesson.id.hashCode() and 0x3FFFFFFF) * 2
+        val requestCode = baseCode + if (reminderType == REMINDER_AFTER_START) 1 else 0
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             requestCode,
@@ -287,6 +311,26 @@ object ScheduleReminderManager {
         }
 
         return reminderDateTime.atZone(zone).toInstant().toEpochMilli()
+    }
+
+    fun computeNextTriggerMillisAfterStart(
+        dayOfWeekAr: String,
+        startTime24: String,
+        minutesAfterStart: Int
+    ): Long? {
+        val targetDay = mapArabicDayToDayOfWeek(dayOfWeekAr) ?: return null
+        val parts = startTime24.trim().split(":")
+        if (parts.size != 2) return null
+        val hour = parts[0].toIntOrNull()?.takeIf { it in 0..23 } ?: return null
+        val minute = parts[1].toIntOrNull()?.takeIf { it in 0..59 } ?: return null
+        val zone = ZoneId.systemDefault()
+        val now = LocalDateTime.now(zone)
+        var candidateDate = now.toLocalDate()
+        while (candidateDate.dayOfWeek != targetDay) candidateDate = candidateDate.plusDays(1)
+        var trigger = LocalDateTime.of(candidateDate, LocalTime.of(hour, minute))
+            .plusMinutes(minutesAfterStart.toLong())
+        if (!trigger.isAfter(now)) trigger = trigger.plusWeeks(1)
+        return trigger.atZone(zone).toInstant().toEpochMilli()
     }
 
     fun mapArabicDayToDayOfWeek(dayAr: String): DayOfWeek? {
@@ -376,6 +420,7 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
             val sectionName = intent.getStringExtra(ScheduleReminderManager.EXTRA_SECTION_NAME) ?: ""
             val lessonNumber = intent.getIntExtra(ScheduleReminderManager.EXTRA_LESSON_NUMBER, 1)
             val startTime = intent.getStringExtra(ScheduleReminderManager.EXTRA_START_TIME) ?: ""
+            val reminderType = intent.getStringExtra(ScheduleReminderManager.EXTRA_REMINDER_TYPE) ?: "before"
             val minutesBefore = intent.getIntExtra(
                 ScheduleReminderManager.EXTRA_MINUTES_BEFORE,
                 savedMinutes
@@ -395,8 +440,13 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
 
                 val lessonLabel = ScheduleReminderManager.getArabicLessonLabel(lessonNumber)
                 val time12 = ScheduleReminderManager.formatTime12HourAr(startTime)
-                val title = "تذكير بالحصة القادمة ($lessonLabel)"
-                val body = "تبدأ حصة $className / شعبة $sectionName بعد $minutesBefore دقائق (الساعة $time12 - $dayOfWeek)"
+                val isAfterStart = reminderType == "after_start"
+                val title = if (isAfterStart) "تذكير أثناء الحصة ($lessonLabel)" else "تذكير بالحصة القادمة ($lessonLabel)"
+                val body = if (isAfterStart) {
+                    "مضى 30 دقيقة على بدء حصة $className / شعبة $sectionName (بدأت الساعة $time12 - $dayOfWeek)"
+                } else {
+                    "تبدأ حصة $className / شعبة $sectionName بعد $minutesBefore دقائق (الساعة $time12 - $dayOfWeek)"
+                }
 
                 val notification = NotificationCompat.Builder(appCtx, ScheduleReminderManager.CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
@@ -410,7 +460,7 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
 
                 runCatching {
                     NotificationManagerCompat.from(appCtx)
-                        .notify(20000 + (lessonId.toInt() and 0x7FFF), notification)
+                        .notify(20000 + (lessonId.toInt() and 0x3FFF) * 2 + if (isAfterStart) 1 else 0, notification)
                 }
             }
 
