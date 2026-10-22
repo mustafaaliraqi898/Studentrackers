@@ -198,7 +198,7 @@ object ScheduleReminderManager {
                     context = appCtx,
                     alarmManager = alarmManager,
                     lesson = lesson,
-                    minutesBefore = 0,
+                    minutesBefore = settings.minutesAfterStart,
                     triggerAtMillis = afterStartMillis,
                     reminderType = REMINDER_AFTER_START
                 )
