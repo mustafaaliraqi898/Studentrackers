@@ -1840,14 +1840,12 @@ fun DailyScheduleScreen(
             return
         }
         reminderAfterInputError = null
-        val saved = ScheduleReminderManager.saveSettingsAndSync(
+        val savedMinutes = ScheduleReminderManager.saveAfterStartMinutesAndSync(
             context = context,
-            enabled = globalReminderEnabled,
-            minutesBefore = ScheduleReminderManager.parsePositiveMinutes(reminderMinutesInput) ?: globalReminderMinutes,
-            repository = repository,
-            minutesAfterStart = parsed
+            minutesAfterStart = parsed,
+            repository = repository
         )
-        globalReminderMinutes = saved.minutesBefore
+        reminderAfterMinutesInput = savedMinutes.toString()
     }
 
     fun toggleGlobalReminderSwitch(checked: Boolean) {
