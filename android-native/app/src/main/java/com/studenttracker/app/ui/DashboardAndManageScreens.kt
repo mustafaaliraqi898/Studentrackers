@@ -2531,6 +2531,20 @@ fun DailyScheduleScreen(
                         )
                     }
 
+                    Surface(
+                        color = Teal50,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "التنبيه الثاني: بعد بدء الدرس بـ 30 دقيقة (مثال: إذا يبدأ الدرس الساعة 8:00، يصلك التنبيه الساعة 8:30).",
+                            fontSize = 11.sp,
+                            color = Teal700,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        )
+                    }
+
                     if (reminderInputError != null) {
                         Surface(
                             color = Red50,
