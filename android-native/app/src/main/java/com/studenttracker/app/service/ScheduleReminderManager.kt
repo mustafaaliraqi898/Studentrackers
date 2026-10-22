@@ -217,7 +217,8 @@ object ScheduleReminderManager {
             action = ACTION_LESSON_REMINDER
         }
         val baseCode = (lessonId.hashCode() and 0x3FFFFFFF) * 2
-        listOf(baseCode, baseCode + 1).forEach { requestCode ->
+        // Also cancel the legacy pre-reminder request code from older app versions.
+        listOf((lessonId.hashCode() and 0x7FFFFFFF), baseCode, baseCode + 1).distinct().forEach { requestCode ->
             val pendingIntent = PendingIntent.getBroadcast(
                 context,
                 requestCode,
