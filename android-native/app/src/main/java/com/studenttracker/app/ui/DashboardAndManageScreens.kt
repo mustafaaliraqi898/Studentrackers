@@ -1756,6 +1756,10 @@ fun DailyScheduleScreen(
     var reminderMinutesInput by remember {
         mutableStateOf(initialReminderSettings.minutesBefore?.toString() ?: "")
     }
+    var reminderAfterMinutesInput by remember {
+        mutableStateOf(initialReminderSettings.minutesAfterStart.toString())
+    }
+    var reminderAfterInputError by remember { mutableStateOf<String?>(null) }
     var reminderInputError by remember { mutableStateOf<String?>(null) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -1824,6 +1828,24 @@ fun DailyScheduleScreen(
             enabled = globalReminderEnabled,
             minutesBefore = parsed,
             repository = repository
+        )
+        globalReminderMinutes = saved.minutesBefore
+    }
+
+    fun applyReminderAfterMinutesTextChange(newText: String) {
+        reminderAfterMinutesInput = newText
+        val parsed = ScheduleReminderManager.parsePositiveMinutes(newText)
+        if (parsed == null) {
+            reminderAfterInputError = "أدخل عدد دقائق صحيحاً أكبر من صفر"
+            return
+        }
+        reminderAfterInputError = null
+        val saved = ScheduleReminderManager.saveSettingsAndSync(
+            context = context,
+            enabled = globalReminderEnabled,
+            minutesBefore = ScheduleReminderManager.parsePositiveMinutes(reminderMinutesInput) ?: globalReminderMinutes,
+            repository = repository,
+            minutesAfterStart = parsed
         )
         globalReminderMinutes = saved.minutesBefore
     }
@@ -2531,13 +2553,46 @@ fun DailyScheduleScreen(
                         )
                     }
 
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "مدة التنبيه بعد بداية الدرس (بالدقائق):",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Slate700,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = reminderAfterMinutesInput,
+                            onValueChange = { applyReminderAfterMinutesTextChange(it) },
+                            placeholder = { Text("مثال: 30", fontSize = 11.sp) },
+                            suffix = {
+                                Text("دقيقة", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Slate600)
+                            },
+                            singleLine = true,
+                            isError = reminderAfterInputError != null,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.width(145.dp)
+                        )
+                    }
+                    if (reminderAfterInputError != null) {
+                        Text(
+                            text = reminderAfterInputError!!,
+                            fontSize = 11.sp,
+                            color = Red700,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Surface(
                         color = Teal50,
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            text = "التنبيه الثاني: بعد بدء الدرس بـ 30 دقيقة (مثال: إذا يبدأ الدرس الساعة 8:00، يصلك التنبيه الساعة 8:30).",
+                            text = "التنبيه الأول قبل الدرس بالمدة المحددة أعلاه، والتنبيه الثاني بعد بداية الدرس بـ $reminderAfterMinutesInput دقيقة.",
                             fontSize = 11.sp,
                             color = Teal700,
                             fontWeight = FontWeight.Medium,
