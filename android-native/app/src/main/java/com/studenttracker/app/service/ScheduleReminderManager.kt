@@ -24,7 +24,8 @@ import java.time.ZoneId
 
 data class GlobalScheduleReminderSettings(
     val enabled: Boolean,
-    val minutesBefore: Int?
+    val minutesBefore: Int?,
+    val minutesAfterStart: Int = 30
 )
 
 object ScheduleReminderManager {
@@ -32,6 +33,7 @@ object ScheduleReminderManager {
     private const val PREFS_NAME = "daily_schedule_reminder_prefs"
     private const val KEY_GLOBAL_REMINDER_ENABLED = "global_reminder_enabled"
     private const val KEY_GLOBAL_REMINDER_MINUTES = "global_reminder_minutes_before"
+    private const val KEY_GLOBAL_REMINDER_AFTER_START_MINUTES = "global_reminder_minutes_after_start"
     private const val KEY_KNOWN_LESSON_IDS = "scheduled_lesson_ids"
 
     const val CHANNEL_ID = "student_tracker_lesson_reminders"
@@ -50,7 +52,7 @@ object ScheduleReminderManager {
     const val EXTRA_REMINDER_TYPE = "extra_reminder_type"
     private const val REMINDER_BEFORE = "before"
     private const val REMINDER_AFTER_START = "after_start"
-    private const val AFTER_START_MINUTES = 30
+    private const val DEFAULT_AFTER_START_MINUTES = 30
 
     fun parsePositiveMinutes(rawInput: String): Int? {
         val normalized = buildString {
@@ -76,9 +78,14 @@ object ScheduleReminderManager {
             -1
         }
         val minutes = if (rawMinutes > 0) rawMinutes else null
+        val minutesAfterStart = prefs.getInt(
+            KEY_GLOBAL_REMINDER_AFTER_START_MINUTES,
+            DEFAULT_AFTER_START_MINUTES
+        ).takeIf { it > 0 } ?: DEFAULT_AFTER_START_MINUTES
         return GlobalScheduleReminderSettings(
             enabled = enabled && minutes != null,
-            minutesBefore = minutes
+            minutesBefore = minutes,
+            minutesAfterStart = minutesAfterStart
         )
     }
 
@@ -113,6 +120,22 @@ object ScheduleReminderManager {
             enabled = effectiveEnabled,
             minutesBefore = validMinutes
         )
+    }
+
+    fun saveAfterStartMinutesAndSync(
+        context: Context,
+        minutesAfterStart: Int,
+        repository: TrackerRepository? = null
+    ): Int {
+        val validMinutes = minutesAfterStart.takeIf { it > 0 } ?: DEFAULT_AFTER_START_MINUTES
+        val appCtx = context.applicationContext
+        appCtx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_GLOBAL_REMINDER_AFTER_START_MINUTES, validMinutes)
+            .apply()
+        val repo = repository ?: TrackerRepository(AppDatabaseHelper.getInstance(appCtx))
+        syncAllLessonReminders(appCtx, repo.getDailySchedules())
+        return validMinutes
     }
 
     fun hasNotificationPermission(context: Context): Boolean {
@@ -191,7 +214,7 @@ object ScheduleReminderManager {
             val afterStartMillis = computeNextTriggerMillisAfterStart(
                 dayOfWeekAr = lesson.dayOfWeek,
                 startTime24 = lesson.startTime,
-                minutesAfterStart = AFTER_START_MINUTES
+                minutesAfterStart = settings.minutesAfterStart
             )
             if (afterStartMillis != null) {
                 scheduleSingleLessonAlarm(
@@ -426,6 +449,7 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
                 ScheduleReminderManager.EXTRA_MINUTES_BEFORE,
                 savedMinutes
             )
+            val minutesAfterStart = settings.minutesAfterStart
 
             if (ScheduleReminderManager.hasNotificationPermission(appCtx)) {
                 ScheduleReminderManager.ensureNotificationChannel(appCtx)
@@ -444,7 +468,7 @@ class ScheduleReminderReceiver : BroadcastReceiver() {
                 val isAfterStart = reminderType == "after_start"
                 val title = if (isAfterStart) "تذكير أثناء الحصة ($lessonLabel)" else "تذكير بالحصة القادمة ($lessonLabel)"
                 val body = if (isAfterStart) {
-                    "مضى 30 دقيقة على بدء حصة $className / شعبة $sectionName (بدأت الساعة $time12 - $dayOfWeek)"
+                    "مضى $minutesAfterStart دقيقة على بدء حصة $className / شعبة $sectionName (بدأت الساعة $time12 - $dayOfWeek)"
                 } else {
                     "تبدأ حصة $className / شعبة $sectionName بعد $minutesBefore دقائق (الساعة $time12 - $dayOfWeek)"
                 }
