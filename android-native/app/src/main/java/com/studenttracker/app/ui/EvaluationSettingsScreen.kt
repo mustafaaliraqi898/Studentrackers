@@ -6,7 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -75,7 +75,7 @@ fun EvaluationSettingsScreen(
             Surface(color = Slate900, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.Tune, contentDescription = null, tint = Teal100)
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = Teal100)
                         Text("توزيع درجات التقييم اليومي", color = androidx.compose.ui.graphics.Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                     }
                     Text("حدد الدرجة القصوى لكل فقرة. يجب أن يكون مجموع الفقرات 100 درجة.", color = Teal100, fontSize = 12.sp)
