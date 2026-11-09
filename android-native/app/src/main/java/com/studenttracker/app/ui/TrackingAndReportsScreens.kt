@@ -64,6 +64,9 @@ fun DailyTrackingScreen(
     onConsumeSavedSessionJump: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val evaluationSettings = remember(selectedClassId, refreshTick) {
+        repository.getEvaluationSettings(selectedClassId)
+    }
 
     // Read real device LocalDate (never UTC conversion, never hardcoded)
     fun currentDeviceIsoDate(): String {
@@ -1255,7 +1258,7 @@ fun DailyTrackingScreen(
                                 label = "المشاركة",
                                 currentValue = entry.participation,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.participation ?: 1.0) * evaluationSettings.participationMax)} / ${GradingService.formatScore(evaluationSettings.participationMax)})",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1268,7 +1271,7 @@ fun DailyTrackingScreen(
                                 label = "الدفتر",
                                 currentValue = entry.notebook,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.notebook ?: 1.0) * evaluationSettings.notebookMax)} / ${GradingService.formatScore(evaluationSettings.notebookMax)})",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1281,7 +1284,7 @@ fun DailyTrackingScreen(
                                 label = "الواجب",
                                 currentValue = entry.homework,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.homework ?: 1.0) * evaluationSettings.homeworkMax)} / ${GradingService.formatScore(evaluationSettings.homeworkMax)})",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -1294,7 +1297,7 @@ fun DailyTrackingScreen(
                                 label = "السلوك",
                                 currentValue = entry.behavior,
                                 enabled = evalEnabled,
-                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 1.0) * 19.0)} / 19)",
+                                scorePreviewText = "(${GradingService.formatScore((entry.behavior ?: 1.0) * evaluationSettings.behaviorMax)} / ${GradingService.formatScore(evaluationSettings.behaviorMax)})",
                                 onValueChange = { v ->
                                     isEditingSaved = true
                                     entriesMap = entriesMap.toMutableMap().apply {
@@ -2436,12 +2439,12 @@ fun StudentProfileScreen(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("تفصيل عناصر الدرجة اليومية (من 100)", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
-                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, 19)
-                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore, 19)
-                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore, 19)
-                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore, 19)
-                        ProfileScoreRow("5. السلوك (${grade.behaviorRatings.size} تقييم مسجل)", grade.behaviorScore, 19)
-                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore, 5)
+                        ProfileScoreRow("1. الحضور (${grade.presentDays} حضور / ${grade.absentDays} غياب من أصل ${grade.totalWorkingDays} يوم دوام)", grade.attendanceScore, grade.attendanceMax)
+                        ProfileScoreRow("2. المشاركة (${grade.participationRatings.size} تقييم مسجل)", grade.participationScore, grade.participationMax)
+                        ProfileScoreRow("3. الدفتر (${grade.notebookRatings.size} تقييم مسجل)", grade.notebookScore, grade.notebookMax)
+                        ProfileScoreRow("4. الواجب (${grade.homeworkRatings.size} تقييم مسجل)", grade.homeworkScore, grade.homeworkMax)
+                        ProfileScoreRow("5. السلوك (${grade.behaviorRatings.size} تقييم مسجل)", grade.behaviorScore, grade.behaviorMax)
+                        ProfileScoreRow("6. الاختبار اليومي (${grade.dailyTests.size} اختبار)", grade.quizScore, grade.dailyTestMax)
                     }
                 }
             }
