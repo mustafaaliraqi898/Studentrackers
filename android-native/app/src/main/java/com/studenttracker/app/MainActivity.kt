@@ -367,6 +367,24 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.MONTHLY_EXAM_GRADES -> MonthlyExamGradesScreen(
+                    classes = classes,
+                    sections = sections,
+                    selectedClassId = selectedClassId,
+                    selectedSectionId = selectedSectionId,
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onSelectClass = { clsId ->
+                        selectedClassId = clsId
+                        val firstSec = sections.firstOrNull { it.classId == clsId }
+                        if (firstSec != null) selectedSectionId = firstSec.id
+                    },
+                    onSelectSection = { secId -> selectedSectionId = secId },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
                 AppScreen.STUDENTS -> StudentsScreen(
                     classes = classes,
                     sections = sections,
