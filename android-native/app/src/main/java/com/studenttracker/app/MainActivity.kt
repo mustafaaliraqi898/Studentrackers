@@ -367,6 +367,15 @@ fun StudentTrackerMainApp(
                     onShowMessage = ::showToastMessage
                 )
 
+                AppScreen.EVALUATION_SETTINGS -> EvaluationSettingsScreen(
+                    classes = classes,
+                    selectedClassId = selectedClassId,
+                    repository = repository,
+                    onSelectClass = { selectedClassId = it },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
+                )
+
                 AppScreen.MONTHLY_EXAM_GRADES -> MonthlyExamGradesScreen(
                     classes = classes,
                     sections = sections,
