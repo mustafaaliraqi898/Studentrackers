@@ -114,9 +114,9 @@ fun MonthlyExamGradesScreen(
                 Text("درجة الامتحانات الشهرية", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.ExtraBold)
                 Text("إدخال درجات الطلبة بالتسلسل وحفظها مباشرة في سجل النتائج", color = Teal100, fontSize = 12.sp)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatMiniCard(Modifier.weight(1f), "عدد الطلبة", students.size.toString())
-                    StatMiniCard(Modifier.weight(1f), "الدرجات المدخلة", enteredCount.toString())
-                    StatMiniCard(Modifier.weight(1f), "المتبقية", (students.size - enteredCount).toString())
+                    ExamStatMiniCard(Modifier.weight(1f), "عدد الطلبة", students.size.toString())
+                    ExamStatMiniCard(Modifier.weight(1f), "الدرجات المدخلة", enteredCount.toString())
+                    ExamStatMiniCard(Modifier.weight(1f), "المتبقية", (students.size - enteredCount).toString())
                 }
             }
         }
@@ -192,6 +192,16 @@ private fun FilterChipRow(title: String, values: List<Pair<Long, String>>, selec
                     Text(label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ExamStatMiniCard(modifier: Modifier = Modifier, label: String, value: String) {
+    Surface(color = Slate800, shape = RoundedCornerShape(10.dp), modifier = modifier) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(value, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold)
+            Text(label, color = Slate200, fontSize = 11.sp)
         }
     }
 }
