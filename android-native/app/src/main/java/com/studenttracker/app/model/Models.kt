@@ -124,7 +124,7 @@ data class StudentCalculatedGrade(
     val behaviorMax: Double = 19.0,
     val dailyTests: List<RatedDateItem>,
     val quizScore: Double, // configured maximum
-    val dailyTestMax: Double = 5.0
+    val dailyTestMax: Double = 5.0,
     val totalScore: Double, // out of 100
     val attendanceHistory: List<Pair<String, AttendanceStatus>> = emptyList()
 )
