@@ -2643,7 +2643,7 @@ fun StudentProfileScreen(
 }
 
 @Composable
-private fun ProfileScoreRow(title: String, score: Double, maxScore: Int) {
+private fun ProfileScoreRow(title: String, score: Double, maxScore: Number) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -2654,7 +2654,7 @@ private fun ProfileScoreRow(title: String, score: Double, maxScore: Int) {
     ) {
         Text(text = title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Slate800, modifier = Modifier.weight(1f))
         Text(
-            text = "${GradingService.formatScore(score)} / $maxScore",
+            text = "${GradingService.formatScore(score)} / ${GradingService.formatScore(maxScore.toDouble())}",
             fontSize = 13.sp,
             fontWeight = FontWeight.ExtraBold,
             color = Teal700
