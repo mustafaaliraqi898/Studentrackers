@@ -59,6 +59,7 @@ enum class AppScreen(val titleAr: String) {
     DAILY_SCHEDULE("الجدول اليومي"),
     DAILY_PLAN("الخطة اليومية"),
     STUDY_PERIODS("الفترات الدراسية"),
+    EVALUATION_SETTINGS("إعدادات التقييم اليومي"),
     MONTHLY_EXAM_GRADES("درجة الامتحانات الشهرية"),
     STUDENTS("الطلاب"),
     CLASSES_SECTIONS("الصفوف والشعب"),
