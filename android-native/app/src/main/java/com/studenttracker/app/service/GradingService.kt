@@ -329,6 +329,13 @@ object GradingService {
         }
 
         return students.map { st ->
+            val evaluationSettings = repository.getEvaluationSettings(st.classId)
+            val attMax = evaluationSettings.attendanceMax
+            val participationMax = evaluationSettings.participationMax
+            val notebookMax = evaluationSettings.notebookMax
+            val homeworkMax = evaluationSettings.homeworkMax
+            val behaviorMax = evaluationSettings.behaviorMax
+            val dailyTestMax = evaluationSettings.dailyTestMax
             val attMap = attByStudent[st.id]?.toMutableMap() ?: linkedMapOf()
             val evalMap = evalByStudent[st.id]?.toMutableMap() ?: linkedMapOf()
             val testMap = testByStudent[st.id]?.toMutableMap() ?: linkedMapOf()
@@ -351,7 +358,7 @@ object GradingService {
                 }
             }
 
-            // 1. Attendance out of 19
+            // 1. Attendance using the maximum configured for this class
             var presentDays = 0
             var absentDays = 0
             for ((_, status) in attMap) {
@@ -359,9 +366,9 @@ object GradingService {
             }
             val totalWorkingDays = presentDays + absentDays
             val attPercent = if (totalWorkingDays > 0) (presentDays.toDouble() / totalWorkingDays.toDouble()) * 100.0 else 100.0
-            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * 19.0) else 19.0
+            val attScore = if (totalWorkingDays > 0) round2((presentDays.toDouble() / totalWorkingDays.toDouble()) * attMax) else attMax
 
-            // 2. Evaluations out of 19 each
+            // 2. Evaluation components use the per-class configured maxima
             val partList = mutableListOf<RatedDateItem>()
             val noteList = mutableListOf<RatedDateItem>()
             val hwList = mutableListOf<RatedDateItem>()
@@ -374,23 +381,23 @@ object GradingService {
                 if (ev.beh != null) behList.add(RatedDateItem(d, ev.beh))
             }
 
-            fun calc19(items: List<RatedDateItem>): Double {
-                if (items.isEmpty()) return 19.0 // Not penalized as zero if unrecorded
+            fun calcComponent(items: List<RatedDateItem>, maximum: Double): Double {
+                if (items.isEmpty()) return maximum // Not penalized as zero if unrecorded
                 val avg = items.sumOf { it.value } / items.size.toDouble()
-                return round2(avg * 19.0)
+                return round2(avg * maximum)
             }
 
-            val partScore = calc19(partList)
-            val noteScore = calc19(noteList)
-            val hwScore = calc19(hwList)
-            val behScore = calc19(behList)
+            val partScore = calcComponent(partList, participationMax)
+            val noteScore = calcComponent(noteList, notebookMax)
+            val hwScore = calcComponent(hwList, homeworkMax)
+            val behScore = calcComponent(behList, behaviorMax)
 
-            // 3. Daily Tests out of 5
+            // 3. Daily tests remain entered on the existing 0..5 scale and are proportionally mapped to the configured maximum
             val testList = testMap.toSortedMap().map { (d, s) -> RatedDateItem(d, s) }
             val quizScore = if (testList.isEmpty()) {
-                5.0
+                dailyTestMax
             } else {
-                round2(testList.sumOf { it.value } / testList.size.toDouble())
+                round2((testList.sumOf { it.value } / testList.size.toDouble()) * (dailyTestMax / 5.0))
             }
 
             val total = round2(attScore + partScore + noteScore + hwScore + behScore + quizScore)
@@ -407,16 +414,22 @@ object GradingService {
                 totalWorkingDays = totalWorkingDays,
                 attendancePercentage = round2(attPercent),
                 attendanceScore = attScore,
+                attendanceMax = attMax,
                 participationRatings = partList,
                 participationScore = partScore,
+                participationMax = participationMax,
                 notebookRatings = noteList,
                 notebookScore = noteScore,
+                notebookMax = notebookMax,
                 homeworkRatings = hwList,
                 homeworkScore = hwScore,
+                homeworkMax = homeworkMax,
                 behaviorRatings = behList,
                 behaviorScore = behScore,
+                behaviorMax = behaviorMax,
                 dailyTests = testList,
                 quizScore = quizScore,
+                dailyTestMax = dailyTestMax,
                 totalScore = total,
                 attendanceHistory = attMap.toSortedMap().map { (d, stStatus) -> d to stStatus }
             )
