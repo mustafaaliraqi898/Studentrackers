@@ -136,7 +136,7 @@ fun MonthlyExamGradesScreen(
             }
         }
         FilterChipRow("الصف الدراسي", classes.map { it.id to it.className }, selectedClassId, onSelectClass)
-        FilterChipRow("الشعبة", classSections.map { it.id to "شعبة \${it.sectionName}" }, selectedSectionId, onSelectSection)
+        FilterChipRow("الشعبة", classSections.map { it.id to "شعبة ${it.sectionName}" }, selectedSectionId, onSelectSection)
         FilterChipRow("السنة الدراسية", years.map { it.id to it.yearName }, selectedYearId) { selectedYearId = it }
 
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
