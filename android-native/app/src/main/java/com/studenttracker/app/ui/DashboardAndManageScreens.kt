@@ -243,7 +243,7 @@ fun DashboardScreen(
                     modifier = Modifier.fillMaxWidth(),
                     title = "إعدادات التقييم اليومي",
                     subtitle = "تحديد الدرجة القصوى لكل فقرة",
-                    icon = Icons.Default.Tune,
+                    icon = Icons.Default.Settings,
                     tint = Teal700,
                     onClick = { onNavigate(AppScreen.EVALUATION_SETTINGS) }
                 )
