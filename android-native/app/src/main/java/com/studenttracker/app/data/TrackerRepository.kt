@@ -44,6 +44,51 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         }
     }
 
+    // ---------------- DAILY EVALUATION SETTINGS ----------------
+    fun getEvaluationSettings(classId: Long): EvaluationSettings {
+        val db = dbHelper.readableDatabase
+        db.rawQuery(
+            "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
+            arrayOf(classId.toString())
+        ).use { c ->
+            if (c.moveToFirst()) {
+                return EvaluationSettings(
+                    classId = classId,
+                    attendanceMax = c.getDouble(0),
+                    participationMax = c.getDouble(1),
+                    notebookMax = c.getDouble(2),
+                    homeworkMax = c.getDouble(3),
+                    behaviorMax = c.getDouble(4),
+                    dailyTestMax = c.getDouble(5)
+                )
+            }
+        }
+        // Preserve the current live grading scale when a class has no custom settings yet.
+        return EvaluationSettings(classId = classId)
+    }
+
+    fun saveEvaluationSettings(settings: EvaluationSettings): String? {
+        val values = listOf(
+            settings.attendanceMax, settings.participationMax, settings.notebookMax,
+            settings.homeworkMax, settings.behaviorMax, settings.dailyTestMax
+        )
+        if (values.any { !it.isFinite() || it < 0.0 }) return "الدرجات يجب أن تكون أرقاماً موجبة أو صفراً"
+        if (kotlin.math.abs(settings.totalMax - 100.0) > 0.0001) return "مجموع درجات الفقرات يجب أن يساوي 100"
+        val db = dbHelper.writableDatabase
+        val cv = ContentValues().apply {
+            put("ClassID", settings.classId)
+            put("AttendanceMax", settings.attendanceMax)
+            put("ParticipationMax", settings.participationMax)
+            put("NotebookMax", settings.notebookMax)
+            put("HomeworkMax", settings.homeworkMax)
+            put("BehaviorMax", settings.behaviorMax)
+            put("DailyTestMax", settings.dailyTestMax)
+            put("UpdatedAt", Instant.now().toString())
+        }
+        db.insertWithOnConflict("EvaluationSettings", null, cv, SQLiteDatabase.CONFLICT_REPLACE)
+        return null
+    }
+
     // ---------------- CLASSES ----------------
     fun getClasses(): List<ClassEntity> {
         val db = dbHelper.readableDatabase
