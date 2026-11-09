@@ -104,6 +104,21 @@ fun MonthlyExamGradesScreen(
         }
     }
 
+    var searchQuery by remember(selectedClassId, selectedSectionId, selectedPeriodId) { mutableStateOf("") }
+    val filteredStudents = remember(students, searchQuery) {
+        val query = TrackerRepository.normalizeStudentName(searchQuery)
+        if (query.isBlank()) students.mapIndexed { index, student -> index to student }
+        else {
+            val queryKey = TrackerRepository.canonicalArabicComparisonKey(query)
+            val tokens = queryKey.split(" ").filter { it.isNotBlank() }
+            students.mapIndexed { index, student -> index to student }.filter { (_, student) ->
+                val normalized = TrackerRepository.normalizeStudentName(student.studentName)
+                val key = TrackerRepository.canonicalArabicComparisonKey(student.studentName)
+                normalized.contains(query, ignoreCase = true) || key.contains(queryKey) ||
+                    (tokens.isNotEmpty() && tokens.all { token -> key.contains(token) })
+            }
+        }
+    }
     val enteredCount = students.count { storedGrades[it.id]?.writtenExamGrade != null }
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
@@ -148,8 +163,19 @@ fun MonthlyExamGradesScreen(
                 } else if (students.isEmpty()) {
                     Text("لا يوجد طلبة نشطون في هذه الشعبة.", color = Slate600, fontSize = 13.sp, modifier = Modifier.padding(vertical = 14.dp))
                 } else {
-                    Text("اضغط Enter بعد إدخال الدرجة للحفظ والانتقال إلى الطالب التالي. ترك الحقل فارغاً يمسح الدرجة، والصفر يُحفظ كدرجة فعلية.", color = Slate600, fontSize = 11.sp)
-                    students.forEachIndexed { index, student ->
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("ابحث عن اسم الطالب...", fontSize = 13.sp) },
+                        leadingIcon = { Text("⌕", color = Teal700, fontSize = 24.sp) },
+                        trailingIcon = { if (searchQuery.isNotEmpty()) TextButton(onClick = { searchQuery = "" }) { Text("مسح") } }
+                    )
+                    Text(if (searchQuery.isBlank()) "اضغط Enter بعد إدخال الدرجة للحفظ والانتقال إلى الطالب التالي. ترك الحقل فارغاً يمسح الدرجة، والصفر يُحفظ كدرجة فعلية." else "نتائج البحث: ${filteredStudents.size} من ${students.size} طالب", color = Slate600, fontSize = 11.sp)
+                    if (filteredStudents.isEmpty()) Text("لا يوجد طالب مطابق لبحثك.", color = Slate600, fontSize = 13.sp, modifier = Modifier.padding(vertical = 14.dp))
+                    filteredStudents.forEachIndexed { visibleIndex, item ->
+                        val (index, student) = item
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                             Text((index + 1).toString(), color = Slate500, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.width(26.dp))
                             Text(student.studentName, color = Slate900, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -160,9 +186,9 @@ fun MonthlyExamGradesScreen(
                                 singleLine = true,
                                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = Slate900),
                                 placeholder = { Text("—", fontSize = 13.sp) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = if (index < students.lastIndex) ImeAction.Next else ImeAction.Done),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = if (visibleIndex < filteredStudents.lastIndex) ImeAction.Next else ImeAction.Done),
                                 keyboardActions = KeyboardActions(
-                                    onNext = { saveStudentGrade(index); focusRequesters.getOrNull(index + 1)?.requestFocus() },
+                                    onNext = { saveStudentGrade(index); focusRequesters.getOrNull(filteredStudents.getOrNull(visibleIndex + 1)?.first ?: -1)?.requestFocus() },
                                     onDone = { saveStudentGrade(index) }
                                 ),
                                 trailingIcon = {
@@ -172,7 +198,7 @@ fun MonthlyExamGradesScreen(
                                 }
                             )
                         }
-                        if (index < students.lastIndex) HorizontalDivider(color = Slate100)
+                        if (visibleIndex < filteredStudents.lastIndex) HorizontalDivider(color = Slate100)
                     }
                 }
             }
