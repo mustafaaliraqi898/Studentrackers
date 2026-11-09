@@ -213,24 +213,14 @@ fun DashboardScreen(
                         onClick = { onNavigate(AppScreen.REPORTS) }
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    NavActionTile(
-                        modifier = Modifier.weight(1f),
-                        title = "درجة الامتحانات الشهرية",
-                        subtitle = "إدخال درجات جميع الطلبة دفعة واحدة",
-                        icon = Icons.Default.Edit,
-                        tint = Teal700,
-                        onClick = { onNavigate(AppScreen.MONTHLY_EXAM_GRADES) }
-                    )
-                    NavActionTile(
-                        modifier = Modifier.weight(1f),
-                        title = "مقارنة نتائج الفترات",
-                        subtitle = "عرض مقارنة أداء الطلبة بين الفترات",
-                        icon = Icons.Default.CompareArrows,
-                        tint = Slate800,
-                        onClick = { onNavigate(AppScreen.PERIOD_COMPARISON) }
-                    )
-                }
+                NavActionTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "درجة الامتحانات الشهرية",
+                    subtitle = "إدخال درجات جميع الطلبة دفعة واحدة",
+                    icon = Icons.Default.Edit,
+                    tint = Teal700,
+                    onClick = { onNavigate(AppScreen.MONTHLY_EXAM_GRADES) }
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
