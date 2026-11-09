@@ -10,6 +10,18 @@ enum class AttendanceStatus(val dbValue: String, val arabicLabel: String) {
     }
 }
 
+data class EvaluationSettings(
+    val classId: Long,
+    val attendanceMax: Double = 19.0,
+    val participationMax: Double = 19.0,
+    val notebookMax: Double = 19.0,
+    val homeworkMax: Double = 19.0,
+    val behaviorMax: Double = 19.0,
+    val dailyTestMax: Double = 5.0
+) {
+    val totalMax: Double get() = attendanceMax + participationMax + notebookMax + homeworkMax + behaviorMax + dailyTestMax
+}
+
 data class ClassEntity(
     val id: Long,
     val className: String,
@@ -96,17 +108,23 @@ data class StudentCalculatedGrade(
     val absentDays: Int,
     val totalWorkingDays: Int,
     val attendancePercentage: Double,
-    val attendanceScore: Double, // out of 19
+    val attendanceScore: Double, // configured maximum
+    val attendanceMax: Double = 19.0
     val participationRatings: List<RatedDateItem>,
-    val participationScore: Double, // out of 19
+    val participationScore: Double, // configured maximum
+    val participationMax: Double = 19.0
     val notebookRatings: List<RatedDateItem>,
-    val notebookScore: Double, // out of 19
+    val notebookScore: Double, // configured maximum
+    val notebookMax: Double = 19.0
     val homeworkRatings: List<RatedDateItem>,
-    val homeworkScore: Double, // out of 19
+    val homeworkScore: Double, // configured maximum
+    val homeworkMax: Double = 19.0
     val behaviorRatings: List<RatedDateItem>,
-    val behaviorScore: Double, // out of 19
+    val behaviorScore: Double, // configured maximum
+    val behaviorMax: Double = 19.0
     val dailyTests: List<RatedDateItem>,
-    val quizScore: Double, // out of 5
+    val quizScore: Double, // configured maximum
+    val dailyTestMax: Double = 5.0
     val totalScore: Double, // out of 100
     val attendanceHistory: List<Pair<String, AttendanceStatus>> = emptyList()
 )
