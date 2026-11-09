@@ -239,6 +239,14 @@ fun DashboardScreen(
                         onClick = { onNavigate(AppScreen.ABSENCE_TRACKING) }
                     )
                 }
+                NavActionTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "إعدادات التقييم اليومي",
+                    subtitle = "تحديد الدرجة القصوى لكل فقرة",
+                    icon = Icons.Default.Tune,
+                    tint = Teal700,
+                    onClick = { onNavigate(AppScreen.EVALUATION_SETTINGS) }
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     NavActionTile(
                         modifier = Modifier.weight(1f),
