@@ -17,7 +17,7 @@ data class EvaluationSettings(
     val notebookMax: Double = 19.0,
     val homeworkMax: Double = 19.0,
     val behaviorMax: Double = 19.0,
-    val dailyTestMax: Double = 5.0
+    val dailyTestMax: Double = 5.0,
 ) {
     val totalMax: Double get() = attendanceMax + participationMax + notebookMax + homeworkMax + behaviorMax + dailyTestMax
 }
@@ -109,19 +109,19 @@ data class StudentCalculatedGrade(
     val totalWorkingDays: Int,
     val attendancePercentage: Double,
     val attendanceScore: Double, // configured maximum
-    val attendanceMax: Double = 19.0
+    val attendanceMax: Double = 19.0,
     val participationRatings: List<RatedDateItem>,
     val participationScore: Double, // configured maximum
-    val participationMax: Double = 19.0
+    val participationMax: Double = 19.0,
     val notebookRatings: List<RatedDateItem>,
     val notebookScore: Double, // configured maximum
-    val notebookMax: Double = 19.0
+    val notebookMax: Double = 19.0,
     val homeworkRatings: List<RatedDateItem>,
     val homeworkScore: Double, // configured maximum
-    val homeworkMax: Double = 19.0
+    val homeworkMax: Double = 19.0,
     val behaviorRatings: List<RatedDateItem>,
     val behaviorScore: Double, // configured maximum
-    val behaviorMax: Double = 19.0
+    val behaviorMax: Double = 19.0,
     val dailyTests: List<RatedDateItem>,
     val quizScore: Double, // configured maximum
     val dailyTestMax: Double = 5.0
