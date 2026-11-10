@@ -1728,10 +1728,25 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val targetPeriod = getStudyPeriods().firstOrNull { it.id == periodId }
         val isMidYear = targetPeriod?.stageType == AcademicStage.MID_YEAR
 
+        // Once a teacher manually approves the daily grade, editing the written exam must preserve it.
+        var effectiveDailyGrade = dailyGrade
+        var isDailyGradeManual = false
+        if (!isMidYear) {
+            dbHelper.readableDatabase.rawQuery(
+                "SELECT DailyGrade, IsDailyGradeManual FROM PeriodGrades WHERE StudentID = ? AND PeriodID = ?",
+                arrayOf(studentId.toString(), periodId.toString())
+            ).use { cursor ->
+                if (cursor.moveToFirst() && cursor.getInt(1) == 1) {
+                    if (!cursor.isNull(0)) effectiveDailyGrade = cursor.getDouble(0)
+                    isDailyGradeManual = true
+                }
+            }
+        }
+
         val roundedDaily: Double? = if (isMidYear) {
             null
         } else {
-            kotlin.math.round(dailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
+            kotlin.math.round(effectiveDailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
         }
         val roundedWritten = writtenExamGrade?.let { kotlin.math.round(it.coerceIn(0.0, 100.0) * 100.0) / 100.0 }
         val periodAvg = if (roundedWritten != null) {
@@ -1748,13 +1763,14 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val now = Instant.now().toString()
         db.execSQL(
             """
-            INSERT INTO PeriodGrades (StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO PeriodGrades (StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate, IsDailyGradeManual)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(StudentID, PeriodID) DO UPDATE SET
                 DailyGrade = excluded.DailyGrade,
                 WrittenExamGrade = excluded.WrittenExamGrade,
                 PeriodAverage = excluded.PeriodAverage,
-                UpdatedDate = excluded.UpdatedDate;
+                UpdatedDate = excluded.UpdatedDate,
+                IsDailyGradeManual = excluded.IsDailyGradeManual;
             """.trimIndent(),
             arrayOf<Any?>(
                 studentId,
@@ -1762,7 +1778,58 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                 roundedDaily,
                 roundedWritten,
                 periodAvg,
-                now
+                now,
+                if (isDailyGradeManual) 1 else 0
+            )
+        )
+        return null
+    }
+
+    /**
+     * Saves the approved daily grade for one student and period, without touching any
+     * original Attendance/Evaluations/DailyTests rows. Set manual=false to restore the
+     * automatically calculated value. Recalculates PeriodAverage using the saved written grade.
+     */
+    fun setPeriodDailyGrade(
+        studentId: Long,
+        periodId: Long,
+        dailyGrade: Double,
+        manual: Boolean = true
+    ): String? {
+        if (dailyGrade.isNaN() || dailyGrade < 0.0 || dailyGrade > 100.0) {
+            return "يجب أن تكون درجة اليومي بين 0 و 100"
+        }
+        val period = getStudyPeriods().firstOrNull { it.id == periodId }
+            ?: return "الفترة الدراسية غير موجودة"
+        if (period.stageType == AcademicStage.MID_YEAR) {
+            return "فترة نصف السنة لا تحتوي على درجة يومي"
+        }
+
+        val db = dbHelper.writableDatabase
+        val writtenGrade = db.rawQuery(
+            "SELECT WrittenExamGrade FROM PeriodGrades WHERE StudentID = ? AND PeriodID = ?",
+            arrayOf(studentId.toString(), periodId.toString())
+        ).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getDouble(0) else null
+        }
+        val roundedDaily = kotlin.math.round(dailyGrade * 100.0) / 100.0
+        val average = writtenGrade?.let {
+            kotlin.math.round(((roundedDaily + it) / 2.0) * 100.0) / 100.0
+        }
+        val now = Instant.now().toString()
+        db.execSQL(
+            """
+            INSERT INTO PeriodGrades (StudentID, PeriodID, DailyGrade, WrittenExamGrade, PeriodAverage, UpdatedDate, IsDailyGradeManual)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(StudentID, PeriodID) DO UPDATE SET
+                DailyGrade = excluded.DailyGrade,
+                PeriodAverage = excluded.PeriodAverage,
+                UpdatedDate = excluded.UpdatedDate,
+                IsDailyGradeManual = excluded.IsDailyGradeManual;
+            """.trimIndent(),
+            arrayOf<Any?>(
+                studentId, periodId, roundedDaily, writtenGrade, average, now,
+                if (manual) 1 else 0
             )
         )
         return null
