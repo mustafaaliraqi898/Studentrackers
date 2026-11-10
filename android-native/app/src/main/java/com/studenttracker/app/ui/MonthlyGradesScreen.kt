@@ -24,6 +24,25 @@ import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
 import com.studenttracker.app.service.GradingService
 
+private fun normalizeGradeInput(raw: String): String? {
+    val normalized = buildString(raw.length) {
+        raw.forEach { char ->
+            append(
+                when (char) {
+                    in '٠'..'٩' -> ('0'.code + (char.code - '٠'.code)).toChar()
+                    in '۰'..'۹' -> ('0'.code + (char.code - '۰'.code)).toChar()
+                    '٫', ',' -> '.'
+                    else -> char
+                }
+            )
+        }
+    }
+    if (normalized.isEmpty()) return normalized
+    if (!normalized.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) return null
+    val value = normalized.toDoubleOrNull() ?: return null
+    return normalized.takeIf { value <= 100.0 }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonthlyGradesScreen(
@@ -189,11 +208,10 @@ fun MonthlyGradesScreen(
                                 OutlinedTextField(
                                     value = dailyValue,
                                     onValueChange = { raw ->
-                                        if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
-                                            val n = raw.toDoubleOrNull()
-                                            if (n == null || n <= 100.0) dailyInputs[student.id] = raw
-                                        }
+                                        normalizeGradeInput(raw)?.let { dailyInputs[student.id] = it }
                                     },
+                                    enabled = true,
+                                    readOnly = false,
                                     modifier = Modifier.weight(1f),
                                     label = { Text("درجة اليومي") },
                                     singleLine = true,
@@ -202,10 +220,7 @@ fun MonthlyGradesScreen(
                                 OutlinedTextField(
                                     value = writtenValue,
                                     onValueChange = { raw ->
-                                        if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
-                                            val n = raw.toDoubleOrNull()
-                                            if (n == null || n <= 100.0) gradeInputs[student.id] = raw
-                                        }
+                                        normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
                                     },
                                     modifier = Modifier.weight(1f),
                                     label = { Text("الامتحان التحريري") },
@@ -236,10 +251,7 @@ fun MonthlyGradesScreen(
                             OutlinedTextField(
                                 value = writtenValue,
                                 onValueChange = { raw ->
-                                    if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
-                                        val n = raw.toDoubleOrNull()
-                                        if (n == null || n <= 100.0) gradeInputs[student.id] = raw
-                                    }
+                                    normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("درجة امتحان نصف السنة من 100") },
