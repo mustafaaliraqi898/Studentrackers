@@ -80,13 +80,19 @@ fun MonthlyGradesScreen(
     val savedGrades = remember(refreshTick, selectedPeriodId) {
         selectedPeriodId?.let { repository.getPeriodGrades(periodId = it).associateBy { grade -> grade.studentId } } ?: emptyMap()
     }
-    val calculatedDailyGrades = remember(refreshTick, selectedClassId, selectedSectionId, selectedPeriodId) {
+    val calculatedPeriodGrades = remember(refreshTick, selectedClassId, selectedSectionId, selectedPeriodId) {
         val id = selectedPeriodId
         if (id == null) emptyMap()
         else GradingService.calculateGradesForClass(
             dbHelper = dbHelper, repository = repository, classId = selectedClassId,
             sectionId = selectedSectionId, monthPrefix = "PERIOD:$id"
-        ).associate { it.studentId to it.totalScore }
+        ).associateBy { it.studentId }
+    }
+    val calculatedDailyGrades = remember(calculatedPeriodGrades) {
+        calculatedPeriodGrades.mapValues { it.value.totalScore }
+    }
+    val dailyTestMax = remember(refreshTick, selectedClassId) {
+        GradingService.getEvaluationWeights(dbHelper, selectedClassId).dailyTest
     }
     val manualDailyStudents = remember(refreshTick, selectedPeriodId) {
         selectedPeriodId?.let { repository.getManualPeriodDailyGradeStudentIds(it) } ?: emptySet()
@@ -217,16 +223,30 @@ fun MonthlyGradesScreen(
                                     singleLine = true,
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                                 )
-                                OutlinedTextField(
-                                    value = writtenValue,
-                                    onValueChange = { raw ->
-                                        normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    label = { Text("الامتحان التحريري") },
-                                    singleLine = true,
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
-                                )
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    OutlinedTextField(
+                                        value = writtenValue,
+                                        onValueChange = { raw ->
+                                            normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        label = { Text("الامتحان التحريري") },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                    )
+                                    val periodDailyTests = calculatedPeriodGrades[student.id]?.dailyTests.orEmpty()
+                                    Text(
+                                        text = if (periodDailyTests.isNotEmpty()) {
+                                            "الامتحان اليومي: ${GradingService.formatScore(calculatedPeriodGrades[student.id]?.quizScore ?: 0.0)} من ${GradingService.formatScore(dailyTestMax)}"
+                                        } else {
+                                            "الامتحان اليومي: غير مسجل"
+                                        },
+                                        color = Red700,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(start = 4.dp)
+                                    )
+                                }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(
