@@ -69,10 +69,21 @@ fun MonthlyGradesScreen(
             sectionId = selectedSectionId, monthPrefix = "PERIOD:$id"
         ).associate { it.studentId to it.totalScore }
     }
+    val manualDailyStudents = remember(refreshTick, selectedPeriodId) {
+        selectedPeriodId?.let { repository.getManualPeriodDailyGradeStudentIds(it) } ?: emptySet()
+    }
     val gradeInputs = remember(refreshTick, selectedPeriodId, students, savedGrades) {
         mutableStateMapOf<Long, String>().apply {
             students.forEach { student ->
                 this[student.id] = savedGrades[student.id]?.writtenExamGrade?.let { GradingService.formatScore(it) } ?: ""
+            }
+        }
+    }
+    val dailyInputs = remember(refreshTick, selectedPeriodId, students, savedGrades, calculatedDailyGrades) {
+        mutableStateMapOf<Long, String>().apply {
+            students.forEach { student ->
+                val daily = savedGrades[student.id]?.dailyGrade ?: calculatedDailyGrades[student.id]
+                this[student.id] = daily?.let { GradingService.formatScore(it) } ?: ""
             }
         }
     }
@@ -148,43 +159,121 @@ fun MonthlyGradesScreen(
             item { Text("ماكو طالب بهذا الاسم", color = Slate600, modifier = Modifier.padding(12.dp)) }
         } else {
             items(filteredStudents, key = { it.id }) { student ->
-                val saved = savedGrades[student.id]?.writtenExamGrade
+                val savedGrade = savedGrades[student.id]
                 var saving by remember(student.id, selectedPeriodId) { mutableStateOf(false) }
+                val isMidYear = selectedPeriod.stageType == AcademicStage.MID_YEAR
+                val writtenValue = gradeInputs[student.id].orEmpty()
+                val dailyValue = dailyInputs[student.id].orEmpty()
+                val liveAverage = if (isMidYear) {
+                    writtenValue.toDoubleOrNull()
+                } else {
+                    val d = dailyValue.toDoubleOrNull()
+                    val w = writtenValue.toDoubleOrNull()
+                    if (d != null && w != null) (d + w) / 2.0 else null
+                }
                 Surface(color = Color.White, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Slate200), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(student.studentName, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = Slate900, fontSize = 14.sp)
-                            if (saved != null) {
+                            if (savedGrade?.writtenExamGrade != null) {
                                 AssistChip(onClick = {}, label = { Text("محفوظة", fontSize = 10.sp) },
                                     leadingIcon = { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) })
                             }
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (!isMidYear) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    value = dailyValue,
+                                    onValueChange = { raw ->
+                                        if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
+                                            val n = raw.toDoubleOrNull()
+                                            if (n == null || n <= 100.0) dailyInputs[student.id] = raw
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    label = { Text("درجة اليومي") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                                OutlinedTextField(
+                                    value = writtenValue,
+                                    onValueChange = { raw ->
+                                        if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
+                                            val n = raw.toDoubleOrNull()
+                                            if (n == null || n <= 100.0) gradeInputs[student.id] = raw
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    label = { Text("الامتحان التحريري") },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                )
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(
+                                    if (manualDailyStudents.contains(student.id)) "اليومي معدّل يدوياً" else "اليومي محسوب تلقائياً",
+                                    color = if (manualDailyStudents.contains(student.id)) Teal700 else Slate500,
+                                    fontSize = 11.sp
+                                )
+                                TextButton(
+                                    enabled = !saving && manualDailyStudents.contains(student.id),
+                                    onClick = {
+                                        val calculated = calculatedDailyGrades[student.id] ?: 0.0
+                                        val error = repository.setPeriodDailyGrade(student.id, selectedPeriod.id, calculated, manual = false)
+                                        if (error == null) {
+                                            dailyInputs[student.id] = GradingService.formatScore(calculated)
+                                            onShowMessage("تمت استعادة درجة اليومي المحسوبة تلقائياً")
+                                            onDataChanged()
+                                        } else onShowMessage(error)
+                                    }
+                                ) { Text("استعادة التلقائي") }
+                            }
+                        } else {
                             OutlinedTextField(
-                                value = gradeInputs[student.id].orEmpty(),
+                                value = writtenValue,
                                 onValueChange = { raw ->
                                     if (raw.isEmpty() || raw.matches(Regex("^\\d{0,3}([.]\\d{0,2})?$"))) {
                                         val n = raw.toDoubleOrNull()
                                         if (n == null || n <= 100.0) gradeInputs[student.id] = raw
                                     }
                                 },
-                                modifier = Modifier.weight(1f), label = { Text("الدرجة من 100") }, placeholder = { Text("—") },
-                                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("درجة امتحان نصف السنة من 100") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "المعدل: ${liveAverage?.let { GradingService.formatScore(it) } ?: "—"}",
+                                modifier = Modifier.weight(1f),
+                                color = Slate700,
+                                fontWeight = FontWeight.Bold
                             )
                             Button(
                                 enabled = !saving,
                                 onClick = {
-                                    val raw = gradeInputs[student.id].orEmpty().trim()
-                                    val grade = if (raw.isEmpty()) null else raw.toDoubleOrNull()
-                                    if (raw.isNotEmpty() && (grade == null || grade !in 0.0..100.0)) {
-                                        onShowMessage("درجة ${student.studentName}: أدخل رقماً من 0 إلى 100")
+                                    val writtenRaw = gradeInputs[student.id].orEmpty().trim()
+                                    val written = if (writtenRaw.isEmpty()) null else writtenRaw.toDoubleOrNull()
+                                    val daily = if (isMidYear) 0.0 else dailyInputs[student.id].orEmpty().trim().toDoubleOrNull()
+                                    val invalidWritten = writtenRaw.isNotEmpty() && (written == null || written !in 0.0..100.0)
+                                    val invalidDaily = !isMidYear && (daily == null || daily !in 0.0..100.0)
+                                    if (invalidDaily) {
+                                        onShowMessage("درجة اليومي للطالب ${student.studentName} يجب أن تكون بين 0 و 100")
+                                    } else if (invalidWritten) {
+                                        onShowMessage("درجة التحريري للطالب ${student.studentName} يجب أن تكون بين 0 و 100")
                                     } else {
                                         saving = true
-                                        val daily = if (selectedPeriod.stageType == AcademicStage.MID_YEAR) 0.0 else calculatedDailyGrades[student.id] ?: 0.0
-                                        val error = repository.upsertPeriodGrade(student.id, selectedPeriod.id, daily, grade)
+                                        val dailyError = if (isMidYear) null else repository.setPeriodDailyGrade(
+                                            student.id, selectedPeriod.id, daily!!, manual = true
+                                        )
+                                        val error = dailyError ?: repository.upsertPeriodGrade(
+                                            student.id, selectedPeriod.id,
+                                            if (isMidYear) 0.0 else daily!!, written
+                                        )
                                         saving = false
                                         if (error == null) {
-                                            onShowMessage(if (grade == null) "تم مسح درجة ${student.studentName}" else "تم حفظ درجة ${student.studentName}")
+                                            onShowMessage("تم حفظ درجات ${student.studentName}")
                                             onDataChanged()
                                         } else onShowMessage(error)
                                     }
