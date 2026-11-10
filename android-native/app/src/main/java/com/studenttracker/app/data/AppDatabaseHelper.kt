@@ -388,6 +388,7 @@ class AppDatabaseHelper(private val context: Context) :
                 WrittenExamGrade REAL NULL CHECK((WrittenExamGrade >= 0 AND WrittenExamGrade <= 100) OR WrittenExamGrade IS NULL),
                 PeriodAverage REAL NULL CHECK((PeriodAverage >= 0 AND PeriodAverage <= 100) OR PeriodAverage IS NULL),
                 UpdatedDate TEXT NOT NULL,
+                IsDailyGradeManual INTEGER NOT NULL DEFAULT 0 CHECK(IsDailyGradeManual IN (0, 1)),
                 FOREIGN KEY (StudentID) REFERENCES Students(ID) ON DELETE CASCADE,
                 FOREIGN KEY (PeriodID) REFERENCES StudyPeriods(ID) ON DELETE CASCADE,
                 UNIQUE(StudentID, PeriodID)
