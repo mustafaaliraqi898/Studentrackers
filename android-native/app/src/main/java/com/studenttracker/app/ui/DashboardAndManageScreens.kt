@@ -703,6 +703,40 @@ fun StudentsScreen(
             sectionId = selectedSectionId
         ).associateBy { it.studentId }
     }
+    // Students list has no period selector; use the latest open non-midyear period
+    // in the active academic year so a saved manual period grade is reflected here.
+    val activePeriodDailyGrades = remember(refreshTick, selectedClassId, selectedSectionId, students) {
+        val activeYearId = repository.getActiveAcademicYear().id
+        val period = repository.getStudyPeriods(academicYearId = activeYearId)
+            .filter { it.stageType != AcademicStage.MID_YEAR }
+            .sortedWith(
+                compareBy<StudyPeriodEntity> { if (it.status == StudyPeriodStatus.OPEN) 0 else 1 }
+                    .thenByDescending { it.startDate }
+                    .thenByDescending { it.sequenceNumber }
+            )
+            .firstOrNull()
+        if (period == null) {
+            emptyMap()
+        } else {
+            val calculated = GradingService.calculateGradesForClass(
+                dbHelper = dbHelper,
+                repository = repository,
+                classId = selectedClassId,
+                sectionId = selectedSectionId,
+                monthPrefix = "PERIOD:${period.id}"
+            ).associate { it.studentId to it.totalScore }
+            val manualIds = repository.getManualPeriodDailyGradeStudentIds(period.id)
+            val saved = repository.getPeriodGrades(periodId = period.id).associateBy { it.studentId }
+            students.associate { student ->
+                val score = if (manualIds.contains(student.id)) {
+                    saved[student.id]?.dailyGrade ?: calculated[student.id]
+                } else {
+                    calculated[student.id] ?: gradesMap[student.id]?.totalScore
+                }
+                student.id to score
+            }.filterValues { it != null }.mapValues { it.value!! }
+        }
+    }
     val behaviorZeroCounts = remember(refreshTick, students) {
         GradingService.getBehaviorZeroCounts(dbHelper, repository)
     }
@@ -913,7 +947,7 @@ fun StudentsScreen(
                                 modifier = Modifier.clickable { onOpenStudentProfile(st.id) }
                             ) {
                                 Text(
-                                    text = "${GradingService.formatScore(grade.totalScore)} / 100",
+                                    text = "${GradingService.formatScore(activePeriodDailyGrades[st.id] ?: grade.totalScore)} / 100",
                                     color = Teal700,
                                     fontWeight = FontWeight.ExtraBold,
                                     fontSize = 12.sp,
