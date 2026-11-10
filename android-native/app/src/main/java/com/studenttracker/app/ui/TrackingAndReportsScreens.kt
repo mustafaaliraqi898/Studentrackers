@@ -8054,3 +8054,161 @@ fun DailyPlanScreen(
         )
     }
 }
+
+
+// ============================================================================
+// MONTHLY GRADES SCREEN — daily grade + written monthly exam
+// ============================================================================
+@Composable
+fun MonthlyGradesScreen(
+    classes: List<ClassEntity>,
+    sections: List<SectionEntity>,
+    dbHelper: AppDatabaseHelper,
+    repository: TrackerRepository,
+    refreshTick: Int,
+    onDataChanged: () -> Unit,
+    onShowMessage: (String) -> Unit
+) {
+    var localTick by remember { mutableIntStateOf(0) }
+    var selectedClassId by remember(classes) { mutableLongStateOf(classes.firstOrNull()?.id ?: 0L) }
+    val classSections = remember(sections, selectedClassId) { sections.filter { it.classId == selectedClassId } }
+    var selectedSectionId by remember(classSections) { mutableLongStateOf(classSections.firstOrNull()?.id ?: 0L) }
+    val periods = remember(refreshTick, localTick) {
+        repository.getStudyPeriods().filter { it.stageType != AcademicStage.MID_YEAR }
+    }
+    var selectedPeriodId by remember(periods) { mutableStateOf<Long?>(periods.firstOrNull()?.id) }
+    val selectedPeriod = periods.firstOrNull { it.id == selectedPeriodId }
+    val students = remember(refreshTick, selectedClassId, selectedSectionId) {
+        if (selectedClassId > 0L && selectedSectionId > 0L)
+            repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
+        else emptyList()
+    }
+    val reports = remember(refreshTick, localTick, selectedClassId, selectedSectionId, selectedPeriodId) {
+        if (selectedClassId > 0L && selectedSectionId > 0L) {
+            GradingService.calculateComprehensiveStudentReports(
+                dbHelper = dbHelper,
+                repository = repository,
+                classId = selectedClassId,
+                sectionId = selectedSectionId,
+                baseDateFilter = "ALL"
+            )
+        } else emptyList()
+    }
+    val savedGrades = remember(refreshTick, localTick, selectedPeriodId) {
+        selectedPeriodId?.let { repository.getPeriodGrades(periodId = it).associateBy { g -> g.studentId } } ?: emptyMap()
+    }
+    val writtenInputs = remember(selectedClassId, selectedSectionId, selectedPeriodId) {
+        androidx.compose.runtime.mutableStateMapOf<Long, String>().apply {
+            students.forEach { student ->
+                put(student.id, savedGrades[student.id]?.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "")
+            }
+        }
+    }
+    LaunchedEffect(classSections) {
+        if (classSections.isNotEmpty() && classSections.none { it.id == selectedSectionId }) {
+            selectedSectionId = classSections.first().id
+        }
+    }
+    LaunchedEffect(periods) {
+        if (periods.isNotEmpty() && periods.none { it.id == selectedPeriodId }) selectedPeriodId = periods.first().id
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Surface(color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Slate200), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("إدخال درجات الامتحان الشهري", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Slate900)
+                    Text("درجة اليومي مقربة إلى أقرب عدد صحيح، والمعدل = (اليومي + التحريري) ÷ 2", fontSize = 12.sp, color = Slate600)
+                    MonthlyGradeFilter(label = "الصف", items = classes.map { it.id to it.className }, selectedId = selectedClassId, onSelect = { selectedClassId = it; selectedSectionId = sections.firstOrNull { s -> s.classId == it }?.id ?: 0L })
+                    MonthlyGradeFilter(label = "الشعبة", items = classSections.map { it.id to it.sectionName }, selectedId = selectedSectionId, onSelect = { selectedSectionId = it })
+                    MonthlyGradeFilter(label = "الفترة", items = periods.map { it.id to "${it.stageType.arabicLabel} — ${it.periodName}" }, selectedId = selectedPeriodId ?: 0L, onSelect = { selectedPeriodId = it })
+                }
+            }
+        }
+        if (selectedPeriod == null) {
+            item { Text("لا توجد فترات دراسية متاحة. أضف فترة من قسم الفترات الدراسية أولاً.", color = Slate600, modifier = Modifier.padding(12.dp)) }
+        } else if (students.isEmpty()) {
+            item { Text("لا يوجد طلاب في الصف والشعبة المحددين.", color = Slate600, modifier = Modifier.padding(12.dp)) }
+        } else {
+            items(students, key = { it.id }) { student ->
+                val report = reports.firstOrNull { it.studentId == student.id }
+                val breakdown = report?.periodBreakdowns?.firstOrNull { it.period.id == selectedPeriod.id }
+                val daily = breakdown?.dailyGrade?.let { GradingService.roundHalfUpInt(it) }
+                val writtenText = writtenInputs[student.id] ?: ""
+                val writtenValue = writtenText.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it in 0.0..100.0 }
+                val average = if (daily != null && writtenValue != null) GradingService.roundHalfUpInt((daily + writtenValue) / 2.0) else null
+                Surface(color = Color.White, shape = RoundedCornerShape(14.dp), border = BorderStroke(1.dp, Slate200), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("${students.indexOf(student) + 1}. ${student.studentName}", fontWeight = FontWeight.ExtraBold, color = Slate900, modifier = Modifier.weight(1f))
+                            Text(if (savedGrades[student.id]?.writtenExamGrade != null) "محفوظة ✓" else "غير محفوظة", fontSize = 11.sp, color = if (savedGrades[student.id]?.writtenExamGrade != null) Emerald700 else Slate500)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = daily?.toString() ?: "—",
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("درجة اليومي") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = writtenText,
+                                onValueChange = { writtenInputs[student.id] = it },
+                                label = { Text("الامتحان التحريري") },
+                                placeholder = { Text("من 0 إلى 100") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("المعدل: ${average?.toString() ?: "—"}", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = if (average != null) Emerald700 else Slate700)
+                            Button(
+                                enabled = daily != null && (writtenText.isBlank() || writtenValue != null),
+                                onClick = {
+                                    val err = repository.upsertPeriodGrade(
+                                        studentId = student.id,
+                                        periodId = selectedPeriod.id,
+                                        dailyGrade = daily?.toDouble() ?: 0.0,
+                                        writtenExamGrade = if (writtenText.isBlank()) null else writtenValue
+                                    )
+                                    if (err == null) {
+                                        localTick++
+                                        onDataChanged()
+                                        onShowMessage(if (writtenText.isBlank()) "تم مسح درجة التحريري للطالب ${student.studentName}" else "تم حفظ الدرجة وحساب المعدل للطالب ${student.studentName}")
+                                    } else onShowMessage(err)
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Slate900)
+                            ) { Text("حفظ") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthlyGradeFilter(
+    label: String,
+    items: List<Pair<Long, String>>,
+    selectedId: Long,
+    onSelect: (Long) -> Unit
+) {
+    var expanded by remember(label) { mutableStateOf(false) }
+    val selectedLabel = items.firstOrNull { it.first == selectedId }?.second ?: "اختر $label"
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("$label: $selectedLabel", modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            items.forEach { (id, name) ->
+                DropdownMenuItem(text = { Text(name) }, onClick = { onSelect(id); expanded = false })
+            }
+        }
+    }
+}
