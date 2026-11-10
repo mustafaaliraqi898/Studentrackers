@@ -5,6 +5,7 @@ import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.util.Locale
 import kotlin.math.round
 
 object GradingService {
@@ -58,7 +59,7 @@ object GradingService {
         return if (r % 1.0 == 0.0) {
             r.toInt().toString()
         } else {
-            String.format("%.2f", r).trimEnd('0').trimEnd('.')
+            String.format(Locale.US, "%.2f", r).trimEnd('0').trimEnd('.')
         }
     }
 
@@ -596,6 +597,9 @@ object GradingService {
         val periods = repository.getStudyPeriods()
         val storedPeriodGrades = repository.getPeriodGrades()
         val storedMap = storedPeriodGrades.associateBy { it.studentId to it.periodId }
+        val manualDailyStudentsByPeriodId = periods.associate { period ->
+            period.id to repository.getManualPeriodDailyGradeStudentIds(period.id)
+        }
 
         // Pre-calculate daily grades per period for all requested students (skip daily grade calculation for MID_YEAR)
         val periodDailyGradesByPeriodId: Map<Long, Map<Long, StudentCalculatedGrade>> = periods.associate { period ->
@@ -619,8 +623,14 @@ object GradingService {
             val breakdowns = periods.map { period ->
                 val isMidYear = period.stageType == AcademicStage.MID_YEAR
                 val calcDaily = periodDailyGradesByPeriodId[period.id]?.get(stId) ?: baseGrade
-                val dailyScore = if (isMidYear) 0.0 else round2(calcDaily.totalScore)
+                val calculatedDailyScore = if (isMidYear) 0.0 else round2(calcDaily.totalScore)
                 val stored = storedMap[stId to period.id]
+                val isDailyManuallyAdjusted = manualDailyStudentsByPeriodId[period.id]?.contains(stId) == true
+                val dailyScore = if (!isMidYear && isDailyManuallyAdjusted) {
+                    stored?.dailyGrade?.let { round2(it) } ?: calculatedDailyScore
+                } else {
+                    calculatedDailyScore
+                }
                 val written = stored?.writtenExamGrade?.let { round2(it) }
                 val periodAvg = if (written != null) {
                     if (isMidYear) {
