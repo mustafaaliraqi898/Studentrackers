@@ -226,7 +226,7 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.DAILY_TRACKING, "اليومي", Icons.Default.FactCheck),
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
                     Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
-                    Triple(AppScreen.REPORTS, "الدرجات الشهرية", Icons.Default.Assessment),
+                    Triple(AppScreen.MONTHLY_GRADES, "الدرجات الشهرية", Icons.Default.EditNote),
                     Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Settings)
                 )
                 navItems.forEach { (screen, label, icon) ->
@@ -484,6 +484,16 @@ fun StudentTrackerMainApp(
                         if (firstSec != null) selectedSectionId = firstSec.id
                     },
                     onSelectSection = { secId -> selectedSectionId = secId }
+                )
+
+                AppScreen.MONTHLY_GRADES -> MonthlyGradesScreen(
+                    classes = classes,
+                    sections = sections,
+                    dbHelper = dbHelper,
+                    repository = repository,
+                    refreshTick = refreshTick,
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.REPORTS -> ReportsScreen(
