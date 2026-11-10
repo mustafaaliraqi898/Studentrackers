@@ -2536,7 +2536,7 @@ fun StudentProfileScreen(
                                                 ) {
                                                     Text(if (grade.missingComponents.isNotEmpty()) "الدرجة اليومية (مؤقتة)" else "الدرجة اليومية", fontSize = 11.sp, color = Slate600, fontWeight = FontWeight.Bold)
                                                     Text(
-                                                        text = "${GradingService.formatScore(bd.dailyGrade)} / 100",
+                                                        text = "${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} / 100",
                                                         fontSize = 14.sp,
                                                         fontWeight = FontWeight.ExtraBold,
                                                         color = Slate900
@@ -2677,7 +2677,7 @@ fun StudentProfileScreen(
                     )
                     if (!isMidYear) {
                         Text(
-                            text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatScore(bd.dailyGrade)} / 100",
+                            text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} / 100",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Teal700
@@ -2736,7 +2736,7 @@ fun StudentProfileScreen(
                             } else {
                                 val previewAvg = (bd.dailyGrade + parsedPreview) / 2.0
                                 Text(
-                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatRoundedFinalGrade(previewAvg)} / 100",
+                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatRoundedFinalGrade(previewAvg)} / 100",
                                     color = Emerald700,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -3627,7 +3627,7 @@ fun ReportsScreen(
                                             )
                                         } else {
                                             Text(
-                                                text = "يومي: ${GradingService.formatScore(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "--"}",
+                                                text = "يومي: ${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "--"}",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Slate700
@@ -3786,7 +3786,7 @@ fun ReportsScreen(
                     )
                     if (!isMidYear) {
                         Text(
-                            text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatScore(bd.dailyGrade)} / 100",
+                            text = "الدرجة اليومية المحسوبة لهذه الفترة: ${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} / 100",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Teal700
@@ -3845,7 +3845,7 @@ fun ReportsScreen(
                             } else {
                                 val previewAvg = (bd.dailyGrade + parsedPreview) / 2.0
                                 Text(
-                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatScore(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatRoundedFinalGrade(previewAvg)} / 100",
+                                    text = "معدل ${bd.period.periodName} بعد الحفظ: (${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} + ${GradingService.formatScore(parsedPreview)}) ÷ 2 = ${GradingService.formatRoundedFinalGrade(previewAvg)} / 100",
                                     color = Emerald700,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.ExtraBold,
