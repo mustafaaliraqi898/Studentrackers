@@ -1735,14 +1735,10 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
             GradingService.roundHalfUpInt(dailyGrade.coerceIn(0.0, 100.0)).toDouble()
         }
         val roundedWritten = writtenExamGrade?.let { kotlin.math.round(it.coerceIn(0.0, 100.0) * 100.0) / 100.0 }
-        val periodAvg = if (roundedWritten != null) {
-            if (isMidYear) {
-                roundedWritten
-            } else {
-                GradingService.roundHalfUpInt(((roundedDaily ?: 0.0) + roundedWritten) / 2.0).toDouble()
-            }
+        val periodAvg = if (isMidYear) {
+            roundedWritten
         } else {
-            null
+            GradingService.calculateRoundedPeriodAverage(roundedDaily ?: dailyGrade, roundedWritten)
         }
 
         val db = dbHelper.writableDatabase
