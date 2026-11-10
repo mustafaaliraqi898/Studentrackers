@@ -79,10 +79,14 @@ fun MonthlyGradesScreen(
             }
         }
     }
-    val dailyInputs = remember(refreshTick, selectedPeriodId, students, savedGrades, calculatedDailyGrades) {
+    val dailyInputs = remember(refreshTick, selectedPeriodId, students, savedGrades, calculatedDailyGrades, manualDailyStudents) {
         mutableStateMapOf<Long, String>().apply {
             students.forEach { student ->
-                val daily = savedGrades[student.id]?.dailyGrade ?: calculatedDailyGrades[student.id]
+                val daily = if (manualDailyStudents.contains(student.id)) {
+                    savedGrades[student.id]?.dailyGrade
+                } else {
+                    calculatedDailyGrades[student.id] ?: savedGrades[student.id]?.dailyGrade
+                }
                 this[student.id] = daily?.let { GradingService.formatScore(it) } ?: ""
             }
         }
@@ -264,9 +268,14 @@ fun MonthlyGradesScreen(
                                         onShowMessage("درجة التحريري للطالب ${student.studentName} يجب أن تكون بين 0 و 100")
                                     } else {
                                         saving = true
-                                        val dailyError = if (isMidYear) null else repository.setPeriodDailyGrade(
-                                            student.id, selectedPeriod.id, daily!!, manual = true
+                                        val calculatedDaily = calculatedDailyGrades[student.id] ?: 0.0
+                                        val dailyWasManuallyChanged = !isMidYear && (
+                                            manualDailyStudents.contains(student.id) ||
+                                            kotlin.math.abs(daily!! - calculatedDaily) > 0.001
                                         )
+                                        val dailyError = if (dailyWasManuallyChanged) repository.setPeriodDailyGrade(
+                                            student.id, selectedPeriod.id, daily!!, manual = true
+                                        ) else null
                                         val error = dailyError ?: repository.upsertPeriodGrade(
                                             student.id, selectedPeriod.id,
                                             if (isMidYear) 0.0 else daily!!, written
