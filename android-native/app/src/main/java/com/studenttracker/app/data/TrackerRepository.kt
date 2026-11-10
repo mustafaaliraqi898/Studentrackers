@@ -1731,14 +1731,14 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         val roundedDaily: Double? = if (isMidYear) {
             null
         } else {
-            kotlin.math.round(dailyGrade.coerceIn(0.0, 100.0) * 100.0) / 100.0
+            GradingService.roundHalfUpInt(dailyGrade.coerceIn(0.0, 100.0)).toDouble()
         }
         val roundedWritten = writtenExamGrade?.let { kotlin.math.round(it.coerceIn(0.0, 100.0) * 100.0) / 100.0 }
         val periodAvg = if (roundedWritten != null) {
             if (isMidYear) {
                 roundedWritten
             } else {
-                kotlin.math.round((((roundedDaily ?: 0.0) + roundedWritten) / 2.0) * 100.0) / 100.0
+                GradingService.roundHalfUpInt(((roundedDaily ?: 0.0) + roundedWritten) / 2.0).toDouble()
             }
         } else {
             null
