@@ -27,6 +27,13 @@ object GradingService {
         return roundHalfUpInt(value).toString()
     }
 
+    /** Daily grade is rounded first, then averaged with the written exam grade. */
+    fun calculateRoundedPeriodAverage(dailyGrade: Double, writtenExamGrade: Double?): Double? {
+        if (writtenExamGrade == null) return null
+        val roundedDaily = roundHalfUpInt(dailyGrade.coerceIn(0.0, 100.0)).toDouble()
+        return roundHalfUpInt((roundedDaily + writtenExamGrade.coerceIn(0.0, 100.0)) / 2.0).toDouble()
+    }
+
     data class EvaluationWeights(
         val attendance: Double = 10.0,
         val participation: Double = 30.0,
@@ -622,14 +629,10 @@ object GradingService {
                 val dailyScore = if (isMidYear) 0.0 else roundHalfUpInt(calcDaily.totalScore).toDouble()
                 val stored = storedMap[stId to period.id]
                 val written = stored?.writtenExamGrade?.let { round2(it) }
-                val periodAvg = if (written != null) {
-                    if (isMidYear) {
-                        written
-                    } else {
-                        roundHalfUpInt((dailyScore + written) / 2.0).toDouble()
-                    }
+                val periodAvg = if (isMidYear) {
+                    written
                 } else {
-                    null
+                    calculateRoundedPeriodAverage(dailyScore, written)
                 }
 
                 // Keep SQLite PeriodGrades row in sync if the daily grade or periodAverage changed since last save
