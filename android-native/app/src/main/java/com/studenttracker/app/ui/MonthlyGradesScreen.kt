@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,6 +51,12 @@ fun MonthlyGradesScreen(
     val selectedPeriod = periods.firstOrNull { it.id == selectedPeriodId }
     val students = remember(refreshTick, selectedClassId, selectedSectionId) {
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
+    }
+    var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
+    val filteredStudents = remember(students, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) students
+        else students.filter { it.studentName.contains(query, ignoreCase = true) }
     }
     val savedGrades = remember(refreshTick, selectedPeriodId) {
         selectedPeriodId?.let { repository.getPeriodGrades(periodId = it).associateBy { grade -> grade.studentId } } ?: emptyMap()
@@ -110,8 +117,24 @@ fun MonthlyGradesScreen(
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("قائمة الطلبة", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Slate900)
-                Text("${students.size} طالب", fontSize = 12.sp, color = Slate600)
+                Text("${filteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
             }
+        }
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("ابحث عن اسم الطالب...") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "بحث") },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        TextButton(onClick = { searchQuery = "" }) { Text("مسح") }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
+            )
         }
         if (selectedPeriod == null) {
             item {
@@ -121,8 +144,10 @@ fun MonthlyGradesScreen(
             }
         } else if (students.isEmpty()) {
             item { Text("لا يوجد طلبة في الصف والشعبة المحددين", color = Slate600, modifier = Modifier.padding(12.dp)) }
+        } else if (filteredStudents.isEmpty()) {
+            item { Text("ماكو طالب بهذا الاسم", color = Slate600, modifier = Modifier.padding(12.dp)) }
         } else {
-            items(students, key = { it.id }) { student ->
+            items(filteredStudents, key = { it.id }) { student ->
                 val saved = savedGrades[student.id]?.writtenExamGrade
                 var saving by remember(student.id, selectedPeriodId) { mutableStateOf(false) }
                 Surface(color = Color.White, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Slate200), modifier = Modifier.fillMaxWidth()) {
