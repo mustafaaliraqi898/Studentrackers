@@ -2571,9 +2571,9 @@ fun StudentProfileScreen(
                                             }
 
                                             Surface(
-                                                color = if (bd.periodAverage != null) Emerald50 else Color.White,
+                                                color = if (bd.periodAverage != null || bd.writtenExamGrade != null) Emerald50 else Color.White,
                                                 shape = RoundedCornerShape(8.dp),
-                                                border = BorderStroke(1.dp, if (bd.periodAverage != null) Emerald600 else Slate200),
+                                                border = BorderStroke(1.dp, if (bd.periodAverage != null || bd.writtenExamGrade != null) Emerald600 else Slate200),
                                                 modifier = Modifier.weight(1f)
                                             ) {
                                                 Column(
@@ -2582,10 +2582,10 @@ fun StudentProfileScreen(
                                                 ) {
                                                     Text("معدل الفترة", fontSize = 11.sp, color = Slate700, fontWeight = FontWeight.Bold)
                                                     Text(
-                                                        text = if (bd.periodAverage != null) "${GradingService.formatRoundedFinalGrade(bd.periodAverage)} / 100" else "--",
+                                                        text = (bd.periodAverage ?: GradingService.calculateRoundedPeriodAverage(bd.dailyGrade, bd.writtenExamGrade))?.let { "${GradingService.formatRoundedFinalGrade(it)} / 100" } ?: "--",
                                                         fontSize = 14.sp,
                                                         fontWeight = FontWeight.ExtraBold,
-                                                        color = if (bd.periodAverage != null) Emerald700 else Slate500
+                                                        color = if (bd.periodAverage != null || bd.writtenExamGrade != null) Emerald700 else Slate500
                                                     )
                                                 }
                                             }
@@ -3627,7 +3627,7 @@ fun ReportsScreen(
                                             )
                                         } else {
                                             Text(
-                                                text = "يومي: ${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${bd.periodAverage?.let { GradingService.formatRoundedFinalGrade(it) } ?: "--"}",
+                                                text = "يومي: ${GradingService.formatRoundedFinalGrade(bd.dailyGrade)} | تحريري: ${bd.writtenExamGrade?.let { GradingService.formatScore(it) } ?: "--"} | معدل: ${(bd.periodAverage ?: GradingService.calculateRoundedPeriodAverage(bd.dailyGrade, bd.writtenExamGrade))?.let { GradingService.formatRoundedFinalGrade(it) } ?: "--"}",
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Slate700
