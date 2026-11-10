@@ -3509,6 +3509,13 @@ fun ReportsScreen(
             } else {
                 rep.periodBreakdowns
             }
+            // When one period is selected, show that period's effective daily grade
+            // (including a teacher's saved manual adjustment) in the green daily badge.
+            val selectedPeriodDailyGrade = selectedPeriodFilterId?.let { periodId ->
+                rep.periodBreakdowns.firstOrNull { it.period.id == periodId }
+                    ?.takeIf { it.period.stageType != AcademicStage.MID_YEAR }
+                    ?.dailyGrade
+            } ?: g.totalScore
 
             Surface(
                 color = Color.White,
@@ -3546,7 +3553,7 @@ fun ReportsScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Text(
-                                        text = "${GradingService.formatRoundedFinalGrade(g.totalScore)} / 100",
+                                        text = "${GradingService.formatRoundedFinalGrade(selectedPeriodDailyGrade)} / 100",
                                         color = Teal700,
                                         fontWeight = FontWeight.ExtraBold,
                                         fontSize = 13.sp
