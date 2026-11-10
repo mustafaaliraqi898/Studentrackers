@@ -209,6 +209,11 @@ fun StudentTrackerMainApp(
                     }) {
                         Icon(Icons.Default.Storage, contentDescription = "النسخ الاحتياطي وExcel", tint = Color.White)
                     }
+                    IconButton(onClick = {
+                        guardedAction { currentScreen = AppScreen.EVALUATION_SETTINGS }
+                    }) {
+                        Icon(Icons.Default.Settings, contentDescription = "إعدادات التقييم اليومي", tint = Color.White)
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Slate900,
