@@ -619,14 +619,14 @@ object GradingService {
             val breakdowns = periods.map { period ->
                 val isMidYear = period.stageType == AcademicStage.MID_YEAR
                 val calcDaily = periodDailyGradesByPeriodId[period.id]?.get(stId) ?: baseGrade
-                val dailyScore = if (isMidYear) 0.0 else round2(calcDaily.totalScore)
+                val dailyScore = if (isMidYear) 0.0 else roundHalfUpInt(calcDaily.totalScore).toDouble()
                 val stored = storedMap[stId to period.id]
                 val written = stored?.writtenExamGrade?.let { round2(it) }
                 val periodAvg = if (written != null) {
                     if (isMidYear) {
                         written
                     } else {
-                        (dailyScore + written) / 2.0
+                        roundHalfUpInt((dailyScore + written) / 2.0).toDouble()
                     }
                 } else {
                     null
