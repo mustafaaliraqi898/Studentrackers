@@ -227,6 +227,7 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
                     Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
                     Triple(AppScreen.REPORTS, "النتائج", Icons.Default.Assessment),
+                    Triple(AppScreen.MONTHLY_GRADES, "الدرجات الشهرية", Icons.Default.Edit),
                     Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Settings)
                 )
                 navItems.forEach { (screen, label, icon) ->
@@ -484,6 +485,24 @@ fun StudentTrackerMainApp(
                         if (firstSec != null) selectedSectionId = firstSec.id
                     },
                     onSelectSection = { secId -> selectedSectionId = secId }
+                )
+
+                AppScreen.MONTHLY_GRADES -> MonthlyGradesScreen(
+                    classes = classes,
+                    sections = sections,
+                    selectedClassId = selectedClassId,
+                    selectedSectionId = selectedSectionId,
+                    repository = repository,
+                    dbHelper = dbHelper,
+                    refreshTick = refreshTick,
+                    onSelectClass = { clsId ->
+                        selectedClassId = clsId
+                        val firstSec = sections.firstOrNull { it.classId == clsId }
+                        if (firstSec != null) selectedSectionId = firstSec.id
+                    },
+                    onSelectSection = { secId -> selectedSectionId = secId },
+                    onDataChanged = { refreshTick++ },
+                    onShowMessage = ::showToastMessage
                 )
 
                 AppScreen.REPORTS -> ReportsScreen(
