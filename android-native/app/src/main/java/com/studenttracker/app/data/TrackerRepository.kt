@@ -1706,6 +1706,18 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
         return list
     }
 
+    /** Returns student IDs whose daily grade was explicitly adjusted by the teacher for this period. */
+    fun getManualPeriodDailyGradeStudentIds(periodId: Long): Set<Long> {
+        val ids = mutableSetOf<Long>()
+        dbHelper.readableDatabase.rawQuery(
+            "SELECT StudentID FROM PeriodGrades WHERE PeriodID = ? AND IsDailyGradeManual = 1",
+            arrayOf(periodId.toString())
+        ).use { cursor ->
+            while (cursor.moveToNext()) ids.add(cursor.getLong(0))
+        }
+        return ids
+    }
+
     /**
      * Saves or updates a student's WrittenExamGrade (0..100 or null to clear) and synchronized
      * DailyGrade + PeriodAverage inside PeriodGrades (UNIQUE(StudentID, PeriodID)).
