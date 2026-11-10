@@ -226,7 +226,7 @@ fun StudentTrackerMainApp(
                     Triple(AppScreen.DAILY_TRACKING, "اليومي", Icons.Default.FactCheck),
                     Triple(AppScreen.STUDENTS, "الطلاب", Icons.Default.Groups),
                     Triple(AppScreen.AVERAGES_TABLE, "المعدل", Icons.Default.TableChart),
-                    Triple(AppScreen.MONTHLY_GRADES, "الدرجات الشهرية", Icons.Default.EditNote),
+                    Triple(AppScreen.MONTHLY_GRADES, "الدرجات الشهرية", Icons.Default.Assessment),
                     Triple(AppScreen.EVALUATION_SETTINGS, "التقييم", Icons.Default.Settings)
                 )
                 navItems.forEach { (screen, label, icon) ->
