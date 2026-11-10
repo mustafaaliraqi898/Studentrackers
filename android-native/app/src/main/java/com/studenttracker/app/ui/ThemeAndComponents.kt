@@ -67,6 +67,7 @@ enum class AppScreen(val titleAr: String) {
     AVERAGES_TABLE("المعدل"),
     PERIOD_COMPARISON("مقارنة نتائج الفترات"),
     REPORTS("التقارير والنتائج"),
+    MONTHLY_GRADES("الدرجات الشهرية"),
     HOLIDAYS("العطل والمناسبات"),
     EXCEL_BACKUP("Excel والنسخ الاحتياطي"),
     EVALUATION_SETTINGS("إعدادات التقييم")
