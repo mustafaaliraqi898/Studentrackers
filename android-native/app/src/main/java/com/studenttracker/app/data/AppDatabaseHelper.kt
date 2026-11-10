@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 14
+        const val DATABASE_VERSION = 15
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -99,6 +99,16 @@ class AppDatabaseHelper(private val context: Context) :
         }
         if (oldVersion < 14) {
             migrateDailyTestsScoreRange(db)
+        }
+        if (oldVersion < 15) {
+            migratePeriodDailyGradeManual(db)
+        }
+    }
+
+    /** Adds a separate flag so a teacher's approved daily-grade override is not overwritten by recalculation. */
+    private fun migratePeriodDailyGradeManual(db: SQLiteDatabase) {
+        runCatching {
+            db.execSQL("ALTER TABLE PeriodGrades ADD COLUMN IsDailyGradeManual INTEGER NOT NULL DEFAULT 0;")
         }
     }
 
