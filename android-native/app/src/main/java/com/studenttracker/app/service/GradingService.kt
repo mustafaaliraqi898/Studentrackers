@@ -37,8 +37,29 @@ object GradingService {
         val dailyTest: Double = 20.0
     )
 
-    fun getEvaluationWeights(dbHelper: AppDatabaseHelper, classId: Long): EvaluationWeights {
-        dbHelper.readableDatabase.rawQuery(
+    fun getEvaluationWeights(
+        dbHelper: AppDatabaseHelper,
+        classId: Long,
+        periodId: Long? = null
+    ): EvaluationWeights {
+        val db = dbHelper.readableDatabase
+        if (periodId != null) {
+            db.rawQuery(
+                "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationPeriodSettings WHERE ClassID = ? AND PeriodID = ?",
+                arrayOf(classId.toString(), periodId.toString())
+            ).use { c ->
+                if (c.moveToFirst()) return EvaluationWeights(
+                    attendance = c.getDouble(0),
+                    participation = c.getDouble(1),
+                    notebook = c.getDouble(2),
+                    homework = c.getDouble(3),
+                    behavior = c.getDouble(4),
+                    dailyTest = c.getDouble(5)
+                )
+            }
+        }
+        // Periods without their own configuration keep using the existing class-wide settings.
+        db.rawQuery(
             "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
             arrayOf(classId.toString())
         ).use { c ->
@@ -262,10 +283,12 @@ object GradingService {
         var effectiveStart = startDateInclusive
         var effectiveEnd = endDateInclusive
         var effectiveMonth = monthPrefix
+        var effectivePeriodId: Long? = null
         if (!monthPrefix.isNullOrBlank() && monthPrefix.startsWith("PERIOD:")) {
             val pid = monthPrefix.removePrefix("PERIOD:").toLongOrNull()
             val period = pid?.let { id -> repository.getStudyPeriods().firstOrNull { it.id == id } }
             if (period != null) {
+                effectivePeriodId = period.id
                 effectiveStart = period.startDate
                 effectiveEnd = period.endDate
                 effectiveMonth = null
@@ -371,7 +394,7 @@ object GradingService {
                         draft.behavior
                     )
                     if (draft.dailyTestScore != null) {
-                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, getEvaluationWeights(dbHelper, st.classId).dailyTest)
+                        testMap[liveOverrideDate] = draft.dailyTestScore.coerceIn(0.0, getEvaluationWeights(dbHelper, st.classId, effectivePeriodId).dailyTest)
                     } else {
                         testMap.remove(liveOverrideDate)
                     }
@@ -404,7 +427,7 @@ object GradingService {
                 }
             }
             val absentDates = attMap.filterValues { it == AttendanceStatus.ABSENT }.keys
-            val weights = getEvaluationWeights(dbHelper, st.classId)
+            val weights = getEvaluationWeights(dbHelper, st.classId, effectivePeriodId)
             val totalWorkingDays = workingDates.size
             val absentDays = workingDates.count { it in absentDates }
             val presentDays = (totalWorkingDays - absentDays).coerceAtLeast(0)
