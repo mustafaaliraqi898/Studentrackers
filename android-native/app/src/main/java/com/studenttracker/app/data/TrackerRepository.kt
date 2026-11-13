@@ -750,7 +750,13 @@ class TrackerRepository(private val dbHelper: AppDatabaseHelper) {
                 // 4. Upsert or delete DailyTests using this class's configured maximum.
                 val testScore = entry.dailyTestScore
                 if (testScore != null) {
-                    val dailyTestMax = db.rawQuery(
+                    val periodDailyTestMax = resolvedPeriodId?.let { pid ->
+                        db.rawQuery(
+                            "SELECT DailyTestMax FROM EvaluationPeriodSettings WHERE ClassID = ? AND PeriodID = ?",
+                            arrayOf(classId.toString(), pid.toString())
+                        ).use { cursor -> if (cursor.moveToFirst()) cursor.getDouble(0) else null }
+                    }
+                    val dailyTestMax = periodDailyTestMax ?: db.rawQuery(
                         "SELECT DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
                         arrayOf(classId.toString())
                     ).use { cursor ->
