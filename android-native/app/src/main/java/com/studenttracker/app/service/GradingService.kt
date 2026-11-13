@@ -634,8 +634,7 @@ object GradingService {
                     repository = repository,
                     classId = classId,
                     sectionId = sectionId,
-                    startDateInclusive = period.startDate,
-                    endDateInclusive = period.endDate
+                    monthPrefix = "PERIOD:${period.id}"
                 ).associateBy { it.studentId }
                 period.id to gradesForPeriod
             }
