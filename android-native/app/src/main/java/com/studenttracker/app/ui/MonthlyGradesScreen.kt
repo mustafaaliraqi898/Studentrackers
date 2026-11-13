@@ -118,6 +118,26 @@ fun MonthlyGradesScreen(
             }
         }
     }
+    val differenceThreshold = minimumGradeDifference.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 20.0
+    val gradeFilteredStudents = filteredStudents.filter { student ->
+        if (gradeFilterMode == "ALL") {
+            true
+        } else {
+            val daily = dailyInputs[student.id]?.toDoubleOrNull()
+            val written = gradeInputs[student.id]?.toDoubleOrNull()
+            if (daily == null || written == null) {
+                false
+            } else {
+                val difference = daily - written
+                when (gradeFilterMode) {
+                    "DAILY_HIGHER" -> difference >= differenceThreshold
+                    "WRITTEN_HIGHER" -> -difference >= differenceThreshold
+                    "CLOSE" -> kotlin.math.abs(difference) < differenceThreshold
+                    else -> true
+                }
+            }
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -159,7 +179,7 @@ fun MonthlyGradesScreen(
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("قائمة الطلبة", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Slate900)
-                Text("${filteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
+                Text("${gradeFilteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
             }
         }
         item {
@@ -223,26 +243,6 @@ fun MonthlyGradesScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
-                }
-            }
-        }
-        val differenceThreshold = minimumGradeDifference.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 20.0
-        val gradeFilteredStudents = filteredStudents.filter { student ->
-            if (gradeFilterMode == "ALL") {
-                true
-            } else {
-                val daily = dailyInputs[student.id]?.toDoubleOrNull()
-                val written = gradeInputs[student.id]?.toDoubleOrNull()
-                if (daily == null || written == null) {
-                    false
-                } else {
-                    val difference = daily - written
-                    when (gradeFilterMode) {
-                        "DAILY_HIGHER" -> difference >= differenceThreshold
-                        "WRITTEN_HIGHER" -> -difference >= differenceThreshold
-                        "CLOSE" -> kotlin.math.abs(difference) < differenceThreshold
-                        else -> true
-                    }
                 }
             }
         }
