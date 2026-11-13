@@ -5075,19 +5075,6 @@ fun AveragesTableScreen(
         }
     }
 
-    val successRates = remember(reports) {
-        fun rate(values: List<Double?>): Pair<Int, Int>? {
-            val completed = values.filterNotNull()
-            if (completed.isEmpty()) return null
-            return completed.count { it >= 50.0 } to completed.size
-        }
-        listOf(
-            "نسبة نجاح النصف الأول" to rate(reports.map { it.firstHalfAverage }),
-            "نسبة نجاح نصف السنة" to rate(reports.map { it.midYearGrade }),
-            "نسبة نجاح النصف الثاني" to rate(reports.map { it.secondHalfAverage }),
-            "نسبة نجاح السعي السنوي" to rate(reports.map { it.annualEffort })
-        )
-    }
     val horizontalScrollState = rememberScrollState()
 
     Column(
@@ -5284,30 +5271,6 @@ fun AveragesTableScreen(
             }
         }
 
-        // Success percentages for the currently selected section (completed grades only).
-        Surface(
-            color = Color.White,
-            shape = RoundedCornerShape(14.dp),
-            border = BorderStroke(1.dp, Slate200),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("نسب النجاح — شعبة ${currentSection?.sectionName ?: "—"}", fontWeight = FontWeight.ExtraBold, color = Slate900, fontSize = 14.sp)
-                successRates.forEach { (label, result) ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(label, fontSize = 12.sp, color = Slate700, fontWeight = FontWeight.Bold)
-                        Text(
-                            result?.let { (passed, total) -> "${"%.2f".format(java.util.Locale.US, passed * 100.0 / total)}% ($passed/$total)" } ?: "غير مكتمل",
-                            fontSize = 12.sp,
-                            color = if (result == null) Slate500 else Emerald700,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-                Text("الناجح: 50 فما فوق — الدرجات غير المدخلة مستثناة من الحساب", fontSize = 10.sp, color = Slate500)
-            }
-        }
-
         // 2. Actual RTL Table (with horizontal scroll support so student name is never cramped)
         Surface(
             color = Color.White,
@@ -5461,6 +5424,17 @@ private fun printClassSuccessRatesA4(
     onError: (String) -> Unit
 ) {
     runCatching {
+        val schoolPrefs = context.getSharedPreferences("school_profile", android.content.Context.MODE_PRIVATE)
+        val schoolName = schoolPrefs.getString("school_name", "").orEmpty().trim()
+        val schoolLogoData = schoolPrefs.getString("school_logo_uri", null)?.let { rawUri ->
+            runCatching {
+                val uri = android.net.Uri.parse(rawUri)
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("تعذر قراءة شعار المدرسة")
+                val mime = context.contentResolver.getType(uri) ?: "image/png"
+                "data:$mime;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            }.getOrNull()
+        }
         val stages = listOf(
             "النصف الأول" to { r: StudentComprehensiveGradeReport -> r.firstHalfAverage },
             "نصف السنة" to { r: StudentComprehensiveGradeReport -> r.midYearGrade },
@@ -5471,46 +5445,78 @@ private fun printClassSuccessRatesA4(
             val completed = reports.mapNotNull(value)
             return Triple(completed.count { it >= 50.0 }, completed.count { it < 50.0 }, completed.size)
         }
-        val sectionRows = StringBuilder()
-        stages.forEach { (stageName, selector) ->
-            val aggregate = sections.map { section ->
-                section to stats(reportsBySection[section.id].orEmpty(), selector)
-            }
-            val totalPassed = aggregate.sumOf { it.second.first }
-            val totalFailed = aggregate.sumOf { it.second.second }
-            val totalCompleted = totalPassed + totalFailed
-            sectionRows.append("<h2>نسبة نجاح $stageName</h2>")
-            sectionRows.append("<table><thead><tr><th>الشعبة</th><th>عدد الدرجات المكتملة</th><th>الناجحون</th><th>الراسبون</th><th>نسبة النجاح</th></tr></thead><tbody>")
-            aggregate.forEach { (section, result) ->
-                val (passed, failed, completed) = result
-                val rate = if (completed == 0) "—" else "${"%.2f".format(java.util.Locale.US, passed * 100.0 / completed)}%"
-                sectionRows.append("<tr><td>شعبة ${escapeHtmlText(section.sectionName)}</td><td>$completed</td><td>$passed</td><td>$failed</td><td class='rate'>$rate</td></tr>")
-            }
-            val overallRate = if (totalCompleted == 0) "—" else "${"%.2f".format(java.util.Locale.US, totalPassed * 100.0 / totalCompleted)}%"
-            sectionRows.append("<tr class='total'><td>المجموع الكلي للصف</td><td>$totalCompleted</td><td>$totalPassed</td><td>$totalFailed</td><td class='rate'>$overallRate</td></tr>")
-            sectionRows.append("</tbody></table>")
+        val headerGroups = stages.joinToString("") { "<th colspan='3' class='stage'>${it.first}</th>" }
+        val subHeaders = stages.joinToString("") {
+            "<th>الممتحنون</th><th>غير الممتحنين</th><th>نسبة النجاح</th>"
         }
+        val bodyRows = StringBuilder()
+        val stagePassed = IntArray(stages.size)
+        val stageNotExamined = IntArray(stages.size)
+        val stageTotalStudents = IntArray(stages.size)
+        sections.forEach { section ->
+            val sectionReports = reportsBySection[section.id].orEmpty()
+            bodyRows.append("<tr><td class='section'>شعبة ${escapeHtmlText(section.sectionName)}</td>")
+            stages.forEachIndexed { index, stage ->
+                val (passed, failed, completed) = stats(sectionReports, stage.second)
+                val notExamined = (sectionReports.size - completed).coerceAtLeast(0)
+                val rate = if (completed == 0) "—" else "${"%.2f".format(java.util.Locale.US, passed * 100.0 / completed)}%"
+                bodyRows.append("<td class='examined'>$completed</td><td class='not-examined'>$notExamined</td><td class='rate'>$rate</td>")
+                stagePassed[index] += passed
+                stageNotExamined[index] += notExamined
+                stageTotalStudents[index] += sectionReports.size
+            }
+            bodyRows.append("</tr>")
+        }
+        bodyRows.append("<tr class='total'><td class='section'>المجموع (جميع الشعب)</td>")
+        stages.forEachIndexed { index, _ ->
+            val totalStudents = stageTotalStudents[index]
+            val notExamined = stageNotExamined[index]
+            val examined = (totalStudents - notExamined).coerceAtLeast(0)
+            val rate = if (examined == 0) "—" else "${"%.2f".format(java.util.Locale.US, stagePassed[index] * 100.0 / examined)}%"
+            bodyRows.append("<td class='examined'>$examined</td><td class='not-examined'>$notExamined</td><td class='rate'>$rate</td>")
+        }
+        bodyRows.append("</tr>")
+        val logoHtml = schoolLogoData?.let { "<img class='school-logo' src='$it' alt='شعار المدرسة'/>" }
+            ?: "<div class='logo-placeholder'></div>"
+        val schoolNameHtml = if (schoolName.isBlank()) "" else escapeHtmlText(schoolName)
         val html = """
             <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/>
             <style>
-              @page { size: A4 portrait; margin: 7mm; }
+              @page { size: A4 landscape; margin: 8mm; }
               * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-              body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color:#0F172A; margin:0; direction:rtl; }
-              h1 { text-align:center; font-size:17px; margin:0 0 3px; }
-              .meta { text-align:center; font-size:10px; margin-bottom:7px; color:#334155; }
-              h2 { font-size:12px; margin:6px 0 3px; padding:3px 6px; background:#E2E8F0; border-right:3px solid #0F766E; }
-              table { width:100%; border-collapse:collapse; table-layout:fixed; margin-bottom:5px; }
-              th,td { border:1px solid #475569; padding:3px 4px; text-align:center; font-size:9px; line-height:1.05; }
-              th { background:#0F172A; color:#fff; font-weight:bold; }
-              td:first-child,th:first-child { text-align:right; width:30%; }
-              .rate { color:#15803D; font-weight:bold; }
-              .total { background:#F1F5F9; font-weight:bold; }
+              body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color:#102B50; margin:0; direction:rtl; }
+              .report-header { direction:ltr; display:grid; grid-template-columns:1fr 2fr 1fr; align-items:center; min-height:76px; border-bottom:3px solid #42A5D5; padding:0 5px 9px; margin-bottom:10px; }
+              .logo-side { display:flex; justify-content:flex-start; align-items:center; }
+              .school-logo { width:76px; height:68px; object-fit:contain; }
+              .logo-placeholder { width:76px; height:68px; }
+              .report-title { direction:rtl; text-align:center; font-size:25px; font-weight:900; color:#12345B; }
+              .school-name { direction:rtl; text-align:right; font-size:21px; font-weight:900; color:#12345B; }
+              .meta { direction:rtl; text-align:center; font-size:12px; font-weight:700; margin:0 0 12px; color:#334155; }
+              table { width:100%; border-collapse:collapse; table-layout:fixed; direction:rtl; }
+              th,td { border:1px solid #8AA9C8; padding:8px 5px; text-align:center; font-size:11px; line-height:1.2; }
+              thead th { background:#176EAA; color:#fff; font-weight:900; }
+              thead .stage { background:#155A91; font-size:13px; }
+              th:first-child,td:first-child { width:13%; }
+              td.section { text-align:right; font-weight:900; color:#12345B; background:#EAF3FB; }
+              td.examined { color:#1457A0; background:#E7F2FC; font-weight:900; }
+              td.not-examined { color:#B65A16; background:#FFF2E4; font-weight:900; }
+              td.rate { color:#16803B; background:#E8F7E9; font-weight:900; }
+              tr.total td { border-top:2px solid #31864B; font-weight:900; }
+              tr.total td.section { background:#E4F3E6; color:#176B35; }
               tr { page-break-inside:avoid; break-inside:avoid; }
+              .notes { direction:rtl; display:flex; justify-content:space-between; margin-top:12px; font-size:10px; color:#475569; }
             </style></head><body>
-            <h1>تقرير نسب النجاح</h1>
-            <div class="meta">الصف: ${escapeHtmlText(className)} &nbsp; | &nbsp; العام الدراسي: ${escapeHtmlText(academicYearName)} &nbsp; | &nbsp; النجاح من 50 فما فوق</div>
-            $sectionRows
-            <div class="meta">الدرجات غير المدخلة مستثناة من حساب نسب النجاح.</div>
+              <div class="report-header">
+                <div class="logo-side">$logoHtml</div>
+                <div class="report-title">تقرير نسب النجاح</div>
+                <div class="school-name">$schoolNameHtml</div>
+              </div>
+              <div class="meta">الصف: ${escapeHtmlText(className)} &nbsp; | &nbsp; العام الدراسي: ${escapeHtmlText(academicYearName)} &nbsp; | &nbsp; النجاح من 50 فما فوق</div>
+              <table>
+                <thead><tr><th rowspan="2">الشعبة</th>$headerGroups</tr><tr>$subHeaders</tr></thead>
+                <tbody>$bodyRows</tbody>
+              </table>
+              <div class="notes"><span>نسبة النجاح تحسب من درجات الممتحنين فقط.</span><span>الدرجات غير المدخلة تظهر ضمن غير الممتحنين.</span></div>
             </body></html>
         """.trimIndent()
         val webView = android.webkit.WebView(context)
@@ -5525,7 +5531,7 @@ private fun printClassSuccessRatesA4(
                 val jobName = "نسب_النجاح_$className"
                 val adapter = webView.createPrintDocumentAdapter(jobName)
                 val attributes = android.print.PrintAttributes.Builder()
-                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
+                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asLandscape())
                     .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
                     .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
                     .build()
