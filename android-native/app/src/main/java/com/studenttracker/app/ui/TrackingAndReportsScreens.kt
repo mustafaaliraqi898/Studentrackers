@@ -412,17 +412,16 @@ fun DailyTrackingScreen(
         dialog.show()
     }
 
-    val dailyWeights = remember(selectedClassId, refreshTick) {
-        val result = mutableListOf(10.0, 30.0, 10.0, 15.0, 15.0, 20.0)
-        dbHelper.readableDatabase.rawQuery(
-            "SELECT AttendanceMax, ParticipationMax, NotebookMax, HomeworkMax, BehaviorMax, DailyTestMax FROM EvaluationSettings WHERE ClassID = ?",
-            arrayOf(selectedClassId.toString())
-        ).use { cursor ->
-            if (cursor.moveToFirst()) {
-                for (i in 0 until 6) result[i] = cursor.getDouble(i)
-            }
-        }
-        result
+    val dailyWeights = remember(selectedClassId, selectedPeriodId, refreshTick) {
+        val weights = GradingService.getEvaluationWeights(dbHelper, selectedClassId, selectedPeriodId)
+        listOf(
+            weights.attendance,
+            weights.participation,
+            weights.notebook,
+            weights.homework,
+            weights.behavior,
+            weights.dailyTest
+        )
     }
     val attendanceMax = dailyWeights[0]
     val participationMax = dailyWeights[1]
