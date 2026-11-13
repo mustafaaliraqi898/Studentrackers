@@ -5075,6 +5075,19 @@ fun AveragesTableScreen(
         }
     }
 
+    val successRates = remember(reports) {
+        fun rate(values: List<Double?>): Pair<Int, Int>? {
+            val completed = values.filterNotNull()
+            if (completed.isEmpty()) return null
+            return completed.count { it >= 50.0 } to completed.size
+        }
+        listOf(
+            "نسبة نجاح النصف الأول" to rate(reports.map { it.firstHalfAverage }),
+            "نسبة نجاح نصف السنة" to rate(reports.map { it.midYearGrade }),
+            "نسبة نجاح النصف الثاني" to rate(reports.map { it.secondHalfAverage }),
+            "نسبة نجاح السعي السنوي" to rate(reports.map { it.annualEffort })
+        )
+    }
     val horizontalScrollState = rememberScrollState()
 
     Column(
@@ -5165,6 +5178,39 @@ fun AveragesTableScreen(
                     }
                 }
 
+                Button(
+                    enabled = currentClass != null && classSections.isNotEmpty(),
+                    onClick = {
+                        if (currentClass != null) {
+                            val sectionReports = classSections.associate { section ->
+                                section.id to GradingService.calculateComprehensiveStudentReports(
+                                    dbHelper = dbHelper,
+                                    repository = repository,
+                                    classId = selectedClassId,
+                                    sectionId = section.id,
+                                    baseDateFilter = "ALL"
+                                )
+                            }
+                            printClassSuccessRatesA4(
+                                context = context,
+                                className = currentClass.className,
+                                academicYearName = activeAcademicYear.yearName,
+                                sections = classSections,
+                                reportsBySection = sectionReports,
+                                onError = onShowMessage
+                            )
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Slate900),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 9.dp)
+                ) {
+                    Icon(Icons.Default.Print, contentDescription = "طباعة نسب النجاح", modifier = Modifier.size(17.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("طباعة نسب النجاح لكل الشعب", fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                }
+
                 // Class filter row
                 Text(
                     text = "الصف:",
@@ -5235,6 +5281,30 @@ fun AveragesTableScreen(
                         }
                     }
                 }
+            }
+        }
+
+        // Success percentages for the currently selected section (completed grades only).
+        Surface(
+            color = Color.White,
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, Slate200),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("نسب النجاح — شعبة ${currentSection?.sectionName ?: "—"}", fontWeight = FontWeight.ExtraBold, color = Slate900, fontSize = 14.sp)
+                successRates.forEach { (label, result) ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, fontSize = 12.sp, color = Slate700, fontWeight = FontWeight.Bold)
+                        Text(
+                            result?.let { (passed, total) -> "${"%.2f".format(java.util.Locale.US, passed * 100.0 / total)}% ($passed/$total)" } ?: "غير مكتمل",
+                            fontSize = 12.sp,
+                            color = if (result == null) Slate500 else Emerald700,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+                Text("الناجح: 50 فما فوق — الدرجات غير المدخلة مستثناة من الحساب", fontSize = 10.sp, color = Slate500)
             }
         }
 
@@ -5379,6 +5449,92 @@ fun AveragesTableScreen(
                 }
             }
         }
+    }
+}
+
+private fun printClassSuccessRatesA4(
+    context: android.content.Context,
+    className: String,
+    academicYearName: String,
+    sections: List<SectionEntity>,
+    reportsBySection: Map<Long, List<StudentComprehensiveGradeReport>>,
+    onError: (String) -> Unit
+) {
+    runCatching {
+        val stages = listOf(
+            "النصف الأول" to { r: StudentComprehensiveGradeReport -> r.firstHalfAverage },
+            "نصف السنة" to { r: StudentComprehensiveGradeReport -> r.midYearGrade },
+            "النصف الثاني" to { r: StudentComprehensiveGradeReport -> r.secondHalfAverage },
+            "السعي السنوي" to { r: StudentComprehensiveGradeReport -> r.annualEffort }
+        )
+        fun stats(reports: List<StudentComprehensiveGradeReport>, value: (StudentComprehensiveGradeReport) -> Double?): Triple<Int, Int, Int> {
+            val completed = reports.mapNotNull(value)
+            return Triple(completed.count { it >= 50.0 }, completed.count { it < 50.0 }, completed.size)
+        }
+        val sectionRows = StringBuilder()
+        stages.forEach { (stageName, selector) ->
+            val aggregate = sections.map { section ->
+                section to stats(reportsBySection[section.id].orEmpty(), selector)
+            }
+            val totalPassed = aggregate.sumOf { it.second.first }
+            val totalFailed = aggregate.sumOf { it.second.second }
+            val totalCompleted = totalPassed + totalFailed
+            sectionRows.append("<h2>نسبة نجاح $stageName</h2>")
+            sectionRows.append("<table><thead><tr><th>الشعبة</th><th>عدد الدرجات المكتملة</th><th>الناجحون</th><th>الراسبون</th><th>نسبة النجاح</th></tr></thead><tbody>")
+            aggregate.forEach { (section, result) ->
+                val (passed, failed, completed) = result
+                val rate = if (completed == 0) "—" else "${"%.2f".format(java.util.Locale.US, passed * 100.0 / completed)}%"
+                sectionRows.append("<tr><td>شعبة ${escapeHtmlText(section.sectionName)}</td><td>$completed</td><td>$passed</td><td>$failed</td><td class='rate'>$rate</td></tr>")
+            }
+            val overallRate = if (totalCompleted == 0) "—" else "${"%.2f".format(java.util.Locale.US, totalPassed * 100.0 / totalCompleted)}%"
+            sectionRows.append("<tr class='total'><td>المجموع الكلي للصف</td><td>$totalCompleted</td><td>$totalPassed</td><td>$totalFailed</td><td class='rate'>$overallRate</td></tr>")
+            sectionRows.append("</tbody></table>")
+        }
+        val html = """
+            <!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"/>
+            <style>
+              @page { size: A4 portrait; margin: 7mm; }
+              * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+              body { font-family: 'Segoe UI', Tahoma, Arial, sans-serif; color:#0F172A; margin:0; direction:rtl; }
+              h1 { text-align:center; font-size:17px; margin:0 0 3px; }
+              .meta { text-align:center; font-size:10px; margin-bottom:7px; color:#334155; }
+              h2 { font-size:12px; margin:6px 0 3px; padding:3px 6px; background:#E2E8F0; border-right:3px solid #0F766E; }
+              table { width:100%; border-collapse:collapse; table-layout:fixed; margin-bottom:5px; }
+              th,td { border:1px solid #475569; padding:3px 4px; text-align:center; font-size:9px; line-height:1.05; }
+              th { background:#0F172A; color:#fff; font-weight:bold; }
+              td:first-child,th:first-child { text-align:right; width:30%; }
+              .rate { color:#15803D; font-weight:bold; }
+              .total { background:#F1F5F9; font-weight:bold; }
+              tr { page-break-inside:avoid; break-inside:avoid; }
+            </style></head><body>
+            <h1>تقرير نسب النجاح</h1>
+            <div class="meta">الصف: ${escapeHtmlText(className)} &nbsp; | &nbsp; العام الدراسي: ${escapeHtmlText(academicYearName)} &nbsp; | &nbsp; النجاح من 50 فما فوق</div>
+            $sectionRows
+            <div class="meta">الدرجات غير المدخلة مستثناة من حساب نسب النجاح.</div>
+            </body></html>
+        """.trimIndent()
+        val webView = android.webkit.WebView(context)
+        webView.settings.javaScriptEnabled = false
+        webView.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                val manager = context.getSystemService(android.content.Context.PRINT_SERVICE) as? android.print.PrintManager
+                if (manager == null) {
+                    onError("خدمة الطباعة غير متوفرة على هذا الجهاز")
+                    return
+                }
+                val jobName = "نسب_النجاح_$className"
+                val adapter = webView.createPrintDocumentAdapter(jobName)
+                val attributes = android.print.PrintAttributes.Builder()
+                    .setMediaSize(android.print.PrintAttributes.MediaSize.ISO_A4.asPortrait())
+                    .setColorMode(android.print.PrintAttributes.COLOR_MODE_COLOR)
+                    .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
+                    .build()
+                manager.print(jobName, adapter, attributes)
+            }
+        }
+        webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+    }.onFailure { error ->
+        onError("تعذر إنشاء تقرير نسب النجاح: ${error.message ?: "خطأ غير معروف"}")
     }
 }
 
