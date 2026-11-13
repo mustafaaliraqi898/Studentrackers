@@ -5741,7 +5741,7 @@ private fun printAveragesReportA4Portrait(
                         margin: 5mm 6mm;
                     }
                     html, body { margin: 0; padding: 0; }
-                    body { zoom: ${when { studentCount > 45 -> "0.78"; studentCount > 35 -> "0.88"; studentCount > 28 -> "0.94"; else -> "1" }}; }
+                    body { zoom: ${if (studentCount > 50) (50.0 / studentCount.toDouble()).coerceAtLeast(0.40) else if (studentCount > 35) "0.88" else if (studentCount > 28) "0.94" else "1"}; }
                     * {
                         box-sizing: border-box;
                         -webkit-print-color-adjust: exact !important;
