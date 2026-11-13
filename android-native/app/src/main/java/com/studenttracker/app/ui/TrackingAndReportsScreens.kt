@@ -5629,8 +5629,18 @@ private fun printAveragesReportA4Portrait(
         val todayStr = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
         val displayDate = GradingService.formatDisplayDate(todayStr)
         val studentCount = reports.size
+        fun successCell(values: List<Double?>): String {
+            val completed = values.filterNotNull()
+            if (completed.isEmpty()) return "غير مكتمل"
+            val passed = completed.count { it >= 50.0 }
+            return "${"%.2f".format(java.util.Locale.US, passed * 100.0 / completed.size)}%"
+        }
+        val firstHalfSuccess = successCell(reports.map { it.firstHalfAverage })
+        val midYearSuccess = successCell(reports.map { it.midYearGrade })
+        val secondHalfSuccess = successCell(reports.map { it.secondHalfAverage })
+        val annualSuccess = successCell(reports.map { it.annualEffort })
 
-        // Adaptive portrait density so typical sections (up to ~50-55 students) fit cleanly on 1 A4 Portrait page
+        // Compact single-page A4 layout; row spacing scales down with class size.
         val pageMargin = when {
             studentCount > 45 -> "5mm 6mm"
             studentCount > 35 -> "6mm 7mm"
@@ -5728,8 +5738,10 @@ private fun printAveragesReportA4Portrait(
                 <style>
                     @page {
                         size: A4 portrait;
-                        margin: $pageMargin;
+                        margin: 5mm 6mm;
                     }
+                    html, body { margin: 0; padding: 0; }
+                    body { zoom: ${when { studentCount > 45 -> "0.78"; studentCount > 35 -> "0.88"; studentCount > 28 -> "0.94"; else -> "1" }}; }
                     * {
                         box-sizing: border-box;
                         -webkit-print-color-adjust: exact !important;
@@ -5801,8 +5813,15 @@ private fun printAveragesReportA4Portrait(
                         padding: $thPadding;
                     }
                     td {
-                        padding: $tdPadding;
+                        padding: ${when { studentCount > 35 -> "2px 4px"; studentCount > 25 -> "3px 5px"; else -> "4px 6px" }};
                     }
+                    tfoot td {
+                        background-color: #E2E8F0;
+                        color: #0F172A;
+                        font-weight: 800;
+                        border-top: 1.5px solid #0F172A;
+                    }
+                    table { page-break-inside: avoid; break-inside: avoid; }
                     th.name-header {
                         width: 38%;
                         text-align: right;
@@ -5863,6 +5882,15 @@ private fun printAveragesReportA4Portrait(
                     <tbody>
                         $rowsHtml
                     </tbody>
+                    <tfoot>
+                        <tr>
+                            <td class="student-name">نسبة النجاح (50 فما فوق)</td>
+                            <td class="score-cell">$firstHalfSuccess</td>
+                            <td class="score-cell">$midYearSuccess</td>
+                            <td class="score-cell">$secondHalfSuccess</td>
+                            <td class="score-cell">$annualSuccess</td>
+                        </tr>
+                    </tfoot>
                 </table>
             </body>
             </html>
