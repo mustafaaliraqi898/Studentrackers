@@ -2091,7 +2091,7 @@ fun StudentProfileScreen(
         )
     }
     val grade = allGrades.find { it.studentId == studentId }
-    val profileWeights = remember(grade?.classId, refreshTick, localTick) {
+    val profileWeights = remember(grade?.classId, selectedPeriodId, refreshTick, localTick) {
         grade?.let { GradingService.getEvaluationWeights(dbHelper, it.classId, selectedPeriodId) }
             ?: GradingService.EvaluationWeights()
     }
