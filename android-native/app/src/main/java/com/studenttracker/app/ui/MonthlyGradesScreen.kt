@@ -24,6 +24,11 @@ import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
 import com.studenttracker.app.service.GradingService
 
+private fun normalizeWholeGradeInput(raw: String): String? {
+    val normalized = normalizeGradeInput(raw) ?: return null
+    return normalized.takeIf { !it.contains('.') }
+}
+
 private fun normalizeGradeInput(raw: String): String? {
     val normalized = buildString(raw.length) {
         raw.forEach { char ->
@@ -91,7 +96,7 @@ fun MonthlyGradesScreen(
         ).associateBy { it.studentId }
     }
     val calculatedDailyGrades = remember(calculatedPeriodGrades) {
-        calculatedPeriodGrades.mapValues { it.value.totalScore }
+        calculatedPeriodGrades.mapValues { GradingService.roundHalfUpInt(it.value.totalScore).toDouble() }
     }
     val dailyTestMax = remember(refreshTick, selectedClassId) {
         GradingService.getEvaluationWeights(dbHelper, selectedClassId, selectedPeriodId).dailyTest
@@ -102,7 +107,7 @@ fun MonthlyGradesScreen(
     val gradeInputs = remember(refreshTick, selectedPeriodId, students, savedGrades) {
         mutableStateMapOf<Long, String>().apply {
             students.forEach { student ->
-                this[student.id] = savedGrades[student.id]?.writtenExamGrade?.let { GradingService.formatScore(it) } ?: ""
+                this[student.id] = savedGrades[student.id]?.writtenExamGrade?.let { GradingService.roundHalfUpInt(it).toString() } ?: ""
             }
         }
     }
@@ -114,7 +119,7 @@ fun MonthlyGradesScreen(
                 } else {
                     calculatedDailyGrades[student.id] ?: savedGrades[student.id]?.dailyGrade
                 }
-                this[student.id] = daily?.let { GradingService.formatScore(it) } ?: ""
+                this[student.id] = daily?.let { GradingService.roundHalfUpInt(it).toString() } ?: ""
             }
         }
     }
@@ -126,11 +131,11 @@ fun MonthlyGradesScreen(
             } else {
                 calculatedDailyGrades[student.id] ?: savedGrades[student.id]?.dailyGrade
             }
-            student.id to daily
+            student.id to daily?.let { GradingService.roundHalfUpInt(it).toDouble() }
         }
     }
     val committedWrittenGrades = remember(students, savedGrades) {
-        students.associate { student -> student.id to savedGrades[student.id]?.writtenExamGrade }
+        students.associate { student -> student.id to savedGrades[student.id]?.writtenExamGrade?.let { GradingService.roundHalfUpInt(it).toDouble() } }
     }
     val editingStudents = remember { mutableStateMapOf<Long, Boolean>() }
     val differenceThreshold = minimumGradeDifference.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 20.0
@@ -290,7 +295,7 @@ fun MonthlyGradesScreen(
                 } else {
                     val d = dailyValue.toDoubleOrNull()
                     val w = writtenValue.toDoubleOrNull()
-                    if (d != null && w != null) (d + w) / 2.0 else null
+                    if (d != null && w != null) GradingService.roundHalfUpInt((GradingService.roundHalfUpInt(d) + GradingService.roundHalfUpInt(w)) / 2.0).toDouble() else null
                 }
                 Surface(color = Color.White, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Slate200), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -308,7 +313,7 @@ fun MonthlyGradesScreen(
                                 OutlinedTextField(
                                     value = dailyValue,
                                     onValueChange = { raw ->
-                                        normalizeGradeInput(raw)?.let { dailyInputs[student.id] = it }
+                                        normalizeWholeGradeInput(raw)?.let { dailyInputs[student.id] = it }
                                     },
                                     enabled = isEditing,
                                     readOnly = !isEditing,
@@ -321,7 +326,7 @@ fun MonthlyGradesScreen(
                                     OutlinedTextField(
                                         value = writtenValue,
                                         onValueChange = { raw ->
-                                            normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
+                                            normalizeWholeGradeInput(raw)?.let { gradeInputs[student.id] = it }
                                         },
                                         enabled = isEditing,
                                         readOnly = !isEditing,
@@ -356,7 +361,7 @@ fun MonthlyGradesScreen(
                                         val calculated = calculatedDailyGrades[student.id] ?: 0.0
                                         val error = repository.setPeriodDailyGrade(student.id, selectedPeriod.id, calculated, manual = false)
                                         if (error == null) {
-                                            dailyInputs[student.id] = GradingService.formatScore(calculated)
+                                            dailyInputs[student.id] = GradingService.roundHalfUpInt(calculated).toString()
                                             onShowMessage("تمت استعادة درجة اليومي المحسوبة تلقائياً")
                                             onDataChanged()
                                         } else onShowMessage(error)
@@ -388,8 +393,8 @@ fun MonthlyGradesScreen(
                                 OutlinedButton(
                                     onClick = {
                                         // Start editing from the currently committed values.
-                                        dailyInputs[student.id] = committedDailyGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
-                                        gradeInputs[student.id] = committedWrittenGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
+                                        dailyInputs[student.id] = committedDailyGrades[student.id]?.let { GradingService.roundHalfUpInt(it).toString() }.orEmpty()
+                                        gradeInputs[student.id] = committedWrittenGrades[student.id]?.let { GradingService.roundHalfUpInt(it).toString() }.orEmpty()
                                         editingStudents[student.id] = true
                                     },
                                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
@@ -413,8 +418,8 @@ fun MonthlyGradesScreen(
                                 enabled = !saving,
                                 onClick = {
                                     val writtenRaw = gradeInputs[student.id].orEmpty().trim()
-                                    val written = if (writtenRaw.isEmpty()) null else writtenRaw.toDoubleOrNull()
-                                    val daily = if (isMidYear) 0.0 else dailyInputs[student.id].orEmpty().trim().toDoubleOrNull()
+                                    val written = if (writtenRaw.isEmpty()) null else writtenRaw.toDoubleOrNull()?.let { GradingService.roundHalfUpInt(it).toDouble() }
+                                    val daily = if (isMidYear) 0.0 else dailyInputs[student.id].orEmpty().trim().toDoubleOrNull()?.let { GradingService.roundHalfUpInt(it).toDouble() }
                                     val invalidWritten = writtenRaw.isNotEmpty() && (written == null || written !in 0.0..100.0)
                                     val invalidDaily = !isMidYear && (daily == null || daily !in 0.0..100.0)
                                     if (invalidDaily) {
