@@ -1,6 +1,12 @@
 package com.studenttracker.app.ui
 
 import android.content.ContentValues
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import android.database.sqlite.SQLiteDatabase
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +32,20 @@ fun EvaluationSettingsScreen(
     repository: TrackerRepository,
     onShowMessage: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val schoolPrefs = remember { context.getSharedPreferences("school_profile", android.content.Context.MODE_PRIVATE) }
+    var schoolName by remember { mutableStateOf(schoolPrefs.getString("school_name", "").orEmpty()) }
+    var schoolLogoUri by remember { mutableStateOf(schoolPrefs.getString("school_logo_uri", null)) }
+    val logoPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                schoolLogoUri = uri.toString()
+                schoolPrefs.edit().putString("school_logo_uri", schoolLogoUri).apply()
+                onShowMessage("تم حفظ شعار المدرسة")
+            }.onFailure { onShowMessage("تعذر حفظ الشعار: ${it.message ?: "خطأ"}") }
+        }
+    }
     val periods = remember(repository) { repository.getStudyPeriods() }
     var selectedClassId by remember(classes) { mutableLongStateOf(classes.firstOrNull()?.id ?: 0L) }
     var selectedPeriodId by remember(periods) {
@@ -90,6 +110,48 @@ fun EvaluationSettingsScreen(
         numbers.all { it != null && it >= 0.0 } && kotlin.math.abs(sum - 100.0) < 0.0001
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("بيانات المدرسة", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = schoolName,
+                    onValueChange = { schoolName = it },
+                    label = { Text("اسم المدرسة") },
+                    placeholder = { Text("اكتب اسم المدرسة") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    if (schoolLogoUri.isNullOrBlank()) "لم يتم اختيار شعار للمدرسة" else "تم اختيار شعار المدرسة",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { logoPicker.launch(arrayOf("image/*")) }) {
+                        Text(if (schoolLogoUri.isNullOrBlank()) "اختيار الشعار" else "تغيير الشعار")
+                    }
+                    if (!schoolLogoUri.isNullOrBlank()) {
+                        TextButton(onClick = {
+                            schoolLogoUri = null
+                            schoolPrefs.edit().remove("school_logo_uri").apply()
+                            onShowMessage("تم حذف شعار المدرسة")
+                        }) { Text("حذف الشعار") }
+                    }
+                }
+                Button(
+                    onClick = {
+                        if (schoolName.isBlank()) {
+                            onShowMessage("يرجى إدخال اسم المدرسة أولاً")
+                        } else {
+                            schoolPrefs.edit().putString("school_name", schoolName.trim()).apply()
+                            onShowMessage("تم حفظ بيانات المدرسة")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("حفظ بيانات المدرسة") }
+                Text("سيظهر اسم المدرسة وشعارها في تقرير المعدل المطبوع.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
         Text("إعدادات التقييم", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("حدد الصف والفترة الدراسية، ثم اكتب الدرجة القصوى لكل عنصر. التوزيع يطبق على جميع شعب الصف ضمن الفترة المحددة.")
         if (classes.isEmpty()) {
