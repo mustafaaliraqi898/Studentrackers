@@ -12,7 +12,7 @@ class AppDatabaseHelper(private val context: Context) :
 
     companion object {
         const val DATABASE_NAME = "student_tracker_native.db"
-        const val DATABASE_VERSION = 15
+        const val DATABASE_VERSION = 16
 
         @Volatile
         private var instance: AppDatabaseHelper? = null
@@ -45,6 +45,7 @@ class AppDatabaseHelper(private val context: Context) :
     override fun onCreate(db: SQLiteDatabase) {
         createAllTables(db)
         createEvaluationSettingsTable(db)
+        createEvaluationPeriodSettingsTable(db)
         seedInitialDemoData(db)
     }
 
@@ -102,6 +103,9 @@ class AppDatabaseHelper(private val context: Context) :
         }
         if (oldVersion < 15) {
             migratePeriodDailyGradeManual(db)
+        }
+        if (oldVersion < 16) {
+            createEvaluationPeriodSettingsTable(db)
         }
     }
 
@@ -173,6 +177,26 @@ class AppDatabaseHelper(private val context: Context) :
                 DailyTestMax REAL NOT NULL DEFAULT 20,
                 UpdatedAt TEXT NOT NULL,
                 FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE
+            );
+        """.trimIndent())
+    }
+
+    /** Stores per-class, per-study-period evaluation weights without changing legacy class defaults. */
+    private fun createEvaluationPeriodSettingsTable(db: SQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS EvaluationPeriodSettings (
+                ClassID INTEGER NOT NULL,
+                PeriodID INTEGER NOT NULL,
+                AttendanceMax REAL NOT NULL,
+                ParticipationMax REAL NOT NULL,
+                NotebookMax REAL NOT NULL,
+                HomeworkMax REAL NOT NULL,
+                BehaviorMax REAL NOT NULL,
+                DailyTestMax REAL NOT NULL,
+                UpdatedAt TEXT NOT NULL,
+                PRIMARY KEY (ClassID, PeriodID),
+                FOREIGN KEY (ClassID) REFERENCES Classes(ID) ON DELETE CASCADE,
+                FOREIGN KEY (PeriodID) REFERENCES StudyPeriods(ID) ON DELETE CASCADE
             );
         """.trimIndent())
     }
