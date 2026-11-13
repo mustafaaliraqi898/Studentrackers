@@ -118,13 +118,28 @@ fun MonthlyGradesScreen(
             }
         }
     }
+    // Filtering always uses persisted/calculated values, never temporary text being edited.
+    val committedDailyGrades = remember(students, savedGrades, calculatedDailyGrades, manualDailyStudents) {
+        students.associate { student ->
+            val daily = if (manualDailyStudents.contains(student.id)) {
+                savedGrades[student.id]?.dailyGrade
+            } else {
+                calculatedDailyGrades[student.id] ?: savedGrades[student.id]?.dailyGrade
+            }
+            student.id to daily
+        }
+    }
+    val committedWrittenGrades = remember(students, savedGrades) {
+        students.associate { student -> student.id to savedGrades[student.id]?.writtenExamGrade }
+    }
+    val editingStudents = remember { mutableStateMapOf<Long, Boolean>() }
     val differenceThreshold = minimumGradeDifference.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 20.0
     val gradeFilteredStudents = filteredStudents.filter { student ->
         if (gradeFilterMode == "ALL") {
             true
         } else {
-            val daily = dailyInputs[student.id]?.toDoubleOrNull()
-            val written = gradeInputs[student.id]?.toDoubleOrNull()
+            val daily = committedDailyGrades[student.id]
+            val written = committedWrittenGrades[student.id]
             if (daily == null || written == null) {
                 false
             } else {
@@ -266,6 +281,7 @@ fun MonthlyGradesScreen(
             items(gradeFilteredStudents, key = { it.id }) { student ->
                 val savedGrade = savedGrades[student.id]
                 var saving by remember(student.id, selectedPeriodId) { mutableStateOf(false) }
+                val isEditing = editingStudents[student.id] == true
                 val isMidYear = selectedPeriod.stageType == AcademicStage.MID_YEAR
                 val writtenValue = gradeInputs[student.id].orEmpty()
                 val dailyValue = dailyInputs[student.id].orEmpty()
@@ -280,7 +296,9 @@ fun MonthlyGradesScreen(
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(student.studentName, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, color = Slate900, fontSize = 14.sp)
-                            if (savedGrade?.writtenExamGrade != null) {
+                            if (isEditing) {
+                                Text("قيد التعديل", color = Teal700, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else if (savedGrade?.writtenExamGrade != null) {
                                 AssistChip(onClick = {}, label = { Text("محفوظة", fontSize = 10.sp) },
                                     leadingIcon = { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) })
                             }
@@ -292,8 +310,8 @@ fun MonthlyGradesScreen(
                                     onValueChange = { raw ->
                                         normalizeGradeInput(raw)?.let { dailyInputs[student.id] = it }
                                     },
-                                    enabled = true,
-                                    readOnly = false,
+                                    enabled = isEditing,
+                                    readOnly = !isEditing,
                                     modifier = Modifier.weight(1f),
                                     label = { Text("درجة اليومي") },
                                     singleLine = true,
@@ -305,6 +323,8 @@ fun MonthlyGradesScreen(
                                         onValueChange = { raw ->
                                             normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
                                         },
+                                        enabled = isEditing,
+                                        readOnly = !isEditing,
                                         modifier = Modifier.fillMaxWidth(),
                                         label = { Text("الامتحان التحريري") },
                                         singleLine = true,
@@ -331,7 +351,7 @@ fun MonthlyGradesScreen(
                                     fontSize = 11.sp
                                 )
                                 TextButton(
-                                    enabled = !saving && manualDailyStudents.contains(student.id),
+                                    enabled = isEditing && !saving && manualDailyStudents.contains(student.id),
                                     onClick = {
                                         val calculated = calculatedDailyGrades[student.id] ?: 0.0
                                         val error = repository.setPeriodDailyGrade(student.id, selectedPeriod.id, calculated, manual = false)
@@ -349,6 +369,8 @@ fun MonthlyGradesScreen(
                                 onValueChange = { raw ->
                                     normalizeGradeInput(raw)?.let { gradeInputs[student.id] = it }
                                 },
+                                enabled = isEditing,
+                                readOnly = !isEditing,
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("درجة امتحان نصف السنة من 100") },
                                 singleLine = true,
@@ -362,7 +384,32 @@ fun MonthlyGradesScreen(
                                 color = Slate700,
                                 fontWeight = FontWeight.Bold
                             )
-                            Button(
+                            if (!isEditing) {
+                                OutlinedButton(
+                                    onClick = {
+                                        // Start editing from the currently committed values.
+                                        dailyInputs[student.id] = committedDailyGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
+                                        gradeInputs[student.id] = committedWrittenGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
+                                        editingStudents[student.id] = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("تعديل")
+                                }
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(
+                                        enabled = !saving,
+                                        onClick = {
+                                            dailyInputs[student.id] = committedDailyGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
+                                            gradeInputs[student.id] = committedWrittenGrades[student.id]?.let { GradingService.formatScore(it) }.orEmpty()
+                                            editingStudents.remove(student.id)
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                                    ) { Text("إلغاء") }
+                                    Button(
                                 enabled = !saving,
                                 onClick = {
                                     val writtenRaw = gradeInputs[student.id].orEmpty().trim()
@@ -390,16 +437,19 @@ fun MonthlyGradesScreen(
                                         )
                                         saving = false
                                         if (error == null) {
+                                            editingStudents.remove(student.id)
                                             onShowMessage("تم حفظ درجات ${student.studentName}")
                                             onDataChanged()
                                         } else onShowMessage(error)
                                     }
                                 },
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(5.dp))
-                                Text("حفظ")
+                                    ) {
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(5.dp))
+                                        Text("حفظ")
+                                    }
+                                }
                             }
                         }
                     }
