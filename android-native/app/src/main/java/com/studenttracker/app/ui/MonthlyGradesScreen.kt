@@ -72,6 +72,8 @@ fun MonthlyGradesScreen(
         repository.getStudents(selectedClassId, selectedSectionId, includeInactive = false)
     }
     var searchQuery by remember(selectedClassId, selectedSectionId) { mutableStateOf("") }
+    var gradeFilterMode by remember(selectedClassId, selectedSectionId) { mutableStateOf("ALL") }
+    var minimumGradeDifference by remember(selectedClassId, selectedSectionId) { mutableStateOf("20") }
     val filteredStudents = remember(students, searchQuery) {
         val query = searchQuery.trim()
         if (query.isEmpty()) students
@@ -176,6 +178,74 @@ fun MonthlyGradesScreen(
                 shape = RoundedCornerShape(12.dp)
             )
         }
+        item {
+            Surface(
+                color = Color.White,
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, Slate200),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("فلترة حسب فرق الدرجات", fontWeight = FontWeight.Bold, color = Slate700, fontSize = 13.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = gradeFilterMode == "ALL",
+                            onClick = { gradeFilterMode = "ALL" },
+                            label = { Text("الكل") }
+                        )
+                        FilterChip(
+                            selected = gradeFilterMode == "DAILY_HIGHER",
+                            onClick = { gradeFilterMode = "DAILY_HIGHER" },
+                            label = { Text("اليومي أعلى") }
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = gradeFilterMode == "CLOSE",
+                            onClick = { gradeFilterMode = "CLOSE" },
+                            label = { Text("متقاربة") }
+                        )
+                        FilterChip(
+                            selected = gradeFilterMode == "WRITTEN_HIGHER",
+                            onClick = { gradeFilterMode = "WRITTEN_HIGHER" },
+                            label = { Text("التحريري أعلى") }
+                        )
+                    }
+                    OutlinedTextField(
+                        value = minimumGradeDifference,
+                        onValueChange = { raw ->
+                            val normalized = normalizeGradeInput(raw)
+                            if (normalized != null && normalized.length <= 6) minimumGradeDifference = normalized
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("الحد الأدنى للفرق بالدرجات") },
+                        supportingText = { Text("القيمة الافتراضية 20 درجة، ويمكنك تغييرها متى تشاء") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
+                }
+            }
+        }
+        val differenceThreshold = minimumGradeDifference.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: 20.0
+        val gradeFilteredStudents = filteredStudents.filter { student ->
+            if (gradeFilterMode == "ALL") {
+                true
+            } else {
+                val daily = dailyInputs[student.id]?.toDoubleOrNull()
+                val written = gradeInputs[student.id]?.toDoubleOrNull()
+                if (daily == null || written == null) {
+                    false
+                } else {
+                    val difference = daily - written
+                    when (gradeFilterMode) {
+                        "DAILY_HIGHER" -> difference >= differenceThreshold
+                        "WRITTEN_HIGHER" -> -difference >= differenceThreshold
+                        "CLOSE" -> kotlin.math.abs(difference) < differenceThreshold
+                        else -> true
+                    }
+                }
+            }
+        }
         if (selectedPeriod == null) {
             item {
                 Surface(color = Amber50, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -184,10 +254,16 @@ fun MonthlyGradesScreen(
             }
         } else if (students.isEmpty()) {
             item { Text("لا يوجد طلبة في الصف والشعبة المحددين", color = Slate600, modifier = Modifier.padding(12.dp)) }
-        } else if (filteredStudents.isEmpty()) {
-            item { Text("ماكو طالب بهذا الاسم", color = Slate600, modifier = Modifier.padding(12.dp)) }
+         } else if (gradeFilteredStudents.isEmpty()) {
+            item {
+                Text(
+                    if (filteredStudents.isEmpty()) "ماكو طالب بهذا الاسم" else "ماكو طالب يطابق شروط الفلترة",
+                    color = Slate600,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
         } else {
-            items(filteredStudents, key = { it.id }) { student ->
+            items(gradeFilteredStudents, key = { it.id }) { student ->
                 val savedGrade = savedGrades[student.id]
                 var saving by remember(student.id, selectedPeriodId) { mutableStateOf(false) }
                 val isMidYear = selectedPeriod.stageType == AcademicStage.MID_YEAR
