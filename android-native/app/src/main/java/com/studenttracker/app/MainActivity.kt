@@ -537,6 +537,7 @@ fun StudentTrackerMainApp(
                 AppScreen.EVALUATION_SETTINGS -> EvaluationSettingsScreen(
                     classes = classes,
                     dbHelper = dbHelper,
+                    repository = repository,
                     onShowMessage = ::showToastMessage
                 )
 
