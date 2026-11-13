@@ -5628,6 +5628,21 @@ private fun printAveragesReportA4Portrait(
     runCatching {
         val todayStr = java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()
         val displayDate = GradingService.formatDisplayDate(todayStr)
+        val schoolPrefs = context.getSharedPreferences("school_profile", android.content.Context.MODE_PRIVATE)
+        val schoolName = schoolPrefs.getString("school_name", "").orEmpty().trim()
+        val schoolLogoData = schoolPrefs.getString("school_logo_uri", null)?.let { rawUri ->
+            runCatching {
+                val uri = android.net.Uri.parse(rawUri)
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw IllegalStateException("تعذر قراءة شعار المدرسة")
+                val mime = context.contentResolver.getType(uri) ?: "image/png"
+                "data:$mime;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            }.getOrNull()
+        }
+        val schoolHeaderHtml = buildString {
+            if (schoolLogoData != null) append("<img class='school-logo' src='$schoolLogoData' alt='شعار المدرسة'/>")
+            if (schoolName.isNotBlank()) append("<div class='school-name'>${escapeHtmlText(schoolName)}</div>")
+        }
         val studentCount = reports.size
         fun successCell(values: List<Double?>): String {
             val completed = values.filterNotNull()
