@@ -94,7 +94,7 @@ fun MonthlyGradesScreen(
         calculatedPeriodGrades.mapValues { it.value.totalScore }
     }
     val dailyTestMax = remember(refreshTick, selectedClassId) {
-        GradingService.getEvaluationWeights(dbHelper, selectedClassId).dailyTest
+        GradingService.getEvaluationWeights(dbHelper, selectedClassId, selectedPeriodId).dailyTest
     }
     val manualDailyStudents = remember(refreshTick, selectedPeriodId) {
         selectedPeriodId?.let { repository.getManualPeriodDailyGradeStudentIds(it) } ?: emptySet()
