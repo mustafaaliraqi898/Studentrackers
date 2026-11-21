@@ -318,8 +318,8 @@ fun MonthlyGradesScreen(
                     onClick = {
                         val period = selectedPeriod
                         if (period != null) {
-                            if (students.size > 70) {
-                                onShowMessage("عدد الطلبة ${students.size} يتجاوز الحد المستهدف لصفحة A4 واحدة (70 طالباً). لم يتم استبعاد أي طالب؛ يمكنك الطباعة على دفعات.")
+                            if (students.size > 78) {
+                                onShowMessage("عدد الطلبة ${students.size} يتجاوز الحد المستهدف لصفحة A4 واحدة (78 طالباً). لم يتم استبعاد أي طالب؛ يمكنك الطباعة على دفعات.")
                             } else {
                                 val printRows = students.map { student ->
                                     val daily = committedDailyGrades[student.id]
