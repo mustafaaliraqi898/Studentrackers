@@ -1,5 +1,10 @@
 package com.studenttracker.app.ui
 
+import android.content.Context
+import android.print.PrintAttributes
+import android.print.PrintManager
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,12 +22,114 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.studenttracker.app.data.AppDatabaseHelper
 import com.studenttracker.app.data.TrackerRepository
 import com.studenttracker.app.model.*
 import com.studenttracker.app.service.GradingService
+
+
+private fun htmlEscape(value: String): String = value
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
+    .replace("'", "&#39;")
+
+private fun openMonthlyGradesPrintPreview(
+    context: Context,
+    className: String,
+    sectionName: String,
+    periodName: String,
+    stageName: String,
+    rows: List<Pair<String, String>>
+) {
+    val rowCount = rows.size
+    val fontSize = when {
+        rowCount <= 30 -> "10pt"
+        rowCount <= 38 -> "9pt"
+        rowCount <= 44 -> "8pt"
+        else -> "7pt"
+    }
+    val cellPadding = when {
+        rowCount <= 30 -> "2.2mm 2mm"
+        rowCount <= 38 -> "1.7mm 2mm"
+        rowCount <= 44 -> "1.25mm 1.5mm"
+        else -> "0.9mm 1.2mm"
+    }
+    val tableRows = rows.mapIndexed { index, row ->
+        """
+        <tr>
+          <td class="number">${index + 1}</td>
+          <td class="student">${htmlEscape(row.first)}</td>
+          <td class="grade">${htmlEscape(row.second)}</td>
+        </tr>
+        """.trimIndent()
+    }.joinToString("\n")
+
+    val html = """
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            @page { size: A4 portrait; margin: 8mm; }
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; direction: rtl; color: #111827; font-family: sans-serif; }
+            body { width: 100%; }
+            .heading { text-align: center; margin: 0 0 5mm; }
+            h1 { font-size: 16pt; margin: 0 0 2mm; }
+            .meta { font-size: 9pt; line-height: 1.6; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: $fontSize; }
+            thead { display: table-header-group; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            th, td { border: 1px solid #374151; padding: $cellPadding; text-align: center; vertical-align: middle; }
+            th { background: #e5e7eb; font-weight: bold; }
+            .number { width: 10%; }
+            .student { width: 60%; text-align: right; }
+            .grade { width: 30%; }
+            .footer { margin-top: 4mm; font-size: 8pt; text-align: left; }
+          </style>
+        </head>
+        <body>
+          <div class="heading">
+            <h1>كشف الدرجات الشهرية</h1>
+            <div class="meta">
+              الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
+              الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
+            </div>
+          </div>
+          <table>
+            <thead>
+              <tr><th class="number">ت</th><th class="student">اسم الطالب</th><th class="grade">معدل الشهر</th></tr>
+            </thead>
+            <tbody>$tableRows</tbody>
+          </table>
+          <div class="footer">عدد الطلبة: $rowCount</div>
+        </body>
+        </html>
+    """.trimIndent()
+
+    val jobName = "الدرجات الشهرية - $className - $sectionName"
+    val webView = WebView(context)
+    webView.settings.javaScriptEnabled = false
+    webView.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView, url: String?) {
+            val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
+            val adapter = view.createPrintDocumentAdapter(jobName)
+            val attributes = PrintAttributes.Builder()
+                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                .setResolution(PrintAttributes.Resolution("monthly_grades", "Monthly Grades", 300, 300))
+                .setMinMargins(PrintAttributes.Margins(50000, 50000, 50000, 50000))
+                .build()
+            printManager.print(jobName, adapter, attributes)
+        }
+    }
+    webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+}
 
 private fun normalizeWholeGradeInput(raw: String): String? {
     val normalized = normalizeGradeInput(raw) ?: return null
@@ -63,7 +170,7 @@ fun MonthlyGradesScreen(
     onDataChanged: () -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    val periods = remember(refreshTick) {
+    val context = LocalContext.current\n    val periods = remember(refreshTick) {
         repository.getStudyPeriods().sortedWith(
             compareBy<StudyPeriodEntity> { it.academicYearId }
                 .thenBy { it.stageType.stageOrder }
@@ -198,8 +305,46 @@ fun MonthlyGradesScreen(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("قائمة الطلبة", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Slate900)
-                Text("${gradeFilteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
+                Column {
+                    Text("قائمة الطلبة", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Slate900)
+                    Text("${gradeFilteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
+                }
+                OutlinedButton(
+                    enabled = selectedPeriod != null && students.isNotEmpty(),
+                    onClick = {
+                        val period = selectedPeriod
+                        if (period != null) {
+                            if (students.size > 48) {
+                                onShowMessage("عدد الطلبة ${students.size} أكبر من الحد الآمن لصفحة A4 واحدة (48 طالباً). لم يتم استبعاد أي طالب؛ قلّل العدد أو اطبع على دفعات.")
+                            } else {
+                                val printRows = students.map { student ->
+                                    val daily = committedDailyGrades[student.id]
+                                    val written = committedWrittenGrades[student.id]
+                                    val average = if (period.stageType == AcademicStage.MID_YEAR) {
+                                        written
+                                    } else if (daily != null && written != null) {
+                                        GradingService.roundHalfUpInt((daily + written) / 2.0).toDouble()
+                                    } else {
+                                        null
+                                    }
+                                    student.studentName to (average?.let { GradingService.roundHalfUpInt(it).toString() } ?: "")
+                                }
+                                val className = classes.firstOrNull { it.id == selectedClassId }?.className ?: ""
+                                val sectionName = sections.firstOrNull { it.id == selectedSectionId }?.sectionName ?: ""
+                                openMonthlyGradesPrintPreview(
+                                    context = context,
+                                    className = className,
+                                    sectionName = sectionName,
+                                    periodName = period.periodName,
+                                    stageName = period.stageType.arabicLabel,
+                                    rows = printRows
+                                )
+                            }
+                        }
+                    }
+                ) {
+                    Text("طباعة")
+                }
             }
         }
         item {
