@@ -47,30 +47,25 @@ private fun openMonthlyGradesPrintPreview(
     rows: List<Pair<String, String>>
 ) {
     val rowCount = rows.size
-    val rightRows = rows.take((rowCount + 1) / 2)
-    val leftRows = rows.drop((rowCount + 1) / 2)
-
-    fun renderTableRows(items: List<Pair<String, String>>, startIndex: Int): String =
-        items.mapIndexed { index, row ->
-            """
-            <tr>
-              <td class="number">${startIndex + index + 1}</td>
-              <td class="student">${htmlEscape(row.first)}</td>
-              <td class="grade">${htmlEscape(row.second)}</td>
-            </tr>
-            """.trimIndent()
-        }.joinToString("\n")
-
-    fun renderTable(items: List<Pair<String, String>>, startIndex: Int): String =
+    val sourceRows = rows.mapIndexed { index, row ->
         """
-        <table>
-          <colgroup><col class="number"><col class="student"><col class="grade"></colgroup>
-          <thead>
-            <tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr>
-          </thead>
-          <tbody>${renderTableRows(items, startIndex)}</tbody>
-        </table>
+        <tr class="source-row">
+          <td class="number">\${index + 1}</td>
+          <td class="student">\${htmlEscape(row.first)}</td>
+          <td class="grade">\${htmlEscape(row.second)}</td>
+        </tr>
         """.trimIndent()
+    }.joinToString("\n")
+
+    val headingHtml = """
+        <div class="heading">
+          <h1>كشف الدرجات الشهرية</h1>
+          <div class="meta">
+            الصف: \${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: \${htmlEscape(sectionName)}<br>
+            الفترة: \${htmlEscape(periodName)} — \${htmlEscape(stageName)}
+          </div>
+        </div>
+    """.trimIndent()
 
     val html = """
         <!DOCTYPE html>
@@ -83,42 +78,93 @@ private fun openMonthlyGradesPrintPreview(
             * { box-sizing: border-box; }
             html, body { margin: 0; padding: 0; direction: rtl; color: #111827; font-family: sans-serif; }
             body { width: 100%; }
-            .heading { text-align: center; margin: 0 0 2mm; }
-            h1 { font-size: 12pt; margin: 0 0 1mm; }
-            .meta { font-size: 7pt; line-height: 1.25; }
+            .sheet { width: 100%; min-height: 287mm; padding: 0; page-break-after: always; break-after: page; }
+            .sheet:last-child { page-break-after: auto; break-after: auto; }
+            .heading { text-align: center; margin: 0 0 3mm; }
+            h1 { font-size: 14pt; margin: 0 0 1.5mm; }
+            .meta { font-size: 9pt; line-height: 1.4; }
             .columns { display: flex; flex-direction: row; direction: rtl; align-items: flex-start; gap: 8mm; width: 100%; }
-            .column { width: calc(50% - 3.5mm); min-width: 0; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 6.5pt; }
+            .column { width: calc(50% - 4mm); min-width: 0; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 14px; }
             tr { page-break-inside: avoid; break-inside: avoid; }
-            th, td { border: 1px solid #374151; padding: 0.45mm 0.55mm; text-align: center; vertical-align: middle; line-height: 1.1; }
-            th { background: #e5e7eb; font-weight: bold; white-space: nowrap; }
+            th, td { border: 1px solid #374151; padding: 2mm 0.8mm; text-align: center; vertical-align: middle; line-height: 1.25; }
+            th { background: #e5e7eb; font-weight: bold; white-space: nowrap; font-size: 13px; }
             .number { width: 11%; }
             .student { width: 67%; text-align: right; }
             .grade { width: 22%; }
             td.student { overflow-wrap: anywhere; }
-            .footer { margin-top: 2mm; font-size: 6.5pt; text-align: left; }
+            .footer { margin-top: 3mm; font-size: 9pt; text-align: left; }
+            #source { display: none; }
           </style>
         </head>
         <body>
-          <div class="heading">
-            <h1>كشف الدرجات الشهرية</h1>
-            <div class="meta">
-              الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
-              الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
-            </div>
+          <div id="source"><table><tbody>$sourceRows</tbody></table></div>
+          <div id="pages">
+            <section class="sheet">
+              $headingHtml
+              <div class="columns">
+                <div class="column"><table><colgroup><col class="number"><col class="student"><col class="grade"></colgroup><thead><tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr></thead><tbody class="right-body"></tbody></table></div>
+                <div class="column"><table><colgroup><col class="number"><col class="student"><col class="grade"></colgroup><thead><tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr></thead><tbody class="left-body"></tbody></table></div>
+              </div>
+              <div class="footer">عدد الطلبة: $rowCount</div>
+            </section>
           </div>
-          <div class="columns">
-            <div class="column">${renderTable(rightRows, 0)}</div>
-            <div class="column">${renderTable(leftRows, rightRows.size)}</div>
-          </div>
-          <div class="footer">عدد الطلبة: ${rowCount}</div>
+          <script>
+            (function () {
+              const pages = document.getElementById('pages');
+              const sourceRows = Array.from(document.querySelectorAll('#source tr'));
+              const firstPage = pages.querySelector('.sheet');
+              const headingHeight = firstPage.querySelector('.heading').getBoundingClientRect().height;
+              const footerHeight = firstPage.querySelector('.footer').getBoundingClientRect().height;
+              const pageHeight = 287 * 96 / 25.4;
+              const availableHeight = pageHeight - headingHeight - footerHeight - 28;
+              let currentPage = firstPage;
+              let currentColumn = 0;
+
+              function getBody(page, column) {
+                return page.querySelector(column === 0 ? '.right-body' : '.left-body');
+              }
+
+              function createPage() {
+                const page = firstPage.cloneNode(true);
+                page.querySelector('.right-body').innerHTML = '';
+                page.querySelector('.left-body').innerHTML = '';
+                pages.appendChild(page);
+                currentPage = page;
+                currentColumn = 0;
+              }
+
+              function tableHeight(body) {
+                return body.closest('table').getBoundingClientRect().height;
+              }
+
+              sourceRows.forEach(function (row) {
+                let placed = false;
+                while (!placed) {
+                  const target = getBody(currentPage, currentColumn);
+                  target.appendChild(row.cloneNode(true));
+                  if (tableHeight(target) <= availableHeight) {
+                    placed = true;
+                  } else {
+                    target.removeChild(target.lastElementChild);
+                    if (currentColumn === 0) {
+                      currentColumn = 1;
+                    } else {
+                      createPage();
+                    }
+                  }
+                }
+              });
+              document.getElementById('source').remove();
+            })();
+          </script>
         </body>
         </html>
     """.trimIndent()
 
     val jobName = "الدرجات الشهرية - $className - $sectionName"
     val webView = WebView(context)
-    webView.settings.javaScriptEnabled = false
+    webView.settings.javaScriptEnabled = true
     webView.webViewClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView, url: String?) {
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
@@ -318,9 +364,7 @@ fun MonthlyGradesScreen(
                     onClick = {
                         val period = selectedPeriod
                         if (period != null) {
-                            if (students.size > 78) {
-                                onShowMessage("عدد الطلبة ${students.size} يتجاوز الحد المستهدف لصفحة A4 واحدة (78 طالباً). لم يتم استبعاد أي طالب؛ يمكنك الطباعة على دفعات.")
-                            } else {
+                            run {
                                 val printRows = students.map { student ->
                                     val daily = committedDailyGrades[student.id]
                                     val written = committedWrittenGrades[student.id]
