@@ -170,7 +170,8 @@ fun MonthlyGradesScreen(
     onDataChanged: () -> Unit,
     onShowMessage: (String) -> Unit
 ) {
-    val context = LocalContext.current\n    val periods = remember(refreshTick) {
+    val context = LocalContext.current
+    val periods = remember(refreshTick) {
         repository.getStudyPeriods().sortedWith(
             compareBy<StudyPeriodEntity> { it.academicYearId }
                 .thenBy { it.stageType.stageOrder }
