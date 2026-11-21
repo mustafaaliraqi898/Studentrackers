@@ -55,9 +55,9 @@ private fun openMonthlyGradesPrintPreview(
     }
     val cellPadding = when {
         rowCount <= 30 -> "2.2mm 2mm"
-        rowCount <= 38 -> "1.7mm 2mm"
-        rowCount <= 44 -> "1.25mm 1.5mm"
-        else -> "0.9mm 1.2mm"
+        rowCount <= 38 -> "1.3mm 1.5mm"
+        rowCount <= 44 -> "1mm 1.2mm"
+        else -> "0.7mm 1mm"
     }
     val tableRows = rows.mapIndexed { index, row ->
         """
@@ -123,7 +123,7 @@ private fun openMonthlyGradesPrintPreview(
             val attributes = PrintAttributes.Builder()
                 .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
                 .setResolution(PrintAttributes.Resolution("monthly_grades", "Monthly Grades", 300, 300))
-                .setMinMargins(PrintAttributes.Margins(50000, 50000, 50000, 50000))
+                .setMinMargins(PrintAttributes.Margins(20, 20, 20, 20))
                 .build()
             printManager.print(jobName, adapter, attributes)
         }
