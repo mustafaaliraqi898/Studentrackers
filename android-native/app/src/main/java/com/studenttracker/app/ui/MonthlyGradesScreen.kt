@@ -54,9 +54,9 @@ private fun openMonthlyGradesPrintPreview(
         items.mapIndexed { index, row ->
             """
             <tr>
-              <td class="number">\${startIndex + index + 1}</td>
-              <td class="student">\${htmlEscape(row.first)}</td>
-              <td class="grade">\${htmlEscape(row.second)}</td>
+              <td class="number">${startIndex + index + 1}</td>
+              <td class="student">${htmlEscape(row.first)}</td>
+              <td class="grade">${htmlEscape(row.second)}</td>
             </tr>
             """.trimIndent()
         }.joinToString("\n")
@@ -68,7 +68,7 @@ private fun openMonthlyGradesPrintPreview(
           <thead>
             <tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr>
           </thead>
-          <tbody>\${renderTableRows(items, startIndex)}</tbody>
+          <tbody>${renderTableRows(items, startIndex)}</tbody>
         </table>
         """.trimIndent()
 
@@ -79,39 +79,39 @@ private fun openMonthlyGradesPrintPreview(
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1">
           <style>
-            @page { size: A4 portrait; margin: 7mm; }
+            @page { size: A4 portrait; margin: 5mm; }
             * { box-sizing: border-box; }
             html, body { margin: 0; padding: 0; direction: rtl; color: #111827; font-family: sans-serif; }
             body { width: 100%; }
-            .heading { text-align: center; margin: 0 0 4mm; }
-            h1 { font-size: 14pt; margin: 0 0 1.5mm; }
-            .meta { font-size: 8pt; line-height: 1.5; }
-            .columns { display: flex; flex-direction: row; direction: rtl; align-items: flex-start; gap: 7mm; width: 100%; }
+            .heading { text-align: center; margin: 0 0 2mm; }
+            h1 { font-size: 12pt; margin: 0 0 1mm; }
+            .meta { font-size: 7pt; line-height: 1.25; }
+            .columns { display: flex; flex-direction: row; direction: rtl; align-items: flex-start; gap: 8mm; width: 100%; }
             .column { width: calc(50% - 3.5mm); min-width: 0; }
-            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 7pt; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 6.5pt; }
             tr { page-break-inside: avoid; break-inside: avoid; }
-            th, td { border: 1px solid #374151; padding: 1mm 0.7mm; text-align: center; vertical-align: middle; line-height: 1.25; }
+            th, td { border: 1px solid #374151; padding: 0.45mm 0.55mm; text-align: center; vertical-align: middle; line-height: 1.1; }
             th { background: #e5e7eb; font-weight: bold; white-space: nowrap; }
             .number { width: 11%; }
             .student { width: 67%; text-align: right; }
             .grade { width: 22%; }
             td.student { overflow-wrap: anywhere; }
-            .footer { margin-top: 3mm; font-size: 7pt; text-align: left; }
+            .footer { margin-top: 2mm; font-size: 6.5pt; text-align: left; }
           </style>
         </head>
         <body>
           <div class="heading">
             <h1>كشف الدرجات الشهرية</h1>
             <div class="meta">
-              الصف: \${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: \${htmlEscape(sectionName)}<br>
-              الفترة: \${htmlEscape(periodName)} — \${htmlEscape(stageName)}
+              الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
+              الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
             </div>
           </div>
           <div class="columns">
-            <div class="column">\${renderTable(rightRows, 0)}</div>
-            <div class="column">\${renderTable(leftRows, rightRows.size)}</div>
+            <div class="column">${renderTable(rightRows, 0)}</div>
+            <div class="column">${renderTable(leftRows, rightRows.size)}</div>
           </div>
-          <div class="footer">عدد الطلبة: \${rowCount}</div>
+          <div class="footer">عدد الطلبة: ${rowCount}</div>
         </body>
         </html>
     """.trimIndent()
