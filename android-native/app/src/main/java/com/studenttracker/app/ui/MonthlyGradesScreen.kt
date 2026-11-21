@@ -47,25 +47,47 @@ private fun openMonthlyGradesPrintPreview(
     rows: List<Pair<String, String>>
 ) {
     val rowCount = rows.size
-    val sourceRows = rows.mapIndexed { index, row ->
+
+    fun renderTable(items: List<Pair<String, String>>, startIndex: Int): String {
+        val body = items.mapIndexed { index, row ->
+            """
+            <tr>
+              <td class="number">${startIndex + index + 1}</td>
+              <td class="student">${htmlEscape(row.first)}</td>
+              <td class="grade">${htmlEscape(row.second)}</td>
+            </tr>
+            """.trimIndent()
+        }.joinToString("\n")
+        return """
+            <table>
+              <colgroup><col class="number"><col class="student"><col class="grade"></colgroup>
+              <thead><tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr></thead>
+              <tbody>$body</tbody>
+            </table>
+        """.trimIndent()
+    }
+
+    val pageHtml = rows.chunked(50).mapIndexed { pageIndex, pageRows ->
+        val rightRows = pageRows.take(25)
+        val leftRows = pageRows.drop(25)
+        val startIndex = pageIndex * 50
         """
-        <tr class="source-row">
-          <td class="number">\${index + 1}</td>
-          <td class="student">\${htmlEscape(row.first)}</td>
-          <td class="grade">\${htmlEscape(row.second)}</td>
-        </tr>
+        <section class="sheet">
+          <div class="heading">
+            <h1>كشف الدرجات الشهرية</h1>
+            <div class="meta">
+              الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
+              الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
+            </div>
+          </div>
+          <div class="columns">
+            <div class="column">${renderTable(rightRows, startIndex)}</div>
+            <div class="column">${renderTable(leftRows, startIndex + rightRows.size)}</div>
+          </div>
+          <div class="footer">عدد الطلبة: $rowCount</div>
+        </section>
         """.trimIndent()
     }.joinToString("\n")
-
-    val headingHtml = """
-        <div class="heading">
-          <h1>كشف الدرجات الشهرية</h1>
-          <div class="meta">
-            الصف: \${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: \${htmlEscape(sectionName)}<br>
-            الفترة: \${htmlEscape(periodName)} — \${htmlEscape(stageName)}
-          </div>
-        </div>
-    """.trimIndent()
 
     val html = """
         <!DOCTYPE html>
@@ -94,77 +116,17 @@ private fun openMonthlyGradesPrintPreview(
             .grade { width: 22%; }
             td.student { overflow-wrap: anywhere; }
             .footer { margin-top: 3mm; font-size: 9pt; text-align: left; }
-            #source { display: none; }
           </style>
         </head>
         <body>
-          <div id="source"><table><tbody>$sourceRows</tbody></table></div>
-          <div id="pages">
-            <section class="sheet">
-              $headingHtml
-              <div class="columns">
-                <div class="column"><table><colgroup><col class="number"><col class="student"><col class="grade"></colgroup><thead><tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr></thead><tbody class="right-body"></tbody></table></div>
-                <div class="column"><table><colgroup><col class="number"><col class="student"><col class="grade"></colgroup><thead><tr><th>ت</th><th>اسم الطالب</th><th>المعدل</th></tr></thead><tbody class="left-body"></tbody></table></div>
-              </div>
-              <div class="footer">عدد الطلبة: $rowCount</div>
-            </section>
-          </div>
-          <script>
-            (function () {
-              const pages = document.getElementById('pages');
-              const sourceRows = Array.from(document.querySelectorAll('#source tr'));
-              const firstPage = pages.querySelector('.sheet');
-              const headingHeight = firstPage.querySelector('.heading').getBoundingClientRect().height;
-              const footerHeight = firstPage.querySelector('.footer').getBoundingClientRect().height;
-              const pageHeight = 287 * 96 / 25.4;
-              const availableHeight = pageHeight - headingHeight - footerHeight - 28;
-              let currentPage = firstPage;
-              let currentColumn = 0;
-
-              function getBody(page, column) {
-                return page.querySelector(column === 0 ? '.right-body' : '.left-body');
-              }
-
-              function createPage() {
-                const page = firstPage.cloneNode(true);
-                page.querySelector('.right-body').innerHTML = '';
-                page.querySelector('.left-body').innerHTML = '';
-                pages.appendChild(page);
-                currentPage = page;
-                currentColumn = 0;
-              }
-
-              function tableHeight(body) {
-                return body.closest('table').getBoundingClientRect().height;
-              }
-
-              sourceRows.forEach(function (row) {
-                let placed = false;
-                while (!placed) {
-                  const target = getBody(currentPage, currentColumn);
-                  target.appendChild(row.cloneNode(true));
-                  if (tableHeight(target) <= availableHeight) {
-                    placed = true;
-                  } else {
-                    target.removeChild(target.lastElementChild);
-                    if (currentColumn === 0) {
-                      currentColumn = 1;
-                    } else {
-                      createPage();
-                    }
-                  }
-                }
-              });
-              document.getElementById('source').remove();
-            })();
-          </script>
+          $pageHtml
         </body>
         </html>
     """.trimIndent()
 
     val jobName = "الدرجات الشهرية - $className - $sectionName"
     val webView = WebView(context)
-    webView.settings.javaScriptEnabled = true
+    webView.settings.javaScriptEnabled = false
     webView.webViewClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView, url: String?) {
             val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
