@@ -453,15 +453,10 @@ object GradingService {
             val partScore = calcWeighted(partList, weights.participation)
             val hwScore = calcWeighted(hwList, weights.homework)
 
-            // Behavior and notebook are full by default; only explicitly saved zero ratings reduce them.
-            val behaviorZeroDates = behList.filter { it.value == 0.0 }.map { it.date }.toSet()
-            val notebookZeroDates = noteList.filter { it.value == 0.0 }.map { it.date }.toSet()
-            val behaviorScore = if (totalWorkingDays > 0) {
-                round2(((totalWorkingDays - workingDates.count { it in behaviorZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.behavior)
-            } else weights.behavior
-            val notebookScore = if (totalWorkingDays > 0) {
-                round2(((totalWorkingDays - workingDates.count { it in notebookZeroDates }).coerceAtLeast(0).toDouble() / totalWorkingDays.toDouble()) * weights.notebook)
-            } else weights.notebook
+            // Notebook and behavior use the same five-level weighted-average calculation
+            // as participation and homework. If no ratings were recorded, keep the full default.
+            val notebookScore = if (noteList.isEmpty()) weights.notebook else calcWeighted(noteList, weights.notebook)
+            val behaviorScore = if (behList.isEmpty()) weights.behavior else calcWeighted(behList, weights.behavior)
             val noteScore = notebookScore
             val behScore = behaviorScore
 
