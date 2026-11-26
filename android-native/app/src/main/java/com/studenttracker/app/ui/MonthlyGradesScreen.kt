@@ -143,6 +143,115 @@ private fun openMonthlyGradesPrintPreview(
     webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
 }
 
+private fun openMonthlyGradesDetailedPrintPreview(
+    context: Context,
+    className: String,
+    sectionName: String,
+    periodName: String,
+    stageName: String,
+    rows: List<List<String>>
+) {
+    val rowCount = rows.size
+
+    fun renderTable(items: List<List<String>>, startIndex: Int): String {
+        val body = items.mapIndexed { index, row ->
+            """
+            <tr>
+              <td class="number">${startIndex + index + 1}</td>
+              <td class="student">${htmlEscape(row[0])}</td>
+              <td class="grade">${htmlEscape(row[1])}</td>
+              <td class="grade">${htmlEscape(row[2])}</td>
+              <td class="grade">${htmlEscape(row[3])}</td>
+            </tr>
+            """.trimIndent()
+        }.joinToString("\n")
+        return """
+            <table>
+              <colgroup>
+                <col class="number"><col class="student">
+                <col class="grade"><col class="grade"><col class="grade">
+              </colgroup>
+              <thead><tr>
+                <th>ت</th><th>اسم الطالب</th><th>درجة اليومي</th><th>درجة التحريري</th><th>معدل الفترة</th>
+              </tr></thead>
+              <tbody>$body</tbody>
+            </table>
+        """.trimIndent()
+    }
+
+    val pageHtml = rows.chunked(50).mapIndexed { pageIndex, pageRows ->
+        val rightRows = pageRows.take(25)
+        val leftRows = pageRows.drop(25)
+        val startIndex = pageIndex * 50
+        """
+        <section class="sheet">
+          <div class="heading">
+            <h1>كشف درجات اليومي والتحريري ومعدل الفترة</h1>
+            <div class="meta">
+              الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
+              الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
+            </div>
+          </div>
+          <div class="columns">
+            <div class="column">${renderTable(rightRows, startIndex)}</div>
+            <div class="column">${renderTable(leftRows, startIndex + rightRows.size)}</div>
+          </div>
+          <div class="footer">عدد الطلبة: $rowCount</div>
+        </section>
+        """.trimIndent()
+    }.joinToString("\n")
+
+    val html = """
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <style>
+            @page { size: A4 portrait; margin: 5mm; }
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; direction: rtl; color: #111827; font-family: sans-serif; }
+            body { width: 100%; }
+            .sheet { width: 100%; min-height: 287mm; padding: 0; page-break-after: always; break-after: page; }
+            .sheet:last-child { page-break-after: auto; break-after: auto; }
+            .heading { text-align: center; margin: 0 0 3mm; }
+            h1 { font-size: 14pt; margin: 0 0 1.5mm; }
+            .meta { font-size: 9pt; line-height: 1.4; }
+            .columns { display: flex; flex-direction: row; direction: rtl; align-items: flex-start; gap: 8mm; width: 100%; }
+            .column { width: calc(50% - 4mm); min-width: 0; }
+            table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 11px; }
+            tr { page-break-inside: avoid; break-inside: avoid; }
+            th, td { border: 1px solid #374151; padding: 1.7mm 0.45mm; text-align: center; vertical-align: middle; line-height: 1.2; }
+            th { background: #e5e7eb; font-weight: bold; font-size: 10px; }
+            .number { width: 8%; }
+            .student { width: 40%; text-align: right; }
+            .grade { width: 17.33%; }
+            td.student { overflow-wrap: anywhere; }
+            .footer { margin-top: 3mm; font-size: 9pt; text-align: left; }
+          </style>
+        </head>
+        <body>$pageHtml</body>
+        </html>
+    """.trimIndent()
+
+    val jobName = "كشف درجات اليومي والتحريري - $className - $sectionName"
+    val webView = WebView(context)
+    webView.settings.javaScriptEnabled = false
+    webView.webViewClient = object : WebViewClient() {
+        override fun onPageFinished(view: WebView, url: String?) {
+            val printManager = context.getSystemService(Context.PRINT_SERVICE) as PrintManager
+            val adapter = view.createPrintDocumentAdapter(jobName)
+            val attributes = PrintAttributes.Builder()
+                .setMediaSize(PrintAttributes.MediaSize.ISO_A4)
+                .setResolution(PrintAttributes.Resolution("monthly_grades_detail", "Monthly Grades Detail", 300, 300))
+                .setMinMargins(PrintAttributes.Margins(20, 20, 20, 20))
+                .build()
+            printManager.print(jobName, adapter, attributes)
+        }
+    }
+    webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+}
+
 private fun normalizeWholeGradeInput(raw: String): String? {
     val normalized = normalizeGradeInput(raw) ?: return null
     return normalized.takeIf { !it.contains('.') }
@@ -382,6 +491,48 @@ fun MonthlyGradesScreen(
                         }
                     ) {
                         Text("طباعة الامتحان")
+                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = selectedPeriod != null && students.isNotEmpty(),
+                        onClick = {
+                            val period = selectedPeriod
+                            if (period != null) {
+                                val collator = java.text.Collator.getInstance(java.util.Locale("ar"))
+                                val sortedStudents = students.sortedWith { first, second ->
+                                    collator.compare(first.studentName.trim(), second.studentName.trim())
+                                }
+                                val printRows = sortedStudents.map { student ->
+                                    val daily = committedDailyGrades[student.id]
+                                    val written = committedWrittenGrades[student.id]
+                                    val average = if (period.stageType == AcademicStage.MID_YEAR) {
+                                        written
+                                    } else if (daily != null && written != null) {
+                                        GradingService.roundHalfUpInt((daily + written) / 2.0).toDouble()
+                                    } else {
+                                        null
+                                    }
+                                    listOf(
+                                        student.studentName,
+                                        daily?.let { GradingService.roundHalfUpInt(it).toString() } ?: "",
+                                        written?.let { GradingService.roundHalfUpInt(it).toString() } ?: "",
+                                        average?.let { GradingService.roundHalfUpInt(it).toString() } ?: ""
+                                    )
+                                }
+                                val className = classes.firstOrNull { it.id == selectedClassId }?.className ?: ""
+                                val sectionName = sections.firstOrNull { it.id == selectedSectionId }?.sectionName ?: ""
+                                openMonthlyGradesDetailedPrintPreview(
+                                    context = context,
+                                    className = className,
+                                    sectionName = sectionName,
+                                    periodName = period.periodName,
+                                    stageName = period.stageType.arabicLabel,
+                                    rows = printRows
+                                )
+                            }
+                        }
+                    ) {
+                        Text("طباعة الكشف الشامل")
                     }
                 }
             }
