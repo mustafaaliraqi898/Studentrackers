@@ -44,7 +44,8 @@ private fun openMonthlyGradesPrintPreview(
     sectionName: String,
     periodName: String,
     stageName: String,
-    rows: List<Pair<String, String>>
+    rows: List<Pair<String, String>>,
+    reportTitle: String = "كشف الدرجات الشهرية"
 ) {
     val rowCount = rows.size
 
@@ -74,7 +75,7 @@ private fun openMonthlyGradesPrintPreview(
         """
         <section class="sheet">
           <div class="heading">
-            <h1>كشف الدرجات الشهرية</h1>
+            <h1>${htmlEscape(reportTitle)}</h1>
             <div class="meta">
               الصف: ${htmlEscape(className)} &nbsp; | &nbsp; الشعبة: ${htmlEscape(sectionName)}<br>
               الفترة: ${htmlEscape(periodName)} — ${htmlEscape(stageName)}
@@ -124,7 +125,7 @@ private fun openMonthlyGradesPrintPreview(
         </html>
     """.trimIndent()
 
-    val jobName = "الدرجات الشهرية - $className - $sectionName"
+    val jobName = "$reportTitle - $className - $sectionName"
     val webView = WebView(context)
     webView.settings.javaScriptEnabled = false
     webView.webViewClient = object : WebViewClient() {
@@ -321,12 +322,13 @@ fun MonthlyGradesScreen(
                     Text("قائمة الطلبة", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Slate900)
                     Text("${gradeFilteredStudents.size} من ${students.size} طالب", fontSize = 12.sp, color = Slate600)
                 }
-                OutlinedButton(
-                    enabled = selectedPeriod != null && students.isNotEmpty(),
-                    onClick = {
-                        val period = selectedPeriod
-                        if (period != null) {
-                            run {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = selectedPeriod != null && students.isNotEmpty(),
+                        onClick = {
+                            val period = selectedPeriod
+                            if (period != null) {
                                 val printRows = students.map { student ->
                                     val daily = committedDailyGrades[student.id]
                                     val written = committedWrittenGrades[student.id]
@@ -347,13 +349,40 @@ fun MonthlyGradesScreen(
                                     sectionName = sectionName,
                                     periodName = period.periodName,
                                     stageName = period.stageType.arabicLabel,
-                                    rows = printRows
+                                    rows = printRows,
+                                    reportTitle = "كشف المعدلات الشهرية"
                                 )
                             }
                         }
+                    ) {
+                        Text("طباعة المعدل")
                     }
-                ) {
-                    Text("طباعة")
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = selectedPeriod != null && students.isNotEmpty(),
+                        onClick = {
+                            val period = selectedPeriod
+                            if (period != null) {
+                                val printRows = students.map { student ->
+                                    val written = committedWrittenGrades[student.id]
+                                    student.studentName to (written?.let { GradingService.roundHalfUpInt(it).toString() } ?: "")
+                                }
+                                val className = classes.firstOrNull { it.id == selectedClassId }?.className ?: ""
+                                val sectionName = sections.firstOrNull { it.id == selectedSectionId }?.sectionName ?: ""
+                                openMonthlyGradesPrintPreview(
+                                    context = context,
+                                    className = className,
+                                    sectionName = sectionName,
+                                    periodName = period.periodName,
+                                    stageName = period.stageType.arabicLabel,
+                                    rows = printRows,
+                                    reportTitle = "كشف درجات الامتحان الشهري"
+                                )
+                            }
+                        }
+                    ) {
+                        Text("طباعة الامتحان")
+                    }
                 }
             }
         }
